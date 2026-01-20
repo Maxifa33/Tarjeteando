@@ -1,0 +1,109 @@
+{
+  "reglasUsuario": [
+    {
+      "id": 1768329624210,
+      "patron": "ABL",
+      "nombre_limpio": "Abl",
+      "fecha_creacion": "2026-01-13T18:40:24.210Z",
+      "veces_usado": 10
+    },
+    {
+      "id": 1768599233628,
+      "patron": "SEGURO.*VIDA",
+      "nombre_limpio": "Seguro de vida",
+      "fecha_creacion": "2026-01-16T21:33:53.628Z",
+      "veces_usado": 5
+    },
+    {
+      "id": 1767812712892,
+      "patron": "TEST.*PATTERN1767812712885",
+      "nombre_limpio": "Test Comercio",
+      "fecha_creacion": "2026-01-07T19:05:12.892Z",
+      "veces_usado": 0
+    },
+    {
+      "id": 1767812712896,
+      "patron": "MICOMERCIO",
+      "nombre_limpio": "Mi Comercio",
+      "fecha_creacion": "2026-01-07T19:05:12.896Z",
+      "veces_usado": 0
+    },
+    {
+      "id": 1767838038851,
+      "patron": "TEST.*PATTERN1767838038842",
+      "nombre_limpio": "Test Comercio",
+      "fecha_creacion": "2026-01-08T02:07:18.851Z",
+      "veces_usado": 0
+    },
+    {
+      "id": 1767838216514,
+      "patron": "TEST.*PATTERN1767838216507",
+      "nombre_limpio": "Test Comercio",
+      "fecha_creacion": "2026-01-08T02:10:16.514Z",
+      "veces_usado": 0
+    },
+    {
+      "id": 1767838216518,
+      "patron": "TESTCOMERCIO",
+      "nombre_limpio": "Mi Comercio Auto",
+      "fecha_creacion": "2026-01-08T02:10:16.518Z",
+      "veces_usado": 0
+    },
+    {
+      "id": 1767896852771,
+      "patron": "TEST.*PATTERN1767896852765",
+      "nombre_limpio": "Test Comercio",
+      "fecha_creacion": "2026-01-08T18:27:32.771Z",
+      "veces_usado": 0
+    },
+    {
+      "id": 1767896852775,
+      "patron": "TESTCOMERCIOVHPO",
+      "nombre_limpio": "Mi Comercio Auto",
+      "fecha_creacion": "2026-01-08T18:27:32.775Z",
+      "veces_usado": 0
+    },
+    {
+      "id": 1767897642676,
+      "patron": "TEST.*PATTERN1767897642669",
+      "nombre_limpio": "Test Comercio",
+      "fecha_creacion": "2026-01-08T18:40:42.676Z",
+      "veces_usado": 0
+    },
+    {
+      "id": 1767897642680,
+      "patron": "TESTCOMERCIOH",
+      "nombre_limpio": "Mi Comercio Auto",
+      "fecha_creacion": "2026-01-08T18:40:42.680Z",
+      "veces_usado": 0
+    },
+    {
+      "id": 1767901454177,
+      "patron": "TEST.*PATTERN1767901454170",
+      "nombre_limpio": "Test Comercio",
+      "fecha_creacion": "2026-01-08T19:44:14.177Z",
+      "veces_usado": 0
+    },
+    {
+      "id": 1767901454182,
+      "patron": "TESTCOMERCIO.*BVU",
+      "nombre_limpio": "Mi Comercio Auto",
+      "fecha_creacion": "2026-01-08T19:44:14.182Z",
+      "veces_usado": 0
+    },
+    {
+      "id": 1767911119790,
+      "patron": "TEST.*PATTERN1767911119783",
+      "nombre_limpio": "Test Comercio",
+      "fecha_creacion": "2026-01-08T22:25:19.790Z",
+      "veces_usado": 0
+    },
+    {
+      "id": 1767911119794,
+      "patron": "TESTCOMERCIOTAPHB",
+      "nombre_limpio": "Mi Comercio Auto",
+      "fecha_creacion": "2026-01-08T22:25:19.794Z",
+      "veces_usado": 0
+    }
+  ]
+}

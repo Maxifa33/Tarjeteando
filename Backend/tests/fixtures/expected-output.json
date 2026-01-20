@@ -1,0 +1,76 @@
+{
+  "descripcion": "Este archivo contiene outputs esperados para validar el parser",
+  "instrucciones": "Coloca archivos PDF de prueba en esta carpeta con nombres descriptivos",
+  
+  "ejemplo_visa_galicia": {
+    "archivo": "visa-galicia-sample.pdf",
+    "tarjeta_esperada": {
+      "nombre": "VISA Galicia",
+      "tipo": "VISA",
+      "banco": "Galicia"
+    },
+    "resumen_esperado": {
+      "mes": 12,
+      "anio": 2025,
+      "total_a_pagar_pesos": 1500000.00,
+      "total_consumos_pesos": 1200000.00
+    },
+    "movimientos_esperados": [
+      {
+        "referencia_original": "MERPAGO*SPOTIFY",
+        "referencia_limpia": "Spotify",
+        "monto_pesos": 5999.00,
+        "es_dudoso": false
+      },
+      {
+        "referencia_original": "CARREFOUR SUPERMERCADO",
+        "referencia_limpia": "Carrefour",
+        "monto_pesos": 85000.00,
+        "es_dudoso": false
+      }
+    ],
+    "validaciones": {
+      "suma_movimientos_igual_total": true,
+      "todos_movimientos_con_fecha": true,
+      "cuotas_detectadas_correctamente": true
+    }
+  },
+
+  "ejemplo_mastercard_galicia": {
+    "archivo": "mastercard-galicia-sample.pdf",
+    "tarjeta_esperada": {
+      "nombre": "Mastercard Galicia",
+      "tipo": "MASTERCARD",
+      "banco": "Galicia"
+    }
+  },
+
+  "casos_limpieza_nombres": {
+    "descripcion": "Casos de prueba para validar limpieza de nombres",
+    "casos": [
+      { "input": "MERPAGO*MERCADOPAGO", "output": "Mercadopago" },
+      { "input": "PEDIDOSYA*REST", "output": "Pedidosya" },
+      { "input": "SPOTIFY AR", "output": "Spotify" },
+      { "input": "NETFLIX.COM", "output": "Netflix" },
+      { "input": "APPLE.COM/BILL", "output": "Apple" },
+      { "input": "UBER *EATS", "output": "Uber Eats" },
+      { "input": "CABIFY25509RBJRLCN", "output": "Cabify" },
+      { "input": "YPF ESTACION", "output": "Ypf" },
+      { "input": "SHELL AUTOPISTA", "output": "Shell" },
+      { "input": "CARREFOUR HIPER", "output": "Carrefour" },
+      { "input": "CLAUDE.AI ANTHROPIC", "output": "Claude Ai (Anthropic)" },
+      { "input": "SMG CIA ARG", "output": "Swiss Medical" },
+      { "input": "FRAVEGA ONLINE", "output": "Fravega" }
+    ]
+  },
+
+  "casos_nombres_dudosos": {
+    "descripcion": "Casos que deberían marcarse como dudosos",
+    "casos": [
+      { "input": "XYZ123456789ABC", "deberia_ser_dudoso": true },
+      { "input": "ABCD1234EFGH5678", "deberia_ser_dudoso": true },
+      { "input": "Carrefour", "deberia_ser_dudoso": false },
+      { "input": "Swiss Medical", "deberia_ser_dudoso": false }
+    ]
+  }
+}

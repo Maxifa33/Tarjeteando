@@ -1,0 +1,52 @@
+# Dependencias
+node_modules/
+node_modules*/
+.pnp
+.pnp.js
+
+# Build
+dist/
+build/
+
+# Variables de entorno (IMPORTANTE: contienen API keys)
+.env
+.env.local
+.env.*.local
+.env*
+!.env.example
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# PDFs de resúmenes (datos personales)
+Backend/uploads/
+*.pdf
+
+# Base de datos local
+*.sqlite
+*.db
+
+# Backups locales
+backups/
+
+# Node modules viejos
+node_modules_old*/
+
+# Archivos temporales
+*.tmp
+*.temp
+
+# Claude Code
+.claude/
