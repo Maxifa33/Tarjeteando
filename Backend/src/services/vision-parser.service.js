@@ -11,6 +11,22 @@ const pdf = require('pdf-parse');
 const sharp = require('sharp');
 const fs = require('fs');
 const path = require('path');
+const { createCanvas, DOMMatrix, ImageData, Image, loadImage } = require('canvas');
+
+// Polyfills necesarios para pdfjs-dist en Node.js
+if (typeof globalThis.DOMMatrix === 'undefined') {
+  globalThis.DOMMatrix = DOMMatrix;
+}
+if (typeof globalThis.ImageData === 'undefined') {
+  globalThis.ImageData = ImageData;
+}
+if (typeof globalThis.Path2D === 'undefined') {
+  const { Path2D } = require('canvas');
+  globalThis.Path2D = Path2D;
+}
+if (typeof globalThis.Image === 'undefined') {
+  globalThis.Image = Image;
+}
 
 class VisionParserService {
   constructor(apiKey) {
@@ -45,30 +61,39 @@ class VisionParserService {
   }
 
   /**
-   * Convierte PDF a imágenes PNG usando pdf-to-img (JavaScript puro)
-   * No requiere dependencias de sistema como GraphicsMagick
+   * Convierte PDF a imágenes PNG usando mupdf (más robusto para PDFs con imágenes)
    */
   async pdfToImages(buffer) {
     try {
-      // Usar pdf-to-img (JavaScript puro, no requiere dependencias de sistema)
-      const pdfToImg = await import('pdf-to-img');
+      const mupdf = await import('mupdf');
 
-      console.log('[Vision] Usando pdf-to-img para conversión...');
+      console.log('[Vision] Usando mupdf para conversión...');
 
-      const doc = await pdfToImg.pdf(buffer, { scale: 2.0 });
-      console.log(`[Vision] PDF tiene ${doc.length} páginas`);
+      // Cargar el documento PDF
+      const doc = mupdf.Document.openDocument(buffer, 'application/pdf');
+      const numPages = doc.countPages();
+      console.log(`[Vision] PDF tiene ${numPages} páginas`);
 
       const images = [];
-      let pageNum = 0;
+      const maxPages = Math.min(numPages, 3); // Procesar máximo 3 páginas
+      const scale = 2.0; // Escala para mejor calidad (DPI = 72 * scale)
 
-      for await (const image of doc) {
-        pageNum++;
-        if (pageNum > 3) break; // Max 3 páginas
+      for (let pageNum = 0; pageNum < maxPages; pageNum++) {
+        console.log(`[Vision] Renderizando página ${pageNum + 1}...`);
 
-        if (image && image.length > 0) {
-          images.push(image);
-          console.log(`[Vision] Página ${pageNum}: ${image.length} bytes`);
-        }
+        const page = doc.loadPage(pageNum);
+        const bounds = page.getBounds();
+
+        // Crear matriz de transformación con escala
+        const matrix = mupdf.Matrix.scale(scale, scale);
+
+        // Renderizar a pixmap
+        const pixmap = page.toPixmap(matrix, mupdf.ColorSpace.DeviceRGB, false, true);
+
+        // Convertir a PNG
+        const pngBuffer = pixmap.asPNG();
+        images.push(Buffer.from(pngBuffer));
+        console.log(`[Vision] Página ${pageNum + 1}: ${pngBuffer.length} bytes`);
       }
 
       if (images.length === 0) {
@@ -78,7 +103,7 @@ class VisionParserService {
       return images;
 
     } catch (error) {
-      console.error('[Vision] Error con pdf-to-img:', error.message);
+      console.error('[Vision] Error con mupdf:', error.message);
       throw new Error('No se pudo convertir PDF a imagen. Error: ' + error.message);
     }
   }
@@ -114,13 +139,17 @@ INSTRUCCIONES CRÍTICAS:
    - NO incluyas las líneas de "Total Consumos de [nombre]" como movimientos
 5. MOVIMIENTOS: Solo extrae las compras/consumos individuales, NO los subtotales ni totales
 6. TOTAL A PAGAR (CRÍTICO para Banco Macro):
-   - Busca el cuadro "OPCIONES DE PAGO" con columnas: Pago Mínimo | Pago Total | 1er Vto | 2do Vto
-   - El valor bajo "Pago Total" o "1er Vto" es el total_a_pagar_pesos
-   - EJEMPLO: Si ves "440.531,89" en esa fila, total_a_pagar_pesos = 440531.89
-   - NUNCA uses estos como total: códigos de barra, números de referencia, números de cuenta
-   - Los códigos de barra tienen 20+ dígitos seguidos (ej: 64008001234567890) - IGNORAR
-   - El total REAL está entre $100.000 y $2.000.000 típicamente
-   - Si calculas un total > 5.000.000, REVISA - probablemente estás usando un código
+   - MACRO tiene múltiples tarjetas, el total se calcula sumando "Total Consumos de [nombre]" de cada tarjeta + impuestos
+   - Busca líneas como "TARJETA 4246 Total Consumos de DIEGO BRIAN  206.152,11" - extrae ese monto
+   - Busca líneas como "TARJETA 2734 Total Consumos de ROCIO A  227.834,44" - extrae ese monto
+   - Incluye estos subtotales en "subtotales_tarjetas" del JSON
+   - El total_a_pagar_pesos = suma de todos los subtotales + impuestos
+   - NUNCA uses como total: LIMITE COMPRA (ej: 6.400.000), códigos de barra, números de cuenta
+   - El total REAL de una persona típica está entre $100.000 y $2.000.000
+   - "LIMITE: COMPRA $ 6.400.000" es el límite de crédito, NO el total a pagar - IGNORAR
+7. SUBTOTALES POR TARJETA (OBLIGATORIO para Macro):
+   - Extrae cada línea "TARJETA XXXX Total Consumos de NOMBRE MONTO"
+   - Guárdalos en "subtotales_tarjetas" como array de objetos
 
 Responde SOLO con un JSON válido:
 {
@@ -147,6 +176,10 @@ Responde SOLO con un JSON válido:
     "otros": número
   },
   "sub_tarjetas": ["4246", "2734"],
+  "subtotales_tarjetas": [
+    {"tarjeta": "4246", "titular": "DIEGO BRIAN", "monto_pesos": 206152.11, "monto_dolares": 0},
+    {"tarjeta": "2734", "titular": "ROCIO A", "monto_pesos": 227834.44, "monto_dolares": 0}
+  ],
   "movimientos": [
     {
       "fecha": "YYYY-MM-DD",
@@ -161,9 +194,12 @@ Responde SOLO con un JSON válido:
 }
 
 IMPORTANTE:
+- Extrae TODOS los movimientos de TODAS las páginas y TODAS las tarjetas
+- Cada tarjeta (ej: 4246, 2734) tiene su propia lista de movimientos - extrae TODOS
 - NO incluyas como movimiento las líneas que dicen "Total Consumos de..." - esas son subtotales
 - NO incluyas como movimiento: IVA, Impuesto de sellos, Intereses, Percepciones, IIBB - esos van en "impuestos"
 - Solo incluye compras/consumos reales (comercios, servicios, etc.)
+- La suma de movimientos debe aproximarse a la suma de subtotales_tarjetas
 
 Si no puedes leer algún dato, usa null. NO inventes datos.`;
 
@@ -398,15 +434,33 @@ Si no puedes leer algún dato, usa null. NO inventes datos.`;
       });
     });
 
-    // Validar y corregir total_a_pagar si es absurdo (> 5M probablemente es código de barras)
-    let totalAPagar = datos.totales?.total_a_pagar_pesos || 0;
+    // Calcular suma de movimientos
     const sumaMovimientos = movimientos.reduce((s, m) => s + (m.monto_pesos || 0), 0);
 
-    if (totalAPagar > 5000000) {
-      console.log(`[Vision] ⚠️ Total ${totalAPagar} parece código de barras, usando suma de movimientos + impuestos`);
-      const totalImpuestos = Object.values(datos.impuestos || {}).reduce((s, v) => s + (v || 0), 0);
-      totalAPagar = sumaMovimientos + totalImpuestos;
+    // Calcular suma de subtotales de tarjetas adicionales (para Macro)
+    const sumaSubtotales = (datos.subtotales_tarjetas || []).reduce((s, st) => s + (st.monto_pesos || 0), 0);
+
+    // Calcular total de impuestos
+    const totalImpuestos = Object.values(datos.impuestos || {}).reduce((s, v) => s + (v || 0), 0);
+
+    // Determinar el total a pagar
+    let totalAPagar = datos.totales?.total_a_pagar_pesos || 0;
+
+    // Si el total es absurdo (> 5M, probablemente límite de crédito o código de barras)
+    if (totalAPagar > 5000000 || totalAPagar === 0) {
+      // Preferir subtotales de tarjetas si existen (para Macro)
+      if (sumaSubtotales > 0) {
+        totalAPagar = sumaSubtotales + totalImpuestos;
+        console.log(`[Vision] ✓ Total calculado desde subtotales de tarjetas: $${totalAPagar.toLocaleString('es-AR')}`);
+      } else {
+        // Usar suma de movimientos + impuestos
+        totalAPagar = sumaMovimientos + totalImpuestos;
+        console.log(`[Vision] ⚠️ Total calculado desde movimientos: $${totalAPagar.toLocaleString('es-AR')}`);
+      }
     }
+
+    // Usar subtotales como total_consumos si están disponibles
+    const totalConsumos = sumaSubtotales > 0 ? sumaSubtotales : sumaMovimientos;
 
     return {
       exito: true,
@@ -419,11 +473,13 @@ Si no puedes leer algún dato, usa null. NO inventes datos.`;
         anio: datos.periodo?.anio,
         fecha_cierre: datos.periodo?.fecha_cierre,
         fecha_vencimiento: datos.periodo?.fecha_vencimiento,
-        total_consumos_pesos: sumaMovimientos,
+        total_consumos_pesos: totalConsumos,
         total_consumos_dolares: datos.totales?.total_consumos_dolares || 0,
         total_a_pagar_pesos: totalAPagar,
         total_a_pagar_dolares: datos.totales?.total_a_pagar_dolares || 0,
-        impuestos: datos.impuestos || {}
+        impuestos: datos.impuestos || {},
+        banco: banco,
+        tipo: tarjeta
       },
       movimientos,
       compras: Array.from(comprasMap.values()),

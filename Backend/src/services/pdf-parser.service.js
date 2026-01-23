@@ -75,9 +75,11 @@ class PDFParserService {
       
       return {
         exito: true,
-        tarjeta,
+        tarjeta: tarjeta.nombre,
         resumen: {
           ...resumen,
+          banco: tarjeta.banco,
+          tipo: tarjeta.tipo,
           total_consumos_dolares: sumaExtraidaDolares
         },
         movimientos: movimientosLimpios,
@@ -137,6 +139,22 @@ class PDFParserService {
       return { id: 4, nombre: 'VISA Santander', tipo: 'VISA', banco: 'Santander' };
     }
 
+    // Macro: buscar "MACRO" o "Sucursal.*CAMPANA" o patrones típicos de Macro
+    const esMacro = /MACRO|BANCO\s+MACRO|Sucursal.*CAMPANA|CAMPANA.*CUIT/i.test(textoUpper);
+    if (esVisa && esMacro) {
+      return { id: 5, nombre: 'VISA Macro', tipo: 'VISA', banco: 'Macro' };
+    }
+    if (esMastercard && esMacro) {
+      return { id: 6, nombre: 'Mastercard Macro', tipo: 'MASTERCARD', banco: 'Macro' };
+    }
+    // Si detectamos Macro sin tipo de tarjeta específico, asumir VISA (más común)
+    if (esMacro && !esVisa && !esMastercard) {
+      // Buscar indicadores en el texto
+      if (/TARJETA\s+\d{4}.*Total\s+Consumos/i.test(textoUpper)) {
+        return { id: 5, nombre: 'VISA Macro', tipo: 'VISA', banco: 'Macro' };
+      }
+    }
+
     throw new Error('No se pudo detectar el tipo de tarjeta del PDF');
   }
 
@@ -162,14 +180,30 @@ class PDFParserService {
       }
     };
     
-    // Buscar "Total Consumos de NOMBRE APELLIDO MONTO_PESOS MONTO_DOLARES" (VISA Galicia y BBVA)
-    const totalConsumosMatch = textoCompleto.match(/Total\s+Consumos\s+de\s+[\w\s]+\s+([\d.]+,\d{2})\s*([\d.,]+)?/i);
-    if (totalConsumosMatch) {
-      metadatos.total_consumos_pesos = this.parsearMonto(totalConsumosMatch[1]);
+    // Buscar "Total Consumos de NOMBRE APELLIDO MONTO_PESOS MONTO_DOLARES" (VISA Galicia, BBVA y Macro)
+    // Macro tiene múltiples tarjetas: "TARJETA XXXX Total Consumos de NOMBRE MONTO *"
+    const regexTotalConsumos = /(?:TARJETA\s+\d+\s+)?Total\s+Consumos\s+de\s+[\w\s]+?\s+([\d.]+,\d{2})\s*\*?\s*([\d.,]+)?\s*\*?/gi;
+    let totalConsumosMatch;
+    let sumaTotalConsumosPesos = 0;
+    let sumaTotalConsumosDolares = 0;
+    let cantidadTarjetasAdicionales = 0;
+
+    while ((totalConsumosMatch = regexTotalConsumos.exec(textoCompleto)) !== null) {
+      const montoPesos = this.parsearMonto(totalConsumosMatch[1]);
+      sumaTotalConsumosPesos += montoPesos;
       if (totalConsumosMatch[2]) {
-        metadatos.total_consumos_dolares = this.parsearMonto(totalConsumosMatch[2]);
+        sumaTotalConsumosDolares += this.parsearMonto(totalConsumosMatch[2]);
       }
-      console.log('[Metadatos] Total consumos PDF: $' + metadatos.total_consumos_pesos.toLocaleString('es-AR', {minimumFractionDigits: 2}));
+      cantidadTarjetasAdicionales++;
+      console.log('[Metadatos] Total consumos tarjeta adicional #' + cantidadTarjetasAdicionales + ': $' + montoPesos.toLocaleString('es-AR', {minimumFractionDigits: 2}));
+    }
+
+    if (sumaTotalConsumosPesos > 0) {
+      metadatos.total_consumos_pesos = sumaTotalConsumosPesos;
+      if (sumaTotalConsumosDolares > 0) {
+        metadatos.total_consumos_dolares = sumaTotalConsumosDolares;
+      }
+      console.log('[Metadatos] Total consumos (suma de ' + cantidadTarjetasAdicionales + ' tarjetas): $' + metadatos.total_consumos_pesos.toLocaleString('es-AR', {minimumFractionDigits: 2}));
     }
 
     // Mastercard Galicia: "TOTAL CONSUMOS EN PESOS" o "Total del Período" o buscar en líneas
@@ -286,6 +320,35 @@ class PDFParserService {
           break;
         }
       }
+    }
+
+    // Macro: Si tiene múltiples tarjetas (TARJETA XXXX Total Consumos), el total a pagar
+    // es la suma de los consumos + impuestos. Si no encontramos TOTAL A PAGAR explícito,
+    // usamos los totales de consumos de tarjetas adicionales.
+    if (!metadatos.total_a_pagar_pesos && cantidadTarjetasAdicionales > 0) {
+      // Buscar impuestos específicos de Macro
+      let impuestosMacro = 0;
+
+      // IMPUESTO DE SELLOS
+      const sellosMatch = textoCompleto.match(/IMPUESTO\s+DE\s+SELLOS\s*\$?\s*([\d.]+,\d{2})/i);
+      if (sellosMatch) {
+        impuestosMacro += this.parsearMonto(sellosMatch[1]);
+      }
+
+      // INTERESES FINANCIACION
+      const interesesMatch = textoCompleto.match(/INTERESES\s+FINANCIACION\s*\$?\s*([\d.]+,\d{2})/i);
+      if (interesesMatch) {
+        impuestosMacro += this.parsearMonto(interesesMatch[1]);
+      }
+
+      // IVA (DB IVA $ 21% o similar)
+      const ivaMatch = textoCompleto.match(/(?:DB\s+)?IVA\s*(?:\$\s*)?(?:21%?)?\s*([\d.]+,\d{2})/i);
+      if (ivaMatch) {
+        impuestosMacro += this.parsearMonto(ivaMatch[1]);
+      }
+
+      metadatos.total_a_pagar_pesos = sumaTotalConsumosPesos + impuestosMacro;
+      console.log('[Metadatos] Total Macro (consumos + impuestos): $' + metadatos.total_a_pagar_pesos.toLocaleString('es-AR', {minimumFractionDigits: 2}));
     }
 
     // NO usar aproximaciones - los totales deben ser exactos del PDF

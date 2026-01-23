@@ -250,6 +250,48 @@ app.patch('/api/v1/tarjetas/:id', (req, res) => {
   });
 });
 
+// Eliminar tarjeta y todos sus datos
+app.delete('/api/v1/tarjetas/:id', (req, res) => {
+  const tarjetaId = parseInt(req.params.id);
+
+  const tarjetaIndex = db.tarjetas.findIndex(t => t.id === tarjetaId);
+  if (tarjetaIndex === -1) {
+    return res.status(404).json({
+      success: false,
+      error: 'Tarjeta no encontrada'
+    });
+  }
+
+  const tarjeta = db.tarjetas[tarjetaIndex];
+  const nombreTarjeta = tarjeta.nombre;
+
+  // Eliminar resúmenes de esta tarjeta
+  const resumenesEliminados = db.resumenes.filter(r => r.tarjeta === nombreTarjeta).length;
+  db.resumenes = db.resumenes.filter(r => r.tarjeta !== nombreTarjeta);
+
+  // Eliminar movimientos de esta tarjeta
+  const movimientosEliminados = db.movimientos.filter(m => m.tarjeta === nombreTarjeta).length;
+  db.movimientos = db.movimientos.filter(m => m.tarjeta !== nombreTarjeta);
+
+  // Eliminar compras en cuotas de esta tarjeta
+  const cuotasEliminadas = Object.values(db.comprasCuotas).filter(c => c.tarjeta === nombreTarjeta).length;
+  Object.keys(db.comprasCuotas).forEach(key => {
+    if (db.comprasCuotas[key].tarjeta === nombreTarjeta) {
+      delete db.comprasCuotas[key];
+    }
+  });
+
+  // Eliminar la tarjeta
+  db.tarjetas.splice(tarjetaIndex, 1);
+
+  console.log(`[Tarjetas] Eliminada: "${nombreTarjeta}" (${resumenesEliminados} resúmenes, ${movimientosEliminados} movimientos, ${cuotasEliminadas} cuotas)`);
+
+  res.json({
+    success: true,
+    message: `Tarjeta "${nombreTarjeta}" eliminada junto con ${resumenesEliminados} resúmenes y ${movimientosEliminados} movimientos`
+  });
+});
+
 // ==================== MOVIMIENTOS ====================
 app.get('/api/v1/movimientos', (req, res) => {
   let movimientos = [...db.movimientos];
@@ -846,6 +888,7 @@ app.post('/api/v1/resumenes/upload', upload.array('pdfs'), async (req, res) => {
         
         resultados.push({
           archivo: file.originalname,
+          exito: true,
           tarjeta: tarjetaNombre,
           mes: resultado.resumen.mes,
           anio: resultado.resumen.anio,
@@ -858,13 +901,32 @@ app.post('/api/v1/resumenes/upload', upload.array('pdfs'), async (req, res) => {
           fecha_cierre: resultado.resumen.fecha_cierre,
           fecha_vencimiento: resultado.resumen.fecha_vencimiento,
           actualizado: !!resumenExistente,
-          metodo: metodoUsado
+          metodo: metodoUsado,
+          // Datos completos para localStorage
+          datos: {
+            tarjeta: tarjetaNombre,
+            resumen: {
+              mes: resultado.resumen.mes,
+              anio: resultado.resumen.anio,
+              fecha_cierre: resultado.resumen.fecha_cierre,
+              fecha_vencimiento: resultado.resumen.fecha_vencimiento,
+              total_a_pagar_pesos: resultado.resumen.total_a_pagar_pesos,
+              total_a_pagar_dolares: resultado.resumen.total_a_pagar_dolares,
+              total_consumos_pesos: resultado.resumen.total_consumos_pesos,
+              total_consumos_dolares: resultado.resumen.total_consumos_dolares,
+              impuestos: resultado.resumen.impuestos || null,
+              banco: resultado.banco || 'Desconocido',
+              tipo: resultado.tipo || 'VISA'
+            },
+            movimientos: movimientosConTarjeta
+          }
         });
 
         console.log(`Procesado correctamente (método: ${metodoUsado})`);
       } else {
         resultados.push({
           archivo: file.originalname,
+          exito: false,
           error: resultado.error
         });
         console.log('Error: ' + resultado.error);

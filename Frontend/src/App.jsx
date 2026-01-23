@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import storage from './services/storage';
 import {
   LayoutDashboard, Receipt, CreditCard, Tag, Upload,
   TrendingUp, TrendingDown, Calendar, AlertCircle, ChevronRight,
@@ -67,8 +68,20 @@ const getCardTheme = (nombre) => {
   return BANK_THEMES['VISA Galicia'];
 };
 
+// Función helper para formatear montos en pesos argentinos (siempre con 2 decimales)
+const formatMonto = (value, prefix = '$') => {
+  const num = Number(value) || 0;
+  return `${prefix}${num.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
+// Función helper para formatear montos en dólares
+const formatMontoDolares = (value) => {
+  const num = Number(value) || 0;
+  return `USD ${num.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
 // Animated Number Component
-const AnimatedNumber = ({ value, prefix = '', suffix = '', decimals = 0 }) => {
+const AnimatedNumber = ({ value, prefix = '', suffix = '', decimals = 2 }) => {
   const [displayValue, setDisplayValue] = useState(0);
   
   useEffect(() => {
@@ -134,8 +147,21 @@ const CreditCardVisual = ({ tarjeta, stats, onClick, nombrePersonalizado, onEdit
   const [editando, setEditando] = useState(false);
   const [nuevoNombre, setNuevoNombre] = useState('');
 
+  // Detectar banco desde nombre si es Desconocido
+  const getBanco = () => {
+    if (tarjeta.banco && tarjeta.banco !== 'Desconocido') return tarjeta.banco;
+    const n = (tarjeta.nombre || '').toUpperCase();
+    if (n.includes('GALICIA')) return 'Galicia';
+    if (n.includes('MACRO')) return 'Macro';
+    if (n.includes('SANTANDER')) return 'Santander';
+    if (n.includes('BBVA')) return 'BBVA';
+    if (n.includes('HSBC')) return 'HSBC';
+    return tarjeta.banco || '';
+  };
+
   // Nombre por defecto: TIPO Banco (ej: VISA Galicia)
-  const nombreDefault = `${tarjeta.tipo} ${tarjeta.banco}`;
+  const banco = getBanco();
+  const nombreDefault = banco ? `${tarjeta.tipo || 'VISA'} ${banco}` : tarjeta.nombre;
   const nombreMostrar = nombrePersonalizado || nombreDefault;
 
   // Colores de texto según si la tarjeta es clara u oscura
@@ -216,11 +242,11 @@ const CreditCardVisual = ({ tarjeta, stats, onClick, nombrePersonalizado, onEdit
           {ultimoResumen ? (
             <>
               <p className={`${textPrimary} text-2xl font-bold`}>
-                ${(ultimoResumen.total_a_pagar || 0).toLocaleString('es-AR', { maximumFractionDigits: 0 })}
+                {formatMonto(ultimoResumen.total_a_pagar || 0)}
               </p>
               {ultimoResumen.total_a_pagar_dolares > 0 && (
                 <p className="text-emerald-500 text-sm font-medium">
-                  USD {ultimoResumen.total_a_pagar_dolares.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                  {formatMontoDolares(ultimoResumen.total_a_pagar_dolares)}
                 </p>
               )}
             </>
@@ -248,8 +274,13 @@ const CreditCardVisual = ({ tarjeta, stats, onClick, nombrePersonalizado, onEdit
 };
 
 // Settings Modal Component - Fondo sólido y cierre al clickear fuera
-const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumenes, cuotasActivas, onRefreshData, theme, setTheme }) => {
-  const [activeTab, setActiveTab] = useState('tarjetas');
+const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumenes, cuotasActivas, onRefreshData, theme, setTheme, initialTab = 'tarjetas', pendientes = [], onResolvePendiente }) => {
+  const [activeTab, setActiveTab] = useState(initialTab);
+
+  // Actualizar tab cuando cambia initialTab
+  useEffect(() => {
+    if (isOpen) setActiveTab(initialTab);
+  }, [isOpen, initialTab]);
   const [editingTarjeta, setEditingTarjeta] = useState(null);
   const [newTarjeta, setNewTarjeta] = useState({ nombre: '', tipo: 'VISA', banco: '' });
   const [preferencias, setPreferencias] = useState(() => {
@@ -258,6 +289,8 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
     } catch { return {}; }
   });
   const [newRegla, setNewRegla] = useState({ patron: '', nombre_limpio: '' });
+  const [editingPendiente, setEditingPendiente] = useState(null);
+  const [pendienteNombreLimpio, setPendienteNombreLimpio] = useState('');
   const [alertas, setAlertas] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem('alertas') || '{"vencimiento": true, "cuotaFinal": true, "diasAntes": 3}');
@@ -277,7 +310,7 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
   const tabs = [
     { id: 'tarjetas', label: 'Tarjetas', icon: CreditCard },
     { id: 'preferencias', label: 'Preferencias', icon: Settings },
-    { id: 'reglas', label: 'Reglas', icon: Tag },
+    { id: 'reglas', label: 'Reglas', icon: Tag, badge: pendientes.length },
     { id: 'alertas', label: 'Alertas', icon: Bell },
     { id: 'datos', label: 'Datos', icon: Download },
     { id: 'temas', label: 'Temas', icon: Sun },
@@ -348,11 +381,7 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
   const handleAddTarjeta = async () => {
     if (!newTarjeta.nombre || !newTarjeta.banco) return;
     try {
-      await fetch(`${API_BASE}/tarjetas`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newTarjeta)
-      });
+      storage.saveTarjeta(newTarjeta);
       setNewTarjeta({ nombre: '', tipo: 'VISA', banco: '' });
       onRefreshData?.();
     } catch (e) { console.error('Error agregando tarjeta:', e); }
@@ -361,18 +390,31 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
   const handleDeleteTarjeta = async (id) => {
     if (!confirm('¿Eliminar esta tarjeta y todos sus datos?')) return;
     try {
-      await fetch(`${API_BASE}/tarjetas/${id}`, { method: 'DELETE' });
+      // Eliminar tarjeta y sus resúmenes/movimientos asociados
+      const tarjetasData = storage.getTarjetas();
+      const tarjeta = tarjetasData.find(t => t.nombre === id || t.id === id);
+      if (tarjeta) {
+        // Eliminar resúmenes de esta tarjeta
+        const resumenes = storage.getResumenes();
+        resumenes.filter(r => r.tarjeta === tarjeta.nombre).forEach(r => {
+          storage.deleteResumen(r.id);
+        });
+        // Eliminar tarjeta
+        const nuevasTarjetas = tarjetasData.filter(t => t.nombre !== tarjeta.nombre);
+        localStorage.setItem('tarjetas_lista', JSON.stringify(nuevasTarjetas));
+      }
       onRefreshData?.();
     } catch (e) { console.error('Error eliminando tarjeta:', e); }
   };
 
   const handleUpdateTarjeta = async (id, data) => {
     try {
-      await fetch(`${API_BASE}/tarjetas/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
-      });
+      const tarjetasData = storage.getTarjetas();
+      const index = tarjetasData.findIndex(t => t.nombre === id || t.id === id);
+      if (index >= 0) {
+        tarjetasData[index] = { ...tarjetasData[index], ...data };
+        localStorage.setItem('tarjetas_lista', JSON.stringify(tarjetasData));
+      }
       setEditingTarjeta(null);
       onRefreshData?.();
     } catch (e) { console.error('Error actualizando tarjeta:', e); }
@@ -381,11 +423,7 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
   const handleAddRegla = async () => {
     if (!newRegla.patron || !newRegla.nombre_limpio) return;
     try {
-      await fetch(`${API_BASE}/reglas`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newRegla)
-      });
+      storage.saveRegla(newRegla);
       setNewRegla({ patron: '', nombre_limpio: '' });
       onRefreshData?.();
     } catch (e) { console.error('Error agregando regla:', e); }
@@ -393,19 +431,13 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
 
   const handleDeleteRegla = async (id) => {
     try {
-      await fetch(`${API_BASE}/reglas/${id}`, { method: 'DELETE' });
+      storage.deleteRegla(id);
       onRefreshData?.();
     } catch (e) { console.error('Error eliminando regla:', e); }
   };
 
   const handleExportAll = () => {
-    const allData = {
-      tarjetas,
-      reglas,
-      preferencias,
-      alertas,
-      exportDate: new Date().toISOString()
-    };
+    const allData = storage.exportAll();
     const blob = new Blob([JSON.stringify(allData, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -478,6 +510,11 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
             >
               <tab.icon className="w-4 h-4" />
               {tab.label}
+              {tab.badge > 0 && (
+                <span className="ml-1 px-1.5 py-0.5 text-xs rounded-full bg-amber-500 text-white">
+                  {tab.badge}
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -590,7 +627,7 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
                               <Edit3 className="w-4 h-4" style={{ color: theme === 'dark' ? '#9ca3af' : '#6b7280' }} />
                             </button>
                             <button
-                              onClick={() => handleDeleteTarjeta(t.id)}
+                              onClick={() => handleDeleteTarjeta(t.nombre)}
                               className="p-2 rounded-lg hover:bg-red-100 transition-colors"
                             >
                               <XCircle className="w-4 h-4 text-red-500" />
@@ -659,6 +696,108 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
             {activeTab === 'reglas' && (
               <div className="space-y-6">
                 <h3 className="text-lg font-semibold" style={{ color: theme === 'dark' ? '#f5f5f5' : '#1f2937' }}>Reglas de Limpieza</h3>
+
+                {/* Pendientes por resolver */}
+                {pendientes.length > 0 && (
+                  <div className="p-4 rounded-xl border-2 border-amber-500/30" style={{ backgroundColor: theme === 'dark' ? '#374151' : '#fef3c7' }}>
+                    <div className="flex items-center gap-2 mb-4">
+                      <AlertCircle className="w-5 h-5 text-amber-500" />
+                      <p className="font-medium" style={{ color: theme === 'dark' ? '#fbbf24' : '#92400e' }}>
+                        Nombres pendientes de resolver ({pendientes.length})
+                      </p>
+                    </div>
+                    <div className="space-y-3 max-h-64 overflow-y-auto">
+                      {pendientes.map(p => (
+                        <div key={p.id} className="p-3 rounded-lg" style={{ backgroundColor: theme === 'dark' ? '#1f2937' : '#ffffff' }}>
+                          {editingPendiente === p.id ? (
+                            <div className="space-y-2">
+                              <p className="text-xs" style={{ color: theme === 'dark' ? '#9ca3af' : '#6b7280' }}>
+                                Original: {p.referencia_original}
+                              </p>
+                              <input
+                                type="text"
+                                value={pendienteNombreLimpio}
+                                onChange={(e) => setPendienteNombreLimpio(e.target.value)}
+                                placeholder="Nombre limpio..."
+                                className="w-full px-3 py-2 rounded-lg border text-sm"
+                                style={{
+                                  backgroundColor: theme === 'dark' ? '#374151' : '#f3f4f6',
+                                  borderColor: theme === 'dark' ? '#4b5563' : '#d1d5db',
+                                  color: theme === 'dark' ? '#f5f5f5' : '#1f2937'
+                                }}
+                                autoFocus
+                              />
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => {
+                                    if (pendienteNombreLimpio.trim()) {
+                                      // Crear regla con el patrón y nombre limpio
+                                      const patron = p.referencia_original.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').substring(0, 30);
+                                      storage.saveRegla({ patron, nombre_limpio: pendienteNombreLimpio.trim() });
+                                      // Marcar pendiente como resuelto
+                                      onResolvePendiente?.(p.id, p.refNorm);
+                                      setEditingPendiente(null);
+                                      setPendienteNombreLimpio('');
+                                    }
+                                  }}
+                                  disabled={!pendienteNombreLimpio.trim()}
+                                  className="px-3 py-1.5 rounded-lg bg-emerald-500 text-white text-sm font-medium
+                                             hover:bg-emerald-600 disabled:opacity-50 transition-colors"
+                                >
+                                  Guardar
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setEditingPendiente(null);
+                                    setPendienteNombreLimpio('');
+                                  }}
+                                  className="px-3 py-1.5 rounded-lg text-sm"
+                                  style={{ backgroundColor: theme === 'dark' ? '#4b5563' : '#d1d5db', color: theme === 'dark' ? '#f5f5f5' : '#374151' }}
+                                >
+                                  Cancelar
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex items-center justify-between">
+                              <div className="flex-1 min-w-0">
+                                <p className="font-medium truncate" style={{ color: theme === 'dark' ? '#f5f5f5' : '#1f2937' }}>
+                                  {p.referencia_original}
+                                </p>
+                                {p.sugerencias && p.sugerencias.length > 0 && (
+                                  <div className="flex gap-1 mt-1 flex-wrap">
+                                    {p.sugerencias.slice(0, 3).map((s, i) => (
+                                      <button
+                                        key={i}
+                                        onClick={() => {
+                                          setEditingPendiente(p.id);
+                                          setPendienteNombreLimpio(s);
+                                        }}
+                                        className="text-xs px-2 py-0.5 rounded bg-violet-500/20 text-violet-500 hover:bg-violet-500/30 transition-colors"
+                                      >
+                                        {s}
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                              <button
+                                onClick={() => {
+                                  setEditingPendiente(p.id);
+                                  setPendienteNombreLimpio(p.sugerencias?.[0] || '');
+                                }}
+                                className="ml-2 p-2 rounded-lg bg-emerald-500/20 text-emerald-500 hover:bg-emerald-500/30 transition-colors"
+                                title="Resolver"
+                              >
+                                <CheckCircle className="w-4 h-4" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {/* Nueva regla */}
                 <div className="p-4 rounded-xl space-y-3" style={{ backgroundColor: theme === 'dark' ? '#374151' : '#f3f4f6' }}>
@@ -914,6 +1053,12 @@ const App = () => {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [readNotifications, setReadNotifications] = useState(new Set());
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState('tarjetas');
+  const [resolvedPendientes, setResolvedPendientes] = useState(() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem('resolved_pendientes') || '[]'));
+    } catch { return new Set(); }
+  });
   
   // Data states
   const [tarjetas, setTarjetas] = useState([]);
@@ -957,39 +1102,257 @@ const App = () => {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
   
-  // Fetch all data
+  // Fetch all data from localStorage
   const fetchData = useCallback(async () => {
+    console.log('[App] Iniciando fetchData...');
     setLoading(true);
     try {
-      const [
-        tarjetasRes, movimientosRes, resumenesRes,
-        cuotasRes, dashboardRes, proyeccionesRes,
-        pendientesRes, reglasRes, proyeccionCuotasRes
-      ] = await Promise.all([
-        fetch(`${API_BASE}/tarjetas`).then(r => r.json()),
-        fetch(`${API_BASE}/movimientos`).then(r => r.json()),
-        fetch(`${API_BASE}/resumenes`).then(r => r.json()),
-        fetch(`${API_BASE}/cuotas/activas`).then(r => r.json()),
-        fetch(`${API_BASE}/dashboard/resumen`).then(r => r.json()),
-        fetch(`${API_BASE}/proyecciones/graficos`).then(r => r.json()),
-        fetch(`${API_BASE}/pendientes-nombre`).then(r => r.json()).catch(() => ({ data: [] })),
-        fetch(`${API_BASE}/reglas`).then(r => r.json()).catch(() => ({ data: [] })),
-        fetch(`${API_BASE}/cuotas/proyeccion`).then(r => r.json()).catch(() => ({ data: [] }))
-      ]);
+      // Función para detectar banco desde nombre de tarjeta
+      const detectarBanco = (nombre) => {
+        const n = (nombre || '').toUpperCase();
+        if (n.includes('GALICIA')) return 'Galicia';
+        if (n.includes('MACRO')) return 'Macro';
+        if (n.includes('SANTANDER')) return 'Santander';
+        if (n.includes('BBVA')) return 'BBVA';
+        if (n.includes('HSBC')) return 'HSBC';
+        if (n.includes('ICBC')) return 'ICBC';
+        if (n.includes('CIUDAD')) return 'Ciudad';
+        if (n.includes('NACION') || n.includes('NACIÓN')) return 'Nación';
+        if (n.includes('PROVINCIA')) return 'Provincia';
+        if (n.includes('PATAGONIA')) return 'Patagonia';
+        if (n.includes('SUPERVIELLE')) return 'Supervielle';
+        if (n.includes('BRUBANK')) return 'Brubank';
+        if (n.includes('UALA') || n.includes('UALÁ')) return 'Ualá';
+        if (n.includes('MERCADOPAGO') || n.includes('MERCADO PAGO')) return 'Mercado Pago';
+        return null;
+      };
 
-      setTarjetas(tarjetasRes.data || []);
-      setMovimientos(movimientosRes.data || []);
-      setResumenes(resumenesRes.data || []);
-      setCuotasActivas(cuotasRes.data || []);
-      setDashboard(dashboardRes.data || null);
-      setProyecciones(proyeccionesRes.data || null);
-      setPendientes(pendientesRes.data || []);
-      setReglas(reglasRes.data || []);
-      setProyeccionCuotas(proyeccionCuotasRes.data || []);
+      // Función para detectar tipo de tarjeta
+      const detectarTipo = (nombre) => {
+        const n = (nombre || '').toUpperCase();
+        if (n.includes('MASTERCARD')) return 'MASTERCARD';
+        if (n.includes('VISA')) return 'VISA';
+        if (n.includes('AMEX') || n.includes('AMERICAN')) return 'AMEX';
+        if (n.includes('CABAL')) return 'CABAL';
+        if (n.includes('NARANJA')) return 'NARANJA';
+        return 'VISA';
+      };
+
+      // Leer datos de localStorage
+      console.log('[App] Leyendo storage...');
+      const resumenesData = storage.getResumenes();
+      const movimientosData = storage.getMovimientos();
+      let tarjetasData = storage.getTarjetas();
+
+      // Corregir tarjetas con banco Desconocido
+      let tarjetasActualizadas = false;
+      tarjetasData = tarjetasData.map(t => {
+        if (!t.banco || t.banco === 'Desconocido') {
+          const bancoDet = detectarBanco(t.nombre);
+          if (bancoDet) {
+            tarjetasActualizadas = true;
+            return { ...t, banco: bancoDet, tipo: t.tipo || detectarTipo(t.nombre) };
+          }
+        }
+        return t;
+      });
+      if (tarjetasActualizadas) {
+        localStorage.setItem('tarjetas_lista', JSON.stringify(tarjetasData));
+      }
+      const reglasData = storage.getReglas();
+      const estadisticas = storage.getEstadisticas();
+      const evolucion = storage.getEvolucionMensual(6);
+      const proyeccionData = storage.getProyeccionCuotas(6);
+      console.log('[App] Datos cargados:', {
+        resumenes: resumenesData.length,
+        tarjetas: tarjetasData.length,
+        movimientos: movimientosData.length,
+        estadisticas
+      });
+
+      // Obtener el último resumen de cada tarjeta
+      const ultimoResumenPorTarjeta = {};
+      resumenesData.forEach(r => {
+        const key = r.tarjeta;
+        if (!ultimoResumenPorTarjeta[key] ||
+            r.anio > ultimoResumenPorTarjeta[key].anio ||
+            (r.anio === ultimoResumenPorTarjeta[key].anio && r.mes > ultimoResumenPorTarjeta[key].mes)) {
+          ultimoResumenPorTarjeta[key] = r;
+        }
+      });
+
+      // Filtrar solo movimientos del último resumen de cada tarjeta
+      const movimientosUltimoResumen = movimientosData.filter(m => {
+        const ultimoResumen = ultimoResumenPorTarjeta[m.tarjeta];
+        if (!ultimoResumen) return false;
+        return m.resumen_id === ultimoResumen.id;
+      });
+
+      // Calcular cuotas activas: solo del último resumen y detectar por es_cuota o cuota_texto
+      const cuotasActivasData = movimientosUltimoResumen.filter(m => {
+        // Si tiene es_cuota explícito
+        if (m.es_cuota && m.cuota_actual && m.total_cuotas) {
+          return true;
+        }
+        // Si tiene cuota_texto (formato "2/6", "3/12", etc.) - usado por pdf-parser
+        if (m.cuota_texto) {
+          const match = m.cuota_texto.match(/(\d+)\/(\d+)/);
+          if (match) {
+            m.cuota_actual = parseInt(match[1]);
+            m.total_cuotas = parseInt(match[2]);
+            m.es_cuota = true;
+            return true;
+          }
+        }
+        return false;
+      });
+
+      // Enriquecer tarjetas con último resumen y estadísticas
+      const tarjetasEnriquecidas = tarjetasData.map((t, idx) => {
+        // Buscar último resumen de esta tarjeta
+        const resumenesOrdenados = resumenesData
+          .filter(r => r.tarjeta === t.nombre)
+          .sort((a, b) => {
+            if (a.anio !== b.anio) return b.anio - a.anio;
+            return b.mes - a.mes;
+          });
+        const ultimoResumen = resumenesOrdenados[0] || null;
+
+        // Calcular estadísticas de movimientos para esta tarjeta
+        const movimientosTarjeta = movimientosData.filter(m => m.tarjeta === t.nombre);
+
+        // Calcular estadísticas de cuotas para esta tarjeta
+        const cuotasTarjeta = cuotasActivasData.filter(c => c.tarjeta === t.nombre);
+        const montoCuotasPendientes = cuotasTarjeta.reduce((sum, c) => {
+          const restantes = c.total_cuotas - c.cuota_actual;
+          return sum + (c.monto_pesos || 0) * restantes;
+        }, 0);
+
+        // Cantidad de cuotas activas de esta tarjeta (sin agrupar por referencia)
+        const comprasEnCuotasUnicas = cuotasTarjeta.length;
+
+        return {
+          ...t,
+          id: t.id || idx + 1, // Asegurar que tenga ID
+          ultimo_resumen: ultimoResumen ? {
+            total_a_pagar: ultimoResumen.total_a_pagar_pesos,
+            total_a_pagar_dolares: ultimoResumen.total_a_pagar_dolares || 0,
+            total_consumos_pesos: ultimoResumen.total_consumos_pesos,
+            total_consumos_dolares: ultimoResumen.total_consumos_dolares || 0,
+            fecha_cierre: ultimoResumen.fecha_cierre,
+            fecha_vencimiento: ultimoResumen.fecha_vencimiento,
+            mes: ultimoResumen.mes,
+            anio: ultimoResumen.anio,
+            cantidad_movimientos: ultimoResumen.cantidad_movimientos
+          } : null,
+          estadisticas: {
+            total_movimientos: movimientosTarjeta.length,
+            compras_en_cuotas: comprasEnCuotasUnicas,
+            monto_cuotas_pendientes: montoCuotasPendientes,
+            cantidad_cuotas: cuotasTarjeta.length
+          }
+        };
+      });
+
+      // Transformar cuotas al formato esperado por CuotasView
+      const cuotasFormateadas = cuotasActivasData.map(m => ({
+        id: m.id,
+        descripcion: m.referencia_limpia || m.referencia_original || 'Sin descripción',
+        tarjeta: m.tarjeta,
+        total_cuotas: m.total_cuotas,
+        cuotas_pagadas: m.cuota_actual,
+        cuotas_restantes: m.total_cuotas - m.cuota_actual,
+        monto_cuota: m.monto_pesos || m.monto_dolares || 0,
+        monto_total: (m.monto_pesos || m.monto_dolares || 0) * m.total_cuotas,
+        es_ultima_cuota: m.cuota_actual === m.total_cuotas,
+        fecha_compra: m.fecha_compra
+      }));
+
+      setTarjetas(tarjetasEnriquecidas);
+      setMovimientos(movimientosData);
+      setResumenes(resumenesData);
+      setCuotasActivas(cuotasFormateadas);
+      // Calcular totales de cuotas pendientes
+      const totalPendienteCuotas = cuotasFormateadas.reduce((sum, c) => {
+        return sum + (c.monto_cuota * c.cuotas_restantes);
+      }, 0);
+
+      setDashboard({
+        // Propiedades en el nivel raíz para las cards
+        total_resumenes: estadisticas.total_resumenes || resumenesData.length,
+        total_a_pagar: estadisticas.total_a_pagar,
+        total_a_pagar_dolares: estadisticas.total_a_pagar_dolares,
+        total_tarjetas: estadisticas.total_tarjetas || tarjetasData.length,
+        total_movimientos: estadisticas.total_movimientos || movimientosData.length,
+        cuotas_activas: cuotasActivasData.length,
+        pagos_pendientes: cuotasActivasData.reduce((sum, m) => sum + (m.total_cuotas - m.cuota_actual), 0),
+        total_pendiente_cuotas: totalPendienteCuotas,
+        ultimo_resumen: estadisticas.ultimo_resumen,
+        // También mantener estadisticas para compatibilidad
+        estadisticas: {
+          total_a_pagar: estadisticas.total_a_pagar,
+          total_a_pagar_dolares: estadisticas.total_a_pagar_dolares,
+          total_tarjetas: estadisticas.total_tarjetas,
+          total_movimientos: estadisticas.total_movimientos,
+          cuotas_activas: estadisticas.cuotas_activas
+        }
+      });
+      setProyecciones({ evolucion_mensual: evolucion });
+      // Calcular pendientes desde movimientos dudosos (excluyendo los ya resueltos)
+      const resolved = JSON.parse(localStorage.getItem('resolved_pendientes') || '[]');
+      const resolvedSet = new Set(resolved);
+      const movimientosDudosos = movimientosData.filter(m => m.es_dudoso);
+      const pendientesUnicos = [];
+      const refVistas = new Set();
+      movimientosDudosos.forEach(m => {
+        const refNorm = (m.referencia_original || '').toLowerCase().replace(/[^a-z]/g, '').substring(0, 20);
+        // Excluir si ya fue resuelto (por ID o por referencia normalizada)
+        if (resolvedSet.has(m.id) || resolvedSet.has(refNorm)) return;
+        if (!refVistas.has(refNorm)) {
+          refVistas.add(refNorm);
+          pendientesUnicos.push({
+            id: m.id,
+            referencia_original: m.referencia_original,
+            sugerencias: m.sugerencias || [],
+            tarjeta: m.tarjeta,
+            monto: m.monto_pesos || m.monto_dolares,
+            refNorm: refNorm // Guardar para usar al resolver
+          });
+        }
+      });
+      setPendientes(pendientesUnicos);
+      setReglas(reglasData);
+
+      // Calcular proyección de cuotas desde cuotasActivasData (datos correctos del último resumen)
+      const ahora = new Date();
+      const proyeccionCalculada = [];
+      for (let i = 0; i < 6; i++) {
+        const fecha = new Date(ahora.getFullYear(), ahora.getMonth() + i, 1);
+        let totalMes = 0;
+        let cantidadCuotas = 0;
+
+        cuotasActivasData.forEach(m => {
+          const cuotasFaltantes = m.total_cuotas - m.cuota_actual;
+          // Si aún quedan cuotas para este mes futuro
+          if (cuotasFaltantes >= i) {
+            totalMes += m.monto_pesos || 0;
+            cantidadCuotas++;
+          }
+        });
+
+        proyeccionCalculada.push({
+          mes: fecha.toLocaleDateString('es-AR', { month: 'short', year: '2-digit' }),
+          mes_nombre: fecha.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }),
+          total: totalMes,
+          cantidad_cuotas: cantidadCuotas
+        });
+      }
+      setProyeccionCuotas(proyeccionCalculada);
     } catch (error) {
-      console.error('Error fetching data:', error);
+      console.error('[App] Error loading data from localStorage:', error);
     }
     setLoading(false);
+    console.log('[App] fetchData completado');
   }, []);
   
   useEffect(() => {
@@ -1009,17 +1372,15 @@ const App = () => {
     { id: 'movimientos', icon: Receipt, label: 'Movimientos' },
     { id: 'cuotas', icon: Calendar, label: 'Cuotas', badge: cuotasActivas.length },
     { id: 'reintegros', icon: RefreshCcw, label: 'Reintegros', badge: reintegros.length > 0 ? reintegros.length : null },
-    { id: 'reglas', icon: Tag, label: 'Reglas', badge: reglas.length },
     { id: 'importar', icon: Upload, label: 'Importar' },
   ];
   
-  // Format currency
+  // Format currency (usa las funciones helper globales)
   const formatCurrency = (amount, currency = 'ARS') => {
-    const value = amount || 0;
     if (currency === 'USD') {
-      return `USD ${value.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`;
+      return formatMontoDolares(amount);
     }
-    return `$${value.toLocaleString('es-AR', { maximumFractionDigits: 0 })}`;
+    return formatMonto(amount);
   };
   
   // Chart colors based on theme
@@ -1043,7 +1404,7 @@ const App = () => {
           </div>
           {sidebarOpen && (
             <div className="animate-fade-in-left">
-              <h1 className="font-bold text-lg text-[var(--text-primary)]">Tarjetas</h1>
+              <h1 className="font-bold text-lg text-[var(--text-primary)]">Tarjeteando</h1>
               <p className="text-xs text-[var(--text-muted)]">Control financiero</p>
             </div>
           )}
@@ -1073,16 +1434,11 @@ const App = () => {
         
         {/* Theme Toggle */}
         <div className="p-4 border-t border-[var(--glass-border)]">
-          <button 
+          <button
             onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
-            className="w-full flex items-center justify-between p-3 rounded-xl 
+            className="w-full flex items-center justify-center p-3 rounded-xl
                        bg-[var(--glass-bg)] hover:bg-opacity-80 transition-all"
           >
-            {sidebarOpen && (
-              <span className="text-sm text-[var(--text-secondary)]">
-                {theme === 'light' ? 'Modo Oscuro' : 'Modo Claro'}
-              </span>
-            )}
             <div className="flex items-center gap-2">
               <Sun className={`w-4 h-4 ${theme === 'light' ? 'text-[var(--accent-1)]' : 'text-[var(--text-muted)]'}`} />
               <div className="theme-toggle" />
@@ -1179,7 +1535,8 @@ const App = () => {
                                     key={p.id}
                                     onClick={() => {
                                       setReadNotifications(prev => new Set([...prev, p.id]));
-                                      setActiveView('reglas');
+                                      setSettingsInitialTab('reglas');
+                                      setSettingsOpen(true);
                                       setNotificationsOpen(false);
                                     }}
                                     className={`p-3 rounded-lg cursor-pointer transition-all
@@ -1221,7 +1578,8 @@ const App = () => {
                             {pendientes.length > 0 && (
                               <button
                                 onClick={() => {
-                                  setActiveView('reglas');
+                                  setSettingsInitialTab('reglas');
+                                  setSettingsOpen(true);
                                   setNotificationsOpen(false);
                                 }}
                                 className="flex-1 py-2 text-sm font-medium text-[var(--accent-1)]
@@ -1259,7 +1617,7 @@ const App = () => {
             </div>
           ) : activeView === 'dashboard' ? (
             <DashboardView
-              dashboard={{...dashboard, total_reintegros: reintegros.length}}
+              dashboard={{...dashboard, total_reintegros: reintegros.reduce((sum, r) => sum + Math.abs(r.monto_pesos || 0), 0)}}
               tarjetas={tarjetas}
               proyecciones={proyecciones}
               proyeccionCuotas={proyeccionCuotas}
@@ -1294,13 +1652,6 @@ const App = () => {
               formatCurrency={formatCurrency}
               searchQuery={searchQuery}
             />
-          ) : activeView === 'reglas' ? (
-            <ReglasView
-              reglas={reglas}
-              pendientes={pendientes}
-              onRefresh={fetchData}
-              searchQuery={searchQuery}
-            />
           ) : activeView === 'importar' ? (
             <ImportarView onSuccess={fetchData} />
           ) : null}
@@ -1310,7 +1661,10 @@ const App = () => {
       {/* Modal de Configuración - Fuera del flujo principal */}
       <SettingsModal
         isOpen={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
+        onClose={() => {
+          setSettingsOpen(false);
+          setSettingsInitialTab('tarjetas'); // Reset al cerrar
+        }}
         tarjetas={tarjetas}
         reglas={reglas}
         movimientos={movimientos}
@@ -1319,6 +1673,18 @@ const App = () => {
         onRefreshData={fetchData}
         theme={theme}
         setTheme={setTheme}
+        initialTab={settingsInitialTab}
+        pendientes={pendientes}
+        onResolvePendiente={(id, refNorm) => {
+          // Guardar en localStorage los pendientes resueltos
+          const resolved = JSON.parse(localStorage.getItem('resolved_pendientes') || '[]');
+          if (!resolved.includes(id)) resolved.push(id);
+          if (refNorm && !resolved.includes(refNorm)) resolved.push(refNorm);
+          localStorage.setItem('resolved_pendientes', JSON.stringify(resolved));
+          // Actualizar estado local inmediatamente
+          setPendientes(prev => prev.filter(p => p.id !== id));
+          setResolvedPendientes(new Set(resolved));
+        }}
       />
     </div>
   );
@@ -1333,7 +1699,7 @@ const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [
     if (!confirm('¿Eliminar este resumen y todos sus movimientos?')) return;
     setDeletingId(resumenId);
     try {
-      await fetch(`${API_BASE}/resumenes/${encodeURIComponent(resumenId)}`, { method: 'DELETE' });
+      storage.deleteResumen(resumenId);
       onDeleteResumen?.();
     } catch (error) {
       console.error('Error eliminando resumen:', error);
@@ -1397,7 +1763,7 @@ const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [
                       </div>
                       <div className="flex items-center gap-3">
                         <span className="text-sm font-semibold text-[var(--text-primary)]">
-                          ${(r.total_a_pagar_pesos || 0).toLocaleString('es-AR')}
+                          {formatMonto(r.total_a_pagar_pesos || 0)}
                         </span>
                         <button
                           onClick={() => handleDeleteResumen(r.id)}
@@ -1516,7 +1882,7 @@ const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [
         <StatCard
           icon={Calendar}
           label="Cuotas Activas"
-          value={`${dashboard.cuotas_activas || 0} (${dashboard.pagos_pendientes || 0} pagos)`}
+          value={dashboard.cuotas_activas || 0}
           delay={200}
           onClick={() => setActiveView?.('cuotas')}
         />
@@ -1531,7 +1897,7 @@ const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [
         <StatCard
           icon={RefreshCcw}
           label="Reintegros"
-          value={dashboard.total_reintegros || 0}
+          value={formatCurrency(dashboard.total_reintegros || 0)}
           delay={400}
           onClick={() => setActiveView?.('reintegros')}
         />
@@ -1569,12 +1935,12 @@ const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [
           </div>
 
           {(() => {
-            const evolucionData = proyecciones?.evolucion || [];
-            // Obtener TODAS las tarjetas de TODOS los meses (no solo el primero)
+            const evolucionData = proyecciones?.evolucion_mensual || proyecciones?.evolucion || [];
+            // Obtener TODAS las tarjetas de TODOS los meses, excluyendo 'mes', 'anio' y 'total'
             const allKeys = new Set();
             evolucionData.forEach(item => {
               Object.keys(item).forEach(k => {
-                if (k !== 'mes') allKeys.add(k);
+                if (k !== 'mes' && k !== 'anio' && k !== 'total') allKeys.add(k);
               });
             });
             const tarjetasEnGrafico = Array.from(allKeys);
@@ -1599,7 +1965,7 @@ const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [
                       border: '1px solid var(--glass-border)',
                       borderRadius: '12px'
                     }}
-                    formatter={(v, name) => [`$${(v || 0).toLocaleString('es-AR')}`, name]}
+                    formatter={(v, name) => [formatMonto(v || 0), name]}
                   />
                   <Legend
                     verticalAlign="bottom"
@@ -1667,7 +2033,7 @@ const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [
                       border: '1px solid var(--glass-border)',
                       borderRadius: '12px'
                     }}
-                    formatter={(v) => [`$${v.toLocaleString('es-AR')}`, '']}
+                    formatter={(v) => [formatMonto(v), '']}
                   />
                   <Legend
                     verticalAlign="bottom"
@@ -1749,7 +2115,7 @@ const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [
                   borderRadius: '12px',
                   backdropFilter: 'blur(10px)'
                 }}
-                formatter={(v) => [`$${v?.toLocaleString('es-AR') || 0}`, 'Total']}
+                formatter={(v) => [formatMonto(v || 0), 'Total']}
               />
               <Bar
                 dataKey="total"
@@ -2560,28 +2926,95 @@ const ImportarView = ({ onSuccess }) => {
   
   const handleUpload = async (files) => {
     if (!files.length) return;
-    
+
     setUploading(true);
     setResults([]);
-    
+
     const formData = new FormData();
     Array.from(files).forEach(file => {
       formData.append('pdfs', file);
     });
-    
+
     try {
       const response = await fetch(`${API_BASE}/resumenes/upload`, {
         method: 'POST',
         body: formData
       });
       const data = await response.json();
-      setResults(data.resultados || []);
+      console.log('[Upload] Respuesta del servidor:', data);
+
+      // Guardar cada resultado exitoso en localStorage
+      const resultados = data.data?.resultados || data.resultados || [];
+      console.log('[Upload] Resultados a procesar:', resultados);
+      for (const resultado of resultados) {
+        console.log('[Upload] Procesando resultado:', resultado);
+        if (resultado.exito && resultado.datos) {
+          const { resumen, movimientos, tarjeta } = resultado.datos;
+          console.log('[Upload] Guardando datos:', { tarjeta, resumen, movimientosCount: movimientos?.length });
+
+          // Guardar tarjeta (detectar banco desde nombre si no viene en resumen)
+          if (tarjeta) {
+            let banco = resumen?.banco;
+            let tipo = resumen?.tipo;
+            if (!banco || banco === 'Desconocido') {
+              const n = tarjeta.toUpperCase();
+              if (n.includes('GALICIA')) banco = 'Galicia';
+              else if (n.includes('MACRO')) banco = 'Macro';
+              else if (n.includes('SANTANDER')) banco = 'Santander';
+              else if (n.includes('BBVA')) banco = 'BBVA';
+              else if (n.includes('HSBC')) banco = 'HSBC';
+            }
+            if (!tipo) {
+              const n = tarjeta.toUpperCase();
+              if (n.includes('MASTERCARD')) tipo = 'MASTERCARD';
+              else if (n.includes('VISA')) tipo = 'VISA';
+              else if (n.includes('AMEX')) tipo = 'AMEX';
+              else tipo = 'VISA';
+            }
+            storage.saveTarjeta({
+              nombre: tarjeta,
+              banco: banco || 'Desconocido',
+              tipo: tipo
+            });
+          }
+
+          // Guardar resumen
+          if (resumen) {
+            const resumenId = `${tarjeta}-${resumen.anio}-${resumen.mes}`;
+            const resumenData = {
+              id: resumenId,
+              tarjeta: tarjeta,
+              mes: resumen.mes,
+              anio: resumen.anio,
+              fecha_cierre: resumen.fecha_cierre,
+              fecha_vencimiento: resumen.fecha_vencimiento,
+              total_a_pagar_pesos: resumen.total_a_pagar_pesos || 0,
+              total_a_pagar_dolares: resumen.total_a_pagar_dolares || 0,
+              total_consumos_pesos: resumen.total_consumos_pesos || 0,
+              total_consumos_dolares: resumen.total_consumos_dolares || 0,
+              impuestos: resumen.impuestos || {},
+              cantidad_movimientos: movimientos?.length || 0,
+              fecha_importacion: new Date().toISOString()
+            };
+            console.log('[Upload] Guardando resumen:', resumenData);
+            storage.saveResumen(resumenData);
+
+            // Guardar movimientos
+            if (movimientos && movimientos.length > 0) {
+              console.log('[Upload] Guardando', movimientos.length, 'movimientos para', tarjeta);
+              storage.saveMovimientos(resumenId, movimientos, tarjeta);
+            }
+          }
+        }
+      }
+
+      setResults(resultados);
       onSuccess?.();
     } catch (error) {
       console.error('Upload error:', error);
       setResults([{ archivo: 'Error', exito: false, error: error.message }]);
     }
-    
+
     setUploading(false);
   };
   
