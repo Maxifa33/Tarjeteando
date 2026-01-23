@@ -16,6 +16,158 @@ import {
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 const API_BASE = `${API_URL}/api/v1`;
 
+// Componente de Onboarding para nuevos usuarios
+const OnboardingWizard = ({ onComplete }) => {
+  const [step, setStep] = useState(1);
+
+  const steps = [
+    {
+      title: "Bienvenido a Tarjeteando",
+      description: "Tu asistente inteligente para gestionar los resumenes de tus tarjetas de credito. Vamos a configurar todo en 3 simples pasos.",
+      icon: Wallet,
+      content: (
+        <div className="text-center">
+          <div className="w-24 h-24 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-[var(--accent-1)] to-[var(--accent-2)] flex items-center justify-center shadow-2xl">
+            <Wallet className="w-12 h-12 text-white" />
+          </div>
+          <h2 className="text-2xl font-bold text-[var(--text-primary)] mb-3">Bienvenido a Tarjeteando</h2>
+          <p className="text-[var(--text-muted)] max-w-md mx-auto">
+            Tu asistente inteligente para gestionar los resumenes de tus tarjetas de credito.
+            Te ayudamos a entender tus gastos, trackear cuotas y proyectar pagos futuros.
+          </p>
+        </div>
+      )
+    },
+    {
+      title: "Subi tu primer resumen",
+      description: "Simplemente arrastra o selecciona el PDF de tu resumen de tarjeta.",
+      icon: Upload,
+      content: (
+        <div className="text-center">
+          <div className="w-24 h-24 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-2xl">
+            <Upload className="w-12 h-12 text-white" />
+          </div>
+          <h2 className="text-2xl font-bold text-[var(--text-primary)] mb-3">Subi tu primer resumen</h2>
+          <p className="text-[var(--text-muted)] max-w-md mx-auto mb-6">
+            Arrastra el PDF de tu resumen de tarjeta o hace click para seleccionarlo.
+            Soportamos VISA, Mastercard y American Express de los principales bancos argentinos.
+          </p>
+          <div className="flex flex-wrap justify-center gap-3">
+            {['Galicia', 'Macro', 'Santander', 'BBVA', 'HSBC', 'ICBC'].map(banco => (
+              <span key={banco} className="px-3 py-1.5 rounded-full bg-[var(--glass-bg)] text-sm text-[var(--text-muted)] border border-[var(--glass-border)]">
+                {banco}
+              </span>
+            ))}
+          </div>
+        </div>
+      )
+    },
+    {
+      title: "Explora tus finanzas",
+      description: "Visualiza gastos, cuotas activas y proyecciones de pago.",
+      icon: BarChart3,
+      content: (
+        <div className="text-center">
+          <div className="w-24 h-24 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-2xl">
+            <BarChart3 className="w-12 h-12 text-white" />
+          </div>
+          <h2 className="text-2xl font-bold text-[var(--text-primary)] mb-3">Explora tus finanzas</h2>
+          <p className="text-[var(--text-muted)] max-w-md mx-auto mb-6">
+            Una vez cargado tu resumen, podras ver:
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-lg mx-auto">
+            <div className="p-4 rounded-xl bg-[var(--glass-bg)] border border-[var(--glass-border)]">
+              <Receipt className="w-8 h-8 mx-auto mb-2 text-[var(--accent-1)]" />
+              <p className="text-sm font-medium text-[var(--text-primary)]">Movimientos</p>
+              <p className="text-xs text-[var(--text-muted)]">Detalle de compras</p>
+            </div>
+            <div className="p-4 rounded-xl bg-[var(--glass-bg)] border border-[var(--glass-border)]">
+              <Calendar className="w-8 h-8 mx-auto mb-2 text-emerald-500" />
+              <p className="text-sm font-medium text-[var(--text-primary)]">Cuotas</p>
+              <p className="text-xs text-[var(--text-muted)]">Seguimiento mensual</p>
+            </div>
+            <div className="p-4 rounded-xl bg-[var(--glass-bg)] border border-[var(--glass-border)]">
+              <TrendingUp className="w-8 h-8 mx-auto mb-2 text-violet-500" />
+              <p className="text-sm font-medium text-[var(--text-primary)]">Proyecciones</p>
+              <p className="text-xs text-[var(--text-muted)]">Pagos futuros</p>
+            </div>
+          </div>
+        </div>
+      )
+    }
+  ];
+
+  const currentStep = steps[step - 1];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      {/* Animated Background */}
+      <div className="animated-bg" />
+
+      {/* Overlay */}
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+
+      {/* Modal */}
+      <div className="relative w-full max-w-2xl glass-card p-8 animate-fade-in-up">
+        {/* Progress Bar */}
+        <div className="flex items-center justify-center gap-2 mb-8">
+          {steps.map((_, idx) => (
+            <div
+              key={idx}
+              className={`h-2 rounded-full transition-all duration-300 ${
+                idx + 1 === step
+                  ? 'w-8 bg-gradient-to-r from-[var(--accent-1)] to-[var(--accent-2)]'
+                  : idx + 1 < step
+                    ? 'w-8 bg-emerald-500'
+                    : 'w-2 bg-[var(--glass-border)]'
+              }`}
+            />
+          ))}
+        </div>
+
+        {/* Step Content */}
+        <div className="min-h-[300px] flex items-center justify-center">
+          {currentStep.content}
+        </div>
+
+        {/* Navigation */}
+        <div className="flex items-center justify-between mt-8 pt-6 border-t border-[var(--glass-border)]">
+          <button
+            onClick={() => setStep(s => Math.max(1, s - 1))}
+            className={`px-6 py-2.5 rounded-xl font-medium transition-all ${
+              step === 1
+                ? 'opacity-0 pointer-events-none'
+                : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--glass-bg)]'
+            }`}
+          >
+            Anterior
+          </button>
+
+          <span className="text-sm text-[var(--text-muted)]">
+            Paso {step} de {steps.length}
+          </span>
+
+          {step < steps.length ? (
+            <button
+              onClick={() => setStep(s => s + 1)}
+              className="px-6 py-2.5 rounded-xl font-medium bg-gradient-to-r from-[var(--accent-1)] to-[var(--accent-2)] text-white shadow-lg hover:shadow-xl transition-all hover:scale-105"
+            >
+              Siguiente
+            </button>
+          ) : (
+            <button
+              onClick={onComplete}
+              className="px-6 py-2.5 rounded-xl font-medium bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg hover:shadow-xl transition-all hover:scale-105"
+            >
+              Comenzar
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // Colores consistentes por tarjeta para todos los gráficos
 const TARJETA_COLORS = {
   'VISA Santander': '#DC2626',       // Rojo
@@ -1060,6 +1212,18 @@ const App = () => {
       return new Set(JSON.parse(localStorage.getItem('resolved_pendientes') || '[]'));
     } catch { return new Set(); }
   });
+
+  // Onboarding state - mostrar solo si es la primera vez
+  const [showOnboarding, setShowOnboarding] = useState(() => {
+    return !localStorage.getItem('onboarding_completed');
+  });
+
+  const handleOnboardingComplete = () => {
+    localStorage.setItem('onboarding_completed', 'true');
+    setShowOnboarding(false);
+    // Ir directamente a la vista de importar
+    setActiveView('importar');
+  };
   
   // Data states
   const [tarjetas, setTarjetas] = useState([]);
@@ -1389,11 +1553,16 @@ const App = () => {
     ? ['#D4AF37', '#FFD700', '#F59E0B', '#FBBF24']
     : ['#8B5CF6', '#EC4899', '#06B6D4', '#10B981'];
 
+  // Mostrar Onboarding si es la primera vez
+  if (showOnboarding) {
+    return <OnboardingWizard onComplete={handleOnboardingComplete} />;
+  }
+
   return (
     <div className="min-h-screen flex">
       {/* Animated Background */}
       <div className="animated-bg" />
-      
+
       {/* Sidebar */}
       <aside className={`sidebar fixed lg:relative w-72 h-screen flex flex-col z-40 transition-all duration-300
                         ${sidebarOpen ? 'left-0' : '-left-72 lg:left-0 lg:w-20'}`}>
