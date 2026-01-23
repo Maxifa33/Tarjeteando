@@ -48,48 +48,55 @@ const OnboardingWizard = ({ onComplete }) => {
             <Upload className="w-12 h-12 text-white" />
           </div>
           <h2 className="text-2xl font-bold text-[var(--text-primary)] mb-3">Subi tu primer resumen</h2>
-          <p className="text-[var(--text-muted)] max-w-md mx-auto mb-6">
+          <p className="text-[var(--text-muted)] max-w-md mx-auto mb-4">
             Arrastra el PDF de tu resumen de tarjeta o hace click para seleccionarlo.
             Soportamos VISA, Mastercard y American Express de los principales bancos argentinos.
           </p>
-          <div className="flex flex-wrap justify-center gap-3">
+          <div className="flex flex-wrap justify-center gap-3 mb-4">
             {['Galicia', 'Macro', 'Santander', 'BBVA', 'HSBC', 'ICBC'].map(banco => (
               <span key={banco} className="px-3 py-1.5 rounded-full bg-[var(--glass-bg)] text-sm text-[var(--text-muted)] border border-[var(--glass-border)]">
                 {banco}
               </span>
             ))}
           </div>
+          <div className="flex items-center justify-center gap-2 text-amber-500 bg-amber-500/10 rounded-lg px-4 py-2 max-w-md mx-auto">
+            <Clock className="w-4 h-4 flex-shrink-0" />
+            <p className="text-sm">La primera carga puede tardar unos segundos mientras procesamos el PDF</p>
+          </div>
         </div>
       )
     },
     {
-      title: "Explora tus finanzas",
-      description: "Visualiza gastos, cuotas activas y proyecciones de pago.",
-      icon: BarChart3,
+      title: "Tips y funcionalidades",
+      description: "Aprovecha al maximo Tarjeteando.",
+      icon: Sparkles,
       content: (
         <div className="text-center">
           <div className="w-24 h-24 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-2xl">
-            <BarChart3 className="w-12 h-12 text-white" />
+            <Sparkles className="w-12 h-12 text-white" />
           </div>
-          <h2 className="text-2xl font-bold text-[var(--text-primary)] mb-3">Explora tus finanzas</h2>
-          <p className="text-[var(--text-muted)] max-w-md mx-auto mb-6">
-            Una vez cargado tu resumen, podras ver:
-          </p>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-lg mx-auto">
-            <div className="p-4 rounded-xl bg-[var(--glass-bg)] border border-[var(--glass-border)]">
-              <Receipt className="w-8 h-8 mx-auto mb-2 text-[var(--accent-1)]" />
-              <p className="text-sm font-medium text-[var(--text-primary)]">Movimientos</p>
-              <p className="text-xs text-[var(--text-muted)]">Detalle de compras</p>
+          <h2 className="text-2xl font-bold text-[var(--text-primary)] mb-3">Tips y funcionalidades</h2>
+          <div className="space-y-3 max-w-md mx-auto text-left">
+            <div className="flex items-start gap-3 p-3 rounded-xl bg-[var(--glass-bg)] border border-[var(--glass-border)]">
+              <FileText className="w-5 h-5 text-[var(--accent-1)] mt-0.5 flex-shrink-0" />
+              <div>
+                <p className="text-sm font-medium text-[var(--text-primary)]">Subi todos tus resumenes</p>
+                <p className="text-xs text-[var(--text-muted)]">Carga varios meses para ver el historial completo y mejores proyecciones</p>
+              </div>
             </div>
-            <div className="p-4 rounded-xl bg-[var(--glass-bg)] border border-[var(--glass-border)]">
-              <Calendar className="w-8 h-8 mx-auto mb-2 text-emerald-500" />
-              <p className="text-sm font-medium text-[var(--text-primary)]">Cuotas</p>
-              <p className="text-xs text-[var(--text-muted)]">Seguimiento mensual</p>
+            <div className="flex items-start gap-3 p-3 rounded-xl bg-[var(--glass-bg)] border border-[var(--glass-border)]">
+              <Edit3 className="w-5 h-5 text-emerald-500 mt-0.5 flex-shrink-0" />
+              <div>
+                <p className="text-sm font-medium text-[var(--text-primary)]">Renombra comercios</p>
+                <p className="text-xs text-[var(--text-muted)]">Podes asignar nombres claros a comercios con nombres confusos desde Configuracion</p>
+              </div>
             </div>
-            <div className="p-4 rounded-xl bg-[var(--glass-bg)] border border-[var(--glass-border)]">
-              <TrendingUp className="w-8 h-8 mx-auto mb-2 text-violet-500" />
-              <p className="text-sm font-medium text-[var(--text-primary)]">Proyecciones</p>
-              <p className="text-xs text-[var(--text-muted)]">Pagos futuros</p>
+            <div className="flex items-start gap-3 p-3 rounded-xl bg-[var(--glass-bg)] border border-[var(--glass-border)]">
+              <CheckCircle className="w-5 h-5 text-blue-500 mt-0.5 flex-shrink-0" />
+              <div>
+                <p className="text-sm font-medium text-[var(--text-primary)]">Tus datos son privados</p>
+                <p className="text-xs text-[var(--text-muted)]">Todo se guarda en tu navegador. No almacenamos tus resumenes en ningun servidor</p>
+              </div>
             </div>
           </div>
         </div>
