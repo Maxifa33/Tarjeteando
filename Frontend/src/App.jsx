@@ -13,7 +13,8 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
 } from 'recharts';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const API_BASE = `${API_URL}/api/v1`;
 
 // Colores consistentes por tarjeta para todos los gráficos
 const TARJETA_COLORS = {
