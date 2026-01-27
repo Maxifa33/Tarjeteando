@@ -30,8 +30,8 @@ const OnboardingWizard = ({ onComplete }) => {
           <div className="w-24 h-24 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-[var(--accent-1)] to-[var(--accent-2)] flex items-center justify-center shadow-2xl">
             <Wallet className="w-12 h-12 text-white" />
           </div>
-          <h2 className="text-2xl font-bold text-[var(--text-primary)] mb-3">Bienvenido a Tarjeteando</h2>
-          <p className="text-[var(--text-muted)] max-w-md mx-auto">
+          <h2 className="text-3xl font-bold bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent mb-3">Bienvenido a Tarjeteando</h2>
+          <p className="text-gray-600 max-w-md mx-auto text-lg">
             Tu asistente inteligente para gestionar los resumenes de tus tarjetas de credito.
             Te ayudamos a entender tus gastos, trackear cuotas y proyectar pagos futuros.
           </p>
@@ -47,21 +47,21 @@ const OnboardingWizard = ({ onComplete }) => {
           <div className="w-24 h-24 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-2xl">
             <Upload className="w-12 h-12 text-white" />
           </div>
-          <h2 className="text-2xl font-bold text-[var(--text-primary)] mb-3">Subi tu primer resumen</h2>
-          <p className="text-[var(--text-muted)] max-w-md mx-auto mb-4">
+          <h2 className="text-3xl font-bold bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent mb-3">Subi tu primer resumen</h2>
+          <p className="text-gray-600 max-w-md mx-auto mb-4 text-lg">
             Arrastra el PDF de tu resumen de tarjeta o hace click para seleccionarlo.
             Soportamos VISA, Mastercard y American Express de los principales bancos argentinos.
           </p>
-          <div className="flex flex-wrap justify-center gap-3 mb-4">
-            {['Galicia', 'Macro', 'Santander', 'BBVA', 'HSBC', 'ICBC'].map(banco => (
-              <span key={banco} className="px-3 py-1.5 rounded-full bg-[var(--glass-bg)] text-sm text-[var(--text-muted)] border border-[var(--glass-border)]">
+          <div className="flex flex-wrap justify-center gap-2 mb-4">
+            {['Galicia', 'Macro', 'Santander', 'BBVA', 'HSBC', 'ICBC'].map((banco, idx) => (
+              <span key={banco} className="px-4 py-2 rounded-full bg-gradient-to-r from-violet-100 to-indigo-100 text-sm font-medium text-violet-700 border border-violet-200 shadow-sm">
                 {banco}
               </span>
             ))}
           </div>
-          <div className="flex items-center justify-center gap-2 text-amber-500 bg-amber-500/10 rounded-lg px-4 py-2 max-w-md mx-auto">
-            <Clock className="w-4 h-4 flex-shrink-0" />
-            <p className="text-sm">La primera carga puede tardar unos segundos mientras procesamos el PDF</p>
+          <div className="flex items-center justify-center gap-2 text-amber-700 bg-gradient-to-r from-amber-50 to-orange-50 rounded-xl px-4 py-3 max-w-md mx-auto border border-amber-200">
+            <Clock className="w-5 h-5 flex-shrink-0 text-amber-500" />
+            <p className="text-sm font-medium">La primera carga puede tardar unos segundos mientras procesamos el PDF</p>
           </div>
         </div>
       )
@@ -75,27 +75,33 @@ const OnboardingWizard = ({ onComplete }) => {
           <div className="w-24 h-24 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-2xl">
             <Sparkles className="w-12 h-12 text-white" />
           </div>
-          <h2 className="text-2xl font-bold text-[var(--text-primary)] mb-3">Tips y funcionalidades</h2>
+          <h2 className="text-3xl font-bold bg-gradient-to-r from-violet-600 to-purple-600 bg-clip-text text-transparent mb-4">Tips y funcionalidades</h2>
           <div className="space-y-3 max-w-md mx-auto text-left">
-            <div className="flex items-start gap-3 p-3 rounded-xl bg-[var(--glass-bg)] border border-[var(--glass-border)]">
-              <FileText className="w-5 h-5 text-[var(--accent-1)] mt-0.5 flex-shrink-0" />
+            <div className="flex items-start gap-3 p-4 rounded-xl bg-gradient-to-r from-violet-50 to-indigo-50 border border-violet-200 shadow-sm hover:shadow-md transition-shadow">
+              <div className="p-2 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-500">
+                <FileText className="w-4 h-4 text-white" />
+              </div>
               <div>
-                <p className="text-sm font-medium text-[var(--text-primary)]">Subi todos tus resumenes</p>
-                <p className="text-xs text-[var(--text-muted)]">Carga varios meses para ver el historial completo y mejores proyecciones</p>
+                <p className="text-sm font-semibold text-gray-800">Subi todos tus resumenes</p>
+                <p className="text-xs text-gray-600">Carga varios meses para ver el historial completo y mejores proyecciones</p>
               </div>
             </div>
-            <div className="flex items-start gap-3 p-3 rounded-xl bg-[var(--glass-bg)] border border-[var(--glass-border)]">
-              <Edit3 className="w-5 h-5 text-emerald-500 mt-0.5 flex-shrink-0" />
+            <div className="flex items-start gap-3 p-4 rounded-xl bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 shadow-sm hover:shadow-md transition-shadow">
+              <div className="p-2 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500">
+                <Edit3 className="w-4 h-4 text-white" />
+              </div>
               <div>
-                <p className="text-sm font-medium text-[var(--text-primary)]">Renombra comercios</p>
-                <p className="text-xs text-[var(--text-muted)]">Podes asignar nombres claros a comercios con nombres confusos desde Configuracion</p>
+                <p className="text-sm font-semibold text-gray-800">Renombra comercios</p>
+                <p className="text-xs text-gray-600">Podes asignar nombres claros a comercios con nombres confusos desde Configuracion</p>
               </div>
             </div>
-            <div className="flex items-start gap-3 p-3 rounded-xl bg-[var(--glass-bg)] border border-[var(--glass-border)]">
-              <CheckCircle className="w-5 h-5 text-blue-500 mt-0.5 flex-shrink-0" />
+            <div className="flex items-start gap-3 p-4 rounded-xl bg-gradient-to-r from-blue-50 to-cyan-50 border border-blue-200 shadow-sm hover:shadow-md transition-shadow">
+              <div className="p-2 rounded-lg bg-gradient-to-br from-blue-500 to-cyan-500">
+                <CheckCircle className="w-4 h-4 text-white" />
+              </div>
               <div>
-                <p className="text-sm font-medium text-[var(--text-primary)]">Tus datos son privados</p>
-                <p className="text-xs text-[var(--text-muted)]">Todo se guarda en tu navegador. No almacenamos tus resumenes en ningun servidor</p>
+                <p className="text-sm font-semibold text-gray-800">Tus datos son privados</p>
+                <p className="text-xs text-gray-600">Todo se guarda en tu navegador. No almacenamos tus resumenes en ningun servidor</p>
               </div>
             </div>
           </div>
@@ -107,26 +113,27 @@ const OnboardingWizard = ({ onComplete }) => {
   const currentStep = steps[step - 1];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      {/* Animated Background */}
-      <div className="animated-bg" />
-
-      {/* Overlay */}
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gradient-to-br from-violet-600 via-purple-600 to-indigo-700">
+      {/* Animated Background with particles effect */}
+      <div className="absolute inset-0 overflow-hidden">
+        <div className="absolute -top-40 -right-40 w-80 h-80 bg-pink-500 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-pulse" />
+        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-yellow-500 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-pulse" style={{animationDelay: '1s'}} />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-80 h-80 bg-cyan-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-pulse" style={{animationDelay: '2s'}} />
+      </div>
 
       {/* Modal */}
-      <div className="relative w-full max-w-2xl glass-card p-8 animate-fade-in-up">
+      <div className="relative w-full max-w-2xl bg-white/95 backdrop-blur-xl rounded-3xl shadow-2xl p-8 animate-fade-in-up border border-white/20">
         {/* Progress Bar */}
-        <div className="flex items-center justify-center gap-2 mb-8">
+        <div className="flex items-center justify-center gap-3 mb-8">
           {steps.map((_, idx) => (
             <div
               key={idx}
-              className={`h-2 rounded-full transition-all duration-300 ${
+              className={`h-2.5 rounded-full transition-all duration-500 ${
                 idx + 1 === step
-                  ? 'w-8 bg-gradient-to-r from-[var(--accent-1)] to-[var(--accent-2)]'
+                  ? 'w-12 bg-gradient-to-r from-violet-500 via-purple-500 to-indigo-500 shadow-lg shadow-violet-500/30'
                   : idx + 1 < step
-                    ? 'w-8 bg-emerald-500'
-                    : 'w-2 bg-[var(--glass-border)]'
+                    ? 'w-12 bg-gradient-to-r from-emerald-400 to-teal-400'
+                    : 'w-3 bg-gray-200'
               }`}
             />
           ))}
@@ -138,33 +145,33 @@ const OnboardingWizard = ({ onComplete }) => {
         </div>
 
         {/* Navigation */}
-        <div className="flex items-center justify-between mt-8 pt-6 border-t border-[var(--glass-border)]">
+        <div className="flex items-center justify-between mt-8 pt-6 border-t border-gray-100">
           <button
             onClick={() => setStep(s => Math.max(1, s - 1))}
             className={`px-6 py-2.5 rounded-xl font-medium transition-all ${
               step === 1
                 ? 'opacity-0 pointer-events-none'
-                : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--glass-bg)]'
+                : 'text-gray-500 hover:text-gray-800 hover:bg-gray-100'
             }`}
           >
             Anterior
           </button>
 
-          <span className="text-sm text-[var(--text-muted)]">
+          <span className="text-sm font-medium text-gray-400">
             Paso {step} de {steps.length}
           </span>
 
           {step < steps.length ? (
             <button
               onClick={() => setStep(s => s + 1)}
-              className="px-6 py-2.5 rounded-xl font-medium bg-gradient-to-r from-[var(--accent-1)] to-[var(--accent-2)] text-white shadow-lg hover:shadow-xl transition-all hover:scale-105"
+              className="px-8 py-3 rounded-xl font-semibold bg-gradient-to-r from-violet-500 via-purple-500 to-indigo-500 text-white shadow-lg shadow-violet-500/30 hover:shadow-xl hover:shadow-violet-500/40 transition-all hover:scale-105"
             >
               Siguiente
             </button>
           ) : (
             <button
               onClick={onComplete}
-              className="px-6 py-2.5 rounded-xl font-medium bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg hover:shadow-xl transition-all hover:scale-105"
+              className="px-8 py-3 rounded-xl font-semibold bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-lg shadow-emerald-500/30 hover:shadow-xl hover:shadow-emerald-500/40 transition-all hover:scale-105"
             >
               Comenzar
             </button>
