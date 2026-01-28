@@ -795,23 +795,21 @@ app.post('/api/v1/resumenes/upload', upload.array('pdfs'), async (req, res) => {
           anio_resumen: resultado.resumen.anio
         }));
         
-        // Aplicar reglas de usuario a movimientos dudosos
+        // Aplicar reglas de usuario a TODOS los movimientos (no solo dudosos)
         movimientosConTarjeta.forEach(mov => {
-          if (mov.es_dudoso) {
-            // Buscar si hay una regla de usuario que coincida
-            for (const regla of db.reglasUsuario) {
-              try {
-                const regex = new RegExp(regla.patron, 'i');
-                if (regex.test(mov.referencia_original)) {
-                  mov.referencia_limpia = regla.nombre_limpio;
-                  mov.es_dudoso = false;
-                  regla.veces_usado++;
-                  console.log(`[Reglas] Aplicada: "${regla.patron}" → "${regla.nombre_limpio}"`);
-                  break;
-                }
-              } catch (e) {
-                // Regex inválido, ignorar
+          // Buscar si hay una regla de usuario que coincida
+          for (const regla of db.reglasUsuario) {
+            try {
+              const regex = new RegExp(regla.patron, 'i');
+              if (regex.test(mov.referencia_original)) {
+                mov.referencia_limpia = regla.nombre_limpio;
+                mov.es_dudoso = false;
+                regla.veces_usado++;
+                console.log(`[Reglas] Aplicada: "${regla.patron}" → "${regla.nombre_limpio}"`);
+                break;
               }
+            } catch (e) {
+              // Regex inválido, ignorar
             }
           }
         });
