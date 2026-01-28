@@ -926,10 +926,12 @@ app.post('/api/v1/resumenes/upload', upload.array('pdfs'), async (req, res) => {
               total_consumos_pesos: resultado.resumen.total_consumos_pesos,
               total_consumos_dolares: resultado.resumen.total_consumos_dolares,
               impuestos: resultado.resumen.impuestos || null,
-              banco: resultado.banco || 'Desconocido',
-              tipo: resultado.tipo || 'VISA'
+              banco: resultado.resumen?.banco || resultado.tarjeta?.banco || 'Desconocido',
+              tipo: resultado.resumen?.tipo || resultado.tarjeta?.tipo || 'VISA'
             },
-            movimientos: movimientosConTarjeta
+            movimientos: movimientosConTarjeta,
+            banco: resultado.resumen?.banco || resultado.tarjeta?.banco || 'Desconocido',
+            tipo: resultado.resumen?.tipo || resultado.tarjeta?.tipo || 'VISA'
           }
         });
 

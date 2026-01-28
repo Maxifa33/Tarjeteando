@@ -162,18 +162,7 @@ class PDFParserService {
     const esUala = /UAL[AÁ]/i.test(textoUpper);
     const esMercadoPago = /MERCADO\s*PAGO/i.test(textoUpper);
 
-    // Determinar el tipo de tarjeta (sin default - debe detectarse explícitamente)
-    let tipo = null;
-    if (esAmex) tipo = 'AMEX';
-    else if (esMastercard) tipo = 'MASTERCARD';
-    else if (esCabal) tipo = 'CABAL';
-    else if (esNaranja) tipo = 'NARANJA';
-    else if (esVisa) tipo = 'VISA';
-
-    // Si no se detectó tipo de tarjeta pero sí banco, usar genérico
-    if (!tipo && banco) tipo = 'Tarjeta';
-
-    // Determinar el banco
+    // Determinar el banco primero
     let banco = null;
     if (esGalicia) banco = 'Galicia';
     else if (esBBVA) banco = 'BBVA';
@@ -189,6 +178,17 @@ class PDFParserService {
     else if (esBrubank) banco = 'Brubank';
     else if (esUala) banco = 'Ualá';
     else if (esMercadoPago) banco = 'Mercado Pago';
+
+    // Determinar el tipo de tarjeta (sin default - debe detectarse explícitamente)
+    let tipo = null;
+    if (esAmex) tipo = 'AMEX';
+    else if (esMastercard) tipo = 'MASTERCARD';
+    else if (esCabal) tipo = 'CABAL';
+    else if (esNaranja) tipo = 'NARANJA';
+    else if (esVisa) tipo = 'VISA';
+
+    // Si no se detectó tipo de tarjeta pero sí banco, usar genérico
+    if (!tipo && banco) tipo = 'Tarjeta';
 
     // Si detectamos al menos tipo de tarjeta O banco, devolver resultado
     if (banco) {
