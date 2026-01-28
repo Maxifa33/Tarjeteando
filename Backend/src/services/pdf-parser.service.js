@@ -1384,6 +1384,13 @@ class PDFParserService {
       { patron: 'um\\s*argentina|urquiza\\s*motos', reemplazo: 'Urquiza Motos' },
       { patron: 'merpago.*gaonamotos', reemplazo: 'Gaona Motos (Mercado Pago)' },
       
+      // === PEAJES Y AUTOPISTAS (antes de Mercado Pago genérico) ===
+      { patron: 'merpago.*ausol|ausol', reemplazo: 'Autopistas del Sol (Peaje)' },
+      { patron: 'merpago.*ausa|ausa', reemplazo: 'AUSA (Peaje)' },
+      { patron: 'merpago.*corredoresv|corredores.*viales', reemplazo: 'Corredores Viales (Peaje)' },
+      { patron: 'merpago.*aubasa|aubasa', reemplazo: 'AUBASA (Peaje)' },
+      { patron: 'coviales|corredor.*vial', reemplazo: 'Corredores Viales (Peaje)' },
+
       // === MERCADO PAGO (genéricos al final) ===
       { patron: 'merpago.*tiendabike', reemplazo: 'Tienda Bike (Mercado Pago)' },
       { patron: 'merpago.*brth', reemplazo: 'BRTH (Mercado Pago)' },

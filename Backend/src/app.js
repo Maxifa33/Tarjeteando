@@ -500,17 +500,26 @@ app.get('/api/v1/reglas', (req, res) => {
 
 // Crear nueva regla de usuario
 app.post('/api/v1/reglas', (req, res) => {
-  const { patron, nombre_limpio, referencia_original } = req.body;
-  
+  const { patron, nombre_limpio, referencia_original, es_regex } = req.body;
+
   if (!nombre_limpio) {
     return res.status(400).json({
       success: false,
       error: { message: 'nombre_limpio es requerido' }
     });
   }
-  
+
+  // Función para escapar caracteres especiales de regex
+  const escaparRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
   // Generar patrón a partir de la referencia original si no se proporciona
-  const patronFinal = patron || generarPatronDesdeReferencia(referencia_original || nombre_limpio);
+  let patronFinal;
+  if (patron) {
+    // Si es_regex es true, usar el patrón tal cual; si no, escapar caracteres especiales
+    patronFinal = es_regex ? patron : escaparRegex(patron);
+  } else {
+    patronFinal = generarPatronDesdeReferencia(referencia_original || nombre_limpio);
+  }
   
   // Verificar si ya existe una regla con este patrón
   const existente = db.reglasUsuario.find(r => r.patron.toLowerCase() === patronFinal.toLowerCase());
@@ -532,12 +541,12 @@ app.post('/api/v1/reglas', (req, res) => {
   db.reglasUsuario.push(nuevaRegla);
   guardarReglasUsuario();
   
-  // Aplicar la regla a movimientos existentes con el mismo patrón
+  // Aplicar la regla a TODOS los movimientos existentes con el mismo patrón
   const regex = new RegExp(patronFinal, 'i');
   let actualizados = 0;
   db.movimientos.forEach(mov => {
-    if (regex.test(mov.referencia_original) && mov.es_dudoso) {
-      mov.referencia_limpia = nombre_limpio;
+    if (regex.test(mov.referencia_original)) {
+      mov.referencia_limpia = nombre_limpio.trim();
       mov.es_dudoso = false;
       actualizados++;
     }
