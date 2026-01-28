@@ -713,11 +713,24 @@ app.post('/api/v1/resumenes/upload', upload.array('pdfs'), async (req, res) => {
         } catch (parseError) {
           // Si hay error y tenemos Vision disponible, intentar con eso
           if (visionParser) {
-            console.log('[Parser] Error en parser tradicional, usando Vision...');
+            // Si el error indica explícitamente usar Vision o es cualquier otro error
+            if (parseError.message.includes('USAR_VISION') || parseError.message.includes('No se pudo detectar')) {
+              console.log('[Parser] Tarjeta no reconocida, usando Vision API para análisis inteligente...');
+            } else {
+              console.log('[Parser] Error en parser tradicional: ' + parseError.message);
+              console.log('[Parser] Intentando con Vision API...');
+            }
             resultado = await visionParser.procesarArchivo(file.buffer, file.originalname, file.mimetype);
             metodoUsado = 'vision';
+
+            // Si Vision indica usar parser tradicional pero ya falló, mostrar error claro
+            if (resultado.usarParserTradicional) {
+              resultado = { exito: false, error: 'No se pudo extraer información del PDF. Formato no reconocido.' };
+            }
           } else {
-            resultado = { exito: false, error: parseError.message };
+            // Sin Vision disponible, dar error más descriptivo
+            const errorMsg = parseError.message.replace('USAR_VISION: ', '');
+            resultado = { exito: false, error: errorMsg + '. Configura ANTHROPIC_API_KEY para habilitar el análisis inteligente.' };
           }
         }
       }

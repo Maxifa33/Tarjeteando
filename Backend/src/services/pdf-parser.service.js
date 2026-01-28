@@ -99,20 +99,38 @@ class PDFParserService {
   detectarFormato(texto) {
     const textoUpper = texto.toUpperCase();
 
+    // Galicia
     if (textoUpper.includes('MASTERCARD') && textoUpper.includes('GALICIA')) {
       return 'GALICIA_MASTERCARD';
     }
-
     if (textoUpper.includes('VISA') && textoUpper.includes('GALICIA')) {
       return 'GALICIA_VISA';
     }
 
-    if ((textoUpper.includes('BBVA') || textoUpper.includes('BANCO BBVA')) && textoUpper.includes('VISA')) {
+    // BBVA
+    if ((textoUpper.includes('BBVA') || textoUpper.includes('BANCO BBVA'))) {
       return 'BBVA_VISA';
     }
 
-    if ((textoUpper.includes('SANTANDER') || textoUpper.includes('SANTANDER RIO')) && textoUpper.includes('VISA')) {
+    // Santander (VISA, Mastercard o AMEX)
+    if (textoUpper.includes('SANTANDER') || textoUpper.includes('SANTANDER RIO')) {
+      if (textoUpper.includes('AMERICAN EXPRESS') || textoUpper.includes('AMEX')) {
+        return 'SANTANDER_AMEX';
+      }
+      if (textoUpper.includes('MASTERCARD')) {
+        return 'SANTANDER_MASTERCARD';
+      }
       return 'SANTANDER_VISA';
+    }
+
+    // HSBC
+    if (textoUpper.includes('HSBC')) {
+      return 'HSBC_GENERIC';
+    }
+
+    // ICBC
+    if (textoUpper.includes('ICBC')) {
+      return 'ICBC_GENERIC';
     }
 
     return 'DESCONOCIDO';
@@ -121,41 +139,67 @@ class PDFParserService {
   detectarTarjeta(texto) {
     const textoUpper = texto.toUpperCase();
 
+    // Detectar tipo de tarjeta
     const esVisa = /VISA/i.test(textoUpper);
     const esMastercard = /MASTERCARD/i.test(textoUpper);
+    const esAmex = /AMERICAN\s*EXPRESS|AMEX/i.test(textoUpper);
+    const esCabal = /CABAL/i.test(textoUpper);
+    const esNaranja = /NARANJA/i.test(textoUpper);
+
+    // Detectar banco
     const esGalicia = /GALICIA|BANCO\s+GALICIA/i.test(textoUpper);
     const esBBVA = /BBVA|BANCO\s+BBVA/i.test(textoUpper);
-
-    if (esVisa && esGalicia) {
-      return { id: 1, nombre: 'VISA Galicia', tipo: 'VISA', banco: 'Galicia' };
-    } else if (esMastercard && esGalicia) {
-      return { id: 2, nombre: 'Mastercard Galicia', tipo: 'MASTERCARD', banco: 'Galicia' };
-    } else if (esVisa && esBBVA) {
-      return { id: 3, nombre: 'VISA BBVA', tipo: 'VISA', banco: 'BBVA' };
-    }
-
-    const esSantander = /SANTANDER/i.test(textoUpper);
-    if (esVisa && esSantander) {
-      return { id: 4, nombre: 'VISA Santander', tipo: 'VISA', banco: 'Santander' };
-    }
-
-    // Macro: buscar "MACRO" o "Sucursal.*CAMPANA" o patrones típicos de Macro
+    const esSantander = /SANTANDER|SANTANDER\s*R[IÍ]O/i.test(textoUpper);
     const esMacro = /MACRO|BANCO\s+MACRO|Sucursal.*CAMPANA|CAMPANA.*CUIT/i.test(textoUpper);
-    if (esVisa && esMacro) {
-      return { id: 5, nombre: 'VISA Macro', tipo: 'VISA', banco: 'Macro' };
-    }
-    if (esMastercard && esMacro) {
-      return { id: 6, nombre: 'Mastercard Macro', tipo: 'MASTERCARD', banco: 'Macro' };
-    }
-    // Si detectamos Macro sin tipo de tarjeta específico, asumir VISA (más común)
-    if (esMacro && !esVisa && !esMastercard) {
-      // Buscar indicadores en el texto
-      if (/TARJETA\s+\d{4}.*Total\s+Consumos/i.test(textoUpper)) {
-        return { id: 5, nombre: 'VISA Macro', tipo: 'VISA', banco: 'Macro' };
-      }
+    const esHSBC = /HSBC/i.test(textoUpper);
+    const esICBC = /ICBC/i.test(textoUpper);
+    const esCiudad = /CIUDAD|BANCO\s+CIUDAD/i.test(textoUpper);
+    const esNacion = /NACI[OÓ]N|BANCO\s+NACI[OÓ]N/i.test(textoUpper);
+    const esProvincia = /PROVINCIA|BANCO\s+PROVINCIA/i.test(textoUpper);
+    const esPatagonia = /PATAGONIA/i.test(textoUpper);
+    const esSupervielle = /SUPERVIELLE/i.test(textoUpper);
+    const esBrubank = /BRUBANK/i.test(textoUpper);
+    const esUala = /UAL[AÁ]/i.test(textoUpper);
+    const esMercadoPago = /MERCADO\s*PAGO/i.test(textoUpper);
+
+    // Determinar el tipo de tarjeta
+    let tipo = 'VISA'; // default
+    if (esAmex) tipo = 'AMEX';
+    else if (esMastercard) tipo = 'MASTERCARD';
+    else if (esCabal) tipo = 'CABAL';
+    else if (esNaranja) tipo = 'NARANJA';
+    else if (esVisa) tipo = 'VISA';
+
+    // Determinar el banco
+    let banco = null;
+    if (esGalicia) banco = 'Galicia';
+    else if (esBBVA) banco = 'BBVA';
+    else if (esSantander) banco = 'Santander';
+    else if (esMacro) banco = 'Macro';
+    else if (esHSBC) banco = 'HSBC';
+    else if (esICBC) banco = 'ICBC';
+    else if (esCiudad) banco = 'Ciudad';
+    else if (esNacion) banco = 'Nación';
+    else if (esProvincia) banco = 'Provincia';
+    else if (esPatagonia) banco = 'Patagonia';
+    else if (esSupervielle) banco = 'Supervielle';
+    else if (esBrubank) banco = 'Brubank';
+    else if (esUala) banco = 'Ualá';
+    else if (esMercadoPago) banco = 'Mercado Pago';
+
+    // Si detectamos al menos tipo de tarjeta O banco, devolver resultado
+    if (banco) {
+      const nombre = `${tipo} ${banco}`;
+      console.log(`[Parser] Tarjeta detectada: ${nombre}`);
+      return { id: 0, nombre, tipo, banco };
     }
 
-    throw new Error('No se pudo detectar el tipo de tarjeta del PDF');
+    // Si solo detectamos tipo de tarjeta sin banco, lanzar error para usar Vision
+    if (esVisa || esMastercard || esAmex || esCabal || esNaranja) {
+      throw new Error(`USAR_VISION: Se detectó ${tipo} pero no se pudo identificar el banco`);
+    }
+
+    throw new Error('USAR_VISION: No se pudo detectar el tipo de tarjeta del PDF');
   }
 
   extraerMetadatos(lineas, tarjeta, textoCompleto) {
