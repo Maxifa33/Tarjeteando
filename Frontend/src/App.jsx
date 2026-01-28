@@ -590,7 +590,24 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
   const handleAddRegla = async () => {
     if (!newRegla.patron || !newRegla.nombre_limpio) return;
     try {
+      // Guardar en localStorage
       storage.saveRegla(newRegla);
+
+      // También enviar al backend para que se aplique al procesar PDFs
+      try {
+        await fetch(`${API_BASE}/reglas`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            patron: newRegla.patron,
+            nombre_limpio: newRegla.nombre_limpio
+          })
+        });
+        console.log('[Reglas] Sincronizada con backend:', newRegla.patron);
+      } catch (backendError) {
+        console.warn('[Reglas] No se pudo sincronizar con backend:', backendError);
+      }
+
       setNewRegla({ patron: '', nombre_limpio: '' });
       onRefreshData?.();
     } catch (e) { console.error('Error agregando regla:', e); }
@@ -598,7 +615,22 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
 
   const handleDeleteRegla = async (id) => {
     try {
+      // Obtener el patrón antes de eliminar para buscar en backend
+      const reglas = storage.getReglas();
+      const regla = reglas.find(r => r.id === id);
+
       storage.deleteRegla(id);
+
+      // También eliminar del backend si existe
+      if (regla) {
+        try {
+          await fetch(`${API_BASE}/reglas/${id}`, { method: 'DELETE' });
+          console.log('[Reglas] Eliminada del backend:', id);
+        } catch (backendError) {
+          console.warn('[Reglas] No se pudo eliminar del backend:', backendError);
+        }
+      }
+
       onRefreshData?.();
     } catch (e) { console.error('Error eliminando regla:', e); }
   };
