@@ -162,13 +162,16 @@ class PDFParserService {
     const esUala = /UAL[AÁ]/i.test(textoUpper);
     const esMercadoPago = /MERCADO\s*PAGO/i.test(textoUpper);
 
-    // Determinar el tipo de tarjeta
-    let tipo = 'VISA'; // default
+    // Determinar el tipo de tarjeta (sin default - debe detectarse explícitamente)
+    let tipo = null;
     if (esAmex) tipo = 'AMEX';
     else if (esMastercard) tipo = 'MASTERCARD';
     else if (esCabal) tipo = 'CABAL';
     else if (esNaranja) tipo = 'NARANJA';
     else if (esVisa) tipo = 'VISA';
+
+    // Si no se detectó tipo de tarjeta pero sí banco, usar genérico
+    if (!tipo && banco) tipo = 'Tarjeta';
 
     // Determinar el banco
     let banco = null;
@@ -588,7 +591,9 @@ class PDFParserService {
     if (this.formatoDetectado === 'BBVA_VISA') {
       return this.extraerMovimientosBBVA(lineas);
     }
-    if (this.formatoDetectado === 'SANTANDER_VISA') {
+    if (this.formatoDetectado === 'SANTANDER_VISA' ||
+        this.formatoDetectado === 'SANTANDER_AMEX' ||
+        this.formatoDetectado === 'SANTANDER_MASTERCARD') {
       return this.extraerMovimientosSantander(lineas);
     }
     return [];
@@ -830,7 +835,7 @@ class PDFParserService {
       const linea = lineas[i].trim();
 
       // Ignorar líneas de encabezado, totales e impuestos
-      if (/^Santander|^RESUMEN|^VISA|^Sucursal|^Grupo|^Cuenta|^Fecha.*Comprobante|^EL PRESENTE|^SALDO|^PAGO|^CAMPANA|^SUPERCLUB|^Le recordamos|^IVA:|^RAWSON|^PROV|^Cierre|^Prox|^LIMITES|^Tarjeta.*Total|^IMPUESTO|^IIBB|^IVA RG|^TNA|^\s*\(|^_+$/i.test(linea)) {
+      if (/^Santander|^RESUMEN|^VISA|^AMERICAN|^Sucursal|^Grupo|^Cuenta|^Fecha.*Comprobante|^EL PRESENTE|^SALDO|^PAGO|^CAMPANA|^SUPERCLUB|^Le recordamos|^IVA:|^RAWSON|^PROV|^Cierre|^Prox|^LIMITES|^Tarjeta.*Total|^IMPUESTO|^IIBB|^IVA RG|^TNA|^CFTA|^Con IVA|^Sin IVA|^Express Plan|^cuotas fijas|^\s*\(|^_+$|^Si Usted|^comprobante|^Inclusion|^Los intereses|^Por la Ley|^gravados|^tarjetas de|^Sujeto al|^Cancelacion|^Condiciones|^DEBITAREMOS|USTED DISPONE|^\*No incluye|^Cart\.|^N319|^CUIT|^SUC:/i.test(linea)) {
         continue;
       }
 
@@ -947,14 +952,18 @@ class PDFParserService {
       }
     }
 
+    // Limpiar números de referencia AMEX largos (ej: 135205059043)
+    referencia = referencia.replace(/\s+\d{10,15}$/, '').trim();
+    referencia = referencia.replace(/\s+\d{10,15}\s+/, ' ').trim();
+
     // Limpiar referencia
     referencia = this.limpiarReferenciaBasica(referencia);
 
     // Ignorar si no hay monto o referencia
     if (referencia.length === 0 || (montoPesos === 0 && !montoDolares)) return null;
 
-    // Ignorar pagos
-    if (/^SU PAGO/i.test(referencia)) return null;
+    // Ignorar pagos y líneas de saldo
+    if (/^SU PAGO|^SALDO ANTERIOR/i.test(referencia)) return null;
 
     return {
       fecha_compra: `${anio}-${mes}-${dia}`,
