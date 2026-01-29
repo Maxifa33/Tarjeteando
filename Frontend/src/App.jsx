@@ -477,7 +477,6 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
   const tabs = [
     { id: 'tarjetas', label: 'Tarjetas', icon: CreditCard },
     { id: 'preferencias', label: 'Preferencias', icon: Settings },
-    { id: 'reglas', label: 'Reglas', icon: Tag, badge: pendientes.length },
     { id: 'alertas', label: 'Alertas', icon: Bell },
     { id: 'datos', label: 'Datos', icon: Download },
     { id: 'temas', label: 'Temas', icon: Sun },
@@ -891,177 +890,6 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
               </div>
             )}
 
-            {/* Reglas de limpieza */}
-            {activeTab === 'reglas' && (
-              <div className="space-y-6">
-                <h3 className="text-lg font-semibold" style={{ color: theme === 'dark' ? '#f5f5f5' : '#1f2937' }}>Reglas de Limpieza</h3>
-
-                {/* Pendientes por resolver */}
-                {pendientes.length > 0 && (
-                  <div className="p-4 rounded-xl border-2 border-amber-500/30" style={{ backgroundColor: theme === 'dark' ? '#374151' : '#fef3c7' }}>
-                    <div className="flex items-center gap-2 mb-4">
-                      <AlertCircle className="w-5 h-5 text-amber-500" />
-                      <p className="font-medium" style={{ color: theme === 'dark' ? '#fbbf24' : '#92400e' }}>
-                        Nombres pendientes de resolver ({pendientes.length})
-                      </p>
-                    </div>
-                    <div className="space-y-3 max-h-64 overflow-y-auto">
-                      {pendientes.map(p => (
-                        <div key={p.id} className="p-3 rounded-lg" style={{ backgroundColor: theme === 'dark' ? '#1f2937' : '#ffffff' }}>
-                          {editingPendiente === p.id ? (
-                            <div className="space-y-2">
-                              <p className="text-xs" style={{ color: theme === 'dark' ? '#9ca3af' : '#6b7280' }}>
-                                Original: {p.referencia_original}
-                              </p>
-                              <input
-                                type="text"
-                                value={pendienteNombreLimpio}
-                                onChange={(e) => setPendienteNombreLimpio(e.target.value)}
-                                placeholder="Nombre limpio..."
-                                className="w-full px-3 py-2 rounded-lg border text-sm"
-                                style={{
-                                  backgroundColor: theme === 'dark' ? '#374151' : '#f3f4f6',
-                                  borderColor: theme === 'dark' ? '#4b5563' : '#d1d5db',
-                                  color: theme === 'dark' ? '#f5f5f5' : '#1f2937'
-                                }}
-                                autoFocus
-                              />
-                              <div className="flex gap-2">
-                                <button
-                                  onClick={() => {
-                                    if (pendienteNombreLimpio.trim()) {
-                                      // Crear regla con el patrón y nombre limpio
-                                      const patron = p.referencia_original.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').substring(0, 30);
-                                      storage.saveRegla({ patron, nombre_limpio: pendienteNombreLimpio.trim() });
-                                      // Marcar pendiente como resuelto
-                                      onResolvePendiente?.(p.id, p.refNorm);
-                                      setEditingPendiente(null);
-                                      setPendienteNombreLimpio('');
-                                    }
-                                  }}
-                                  disabled={!pendienteNombreLimpio.trim()}
-                                  className="px-3 py-1.5 rounded-lg bg-emerald-500 text-white text-sm font-medium
-                                             hover:bg-emerald-600 disabled:opacity-50 transition-colors"
-                                >
-                                  Guardar
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    setEditingPendiente(null);
-                                    setPendienteNombreLimpio('');
-                                  }}
-                                  className="px-3 py-1.5 rounded-lg text-sm"
-                                  style={{ backgroundColor: theme === 'dark' ? '#4b5563' : '#d1d5db', color: theme === 'dark' ? '#f5f5f5' : '#374151' }}
-                                >
-                                  Cancelar
-                                </button>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="flex items-center justify-between">
-                              <div className="flex-1 min-w-0">
-                                <p className="font-medium truncate" style={{ color: theme === 'dark' ? '#f5f5f5' : '#1f2937' }}>
-                                  {p.referencia_original}
-                                </p>
-                                {p.sugerencias && p.sugerencias.length > 0 && (
-                                  <div className="flex gap-1 mt-1 flex-wrap">
-                                    {p.sugerencias.slice(0, 3).map((s, i) => (
-                                      <button
-                                        key={i}
-                                        onClick={() => {
-                                          setEditingPendiente(p.id);
-                                          setPendienteNombreLimpio(s);
-                                        }}
-                                        className="text-xs px-2 py-0.5 rounded bg-violet-500/20 text-violet-500 hover:bg-violet-500/30 transition-colors"
-                                      >
-                                        {s}
-                                      </button>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                              <button
-                                onClick={() => {
-                                  setEditingPendiente(p.id);
-                                  setPendienteNombreLimpio(p.sugerencias?.[0] || '');
-                                }}
-                                className="ml-2 p-2 rounded-lg bg-emerald-500/20 text-emerald-500 hover:bg-emerald-500/30 transition-colors"
-                                title="Resolver"
-                              >
-                                <CheckCircle className="w-4 h-4" />
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Nueva regla */}
-                <div className="p-4 rounded-xl space-y-3" style={{ backgroundColor: theme === 'dark' ? '#374151' : '#f3f4f6' }}>
-                  <p className="text-sm font-medium" style={{ color: theme === 'dark' ? '#d1d5db' : '#374151' }}>Agregar nueva regla</p>
-                  <div className="grid grid-cols-2 gap-3">
-                    <input
-                      type="text"
-                      placeholder="Patrón (ej: MERPAGO*)"
-                      value={newRegla.patron}
-                      onChange={(e) => setNewRegla({...newRegla, patron: e.target.value})}
-                      className="px-3 py-2 rounded-lg border text-sm"
-                      style={{
-                        backgroundColor: theme === 'dark' ? '#1f2937' : '#ffffff',
-                        borderColor: theme === 'dark' ? '#4b5563' : '#d1d5db',
-                        color: theme === 'dark' ? '#f5f5f5' : '#1f2937'
-                      }}
-                    />
-                    <input
-                      type="text"
-                      placeholder="Nombre limpio (ej: Mercado Pago)"
-                      value={newRegla.nombre_limpio}
-                      onChange={(e) => setNewRegla({...newRegla, nombre_limpio: e.target.value})}
-                      className="px-3 py-2 rounded-lg border text-sm"
-                      style={{
-                        backgroundColor: theme === 'dark' ? '#1f2937' : '#ffffff',
-                        borderColor: theme === 'dark' ? '#4b5563' : '#d1d5db',
-                        color: theme === 'dark' ? '#f5f5f5' : '#1f2937'
-                      }}
-                    />
-                  </div>
-                  <button
-                    onClick={handleAddRegla}
-                    disabled={!newRegla.patron || !newRegla.nombre_limpio}
-                    className="px-4 py-2 rounded-lg bg-violet-500 text-white text-sm font-medium
-                               hover:bg-violet-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  >
-                    <Plus className="w-4 h-4 inline mr-2" />
-                    Agregar Regla
-                  </button>
-                </div>
-
-                {/* Lista de reglas */}
-                <div className="space-y-3">
-                  {reglas.map(r => (
-                    <div key={r.id} className="flex items-center justify-between p-4 rounded-xl" style={{ backgroundColor: theme === 'dark' ? '#374151' : '#f3f4f6' }}>
-                      <div>
-                        <code className="text-sm text-violet-500">{r.patron}</code>
-                        <p style={{ color: theme === 'dark' ? '#f5f5f5' : '#1f2937' }}>→ {r.nombre_limpio}</p>
-                        <p className="text-xs" style={{ color: theme === 'dark' ? '#9ca3af' : '#6b7280' }}>{r.veces_usado || 0} usos</p>
-                      </div>
-                      <button
-                        onClick={() => handleDeleteRegla(r.id)}
-                        className="p-2 rounded-lg hover:bg-red-100 transition-colors"
-                      >
-                        <XCircle className="w-4 h-4 text-red-500" />
-                      </button>
-                    </div>
-                  ))}
-                  {reglas.length === 0 && (
-                    <p className="text-center py-8" style={{ color: theme === 'dark' ? '#9ca3af' : '#6b7280' }}>No hay reglas personalizadas</p>
-                  )}
-                </div>
-              </div>
-            )}
-
             {/* Alertas */}
             {activeTab === 'alertas' && (
               <div className="space-y-6">
@@ -1307,7 +1135,50 @@ const App = () => {
       console.log('No se pudo guardar en backend:', e);
     }
   };
-  
+
+  // Función para guardar edición de descripción de movimiento
+  // Guarda como regla local y aplica a todos los movimientos con la misma referencia_original
+  const guardarEdicionDescripcion = async (referenciaOriginal, nombreLimpio) => {
+    console.log('[App] Guardando edición:', referenciaOriginal, '→', nombreLimpio);
+
+    // 1. Guardar como regla local en storage
+    const regla = {
+      patron: referenciaOriginal,
+      nombre_limpio: nombreLimpio,
+      es_exacta: true, // Marca que es coincidencia exacta, no regex
+      fecha_creacion: new Date().toISOString()
+    };
+    storage.saveRegla(regla);
+
+    // 2. Aplicar a todos los movimientos locales con la misma referencia_original
+    const movimientosActualizados = movimientos.map(m => {
+      if (m.referencia_original === referenciaOriginal) {
+        return { ...m, referencia_limpia: nombreLimpio };
+      }
+      return m;
+    });
+    setMovimientos(movimientosActualizados);
+
+    // 3. Actualizar también en localStorage
+    storage.setItem('tarjetas_movimientos', movimientosActualizados);
+
+    // 4. Sincronizar con backend para futuras importaciones
+    try {
+      await fetch(`${API_BASE}/reglas`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          patron: referenciaOriginal,
+          nombre_limpio: nombreLimpio,
+          referencia_original: referenciaOriginal
+        })
+      });
+      console.log('[App] Regla sincronizada con backend');
+    } catch (e) {
+      console.log('[App] No se pudo sincronizar con backend:', e);
+    }
+  };
+
   // Theme toggle
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -1352,8 +1223,34 @@ const App = () => {
       // Leer datos de localStorage
       console.log('[App] Leyendo storage...');
       const resumenesData = storage.getResumenes();
-      const movimientosData = storage.getMovimientos();
+      let movimientosData = storage.getMovimientos();
       let tarjetasData = storage.getTarjetas();
+      const reglasLocales = storage.getReglas();
+
+      // Aplicar reglas locales a los movimientos
+      if (reglasLocales.length > 0) {
+        movimientosData = movimientosData.map(m => {
+          // Buscar si hay una regla que coincida con la referencia_original
+          const regla = reglasLocales.find(r => {
+            if (r.es_exacta) {
+              // Coincidencia exacta
+              return r.patron === m.referencia_original;
+            } else {
+              // Coincidencia por regex/patrón
+              try {
+                const regex = new RegExp(r.patron, 'i');
+                return regex.test(m.referencia_original);
+              } catch {
+                return r.patron.toLowerCase() === m.referencia_original.toLowerCase();
+              }
+            }
+          });
+          if (regla) {
+            return { ...m, referencia_limpia: regla.nombre_limpio };
+          }
+          return m;
+        });
+      }
 
       // Corregir tarjetas con banco Desconocido
       let tarjetasActualizadas = false;
@@ -1370,7 +1267,6 @@ const App = () => {
       if (tarjetasActualizadas) {
         localStorage.setItem('tarjetas_lista', JSON.stringify(tarjetasData));
       }
-      const reglasData = storage.getReglas();
       const estadisticas = storage.getEstadisticas();
       const evolucion = storage.getEvolucionMensual(6);
       const proyeccionData = storage.getProyeccionCuotas(6);
@@ -1532,7 +1428,7 @@ const App = () => {
         }
       });
       setPendientes(pendientesUnicos);
-      setReglas(reglasData);
+      setReglas(reglasLocales);
 
       // Calcular proyección de cuotas desde cuotasActivasData (datos correctos del último resumen)
       const ahora = new Date();
@@ -1855,6 +1751,7 @@ const App = () => {
               tarjetas={tarjetas}
               searchQuery={searchQuery}
               formatCurrency={formatCurrency}
+              onEditarDescripcion={guardarEdicionDescripcion}
             />
           ) : activeView === 'cuotas' ? (
             <CuotasView
@@ -2354,9 +2251,13 @@ const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [
 };
 
 // Movimientos View con paginación por mes y filtros
-const MovimientosView = ({ movimientos, tarjetas = [], searchQuery, formatCurrency }) => {
+const MovimientosView = ({ movimientos, tarjetas = [], searchQuery, formatCurrency, onEditarDescripcion }) => {
   const [mesActual, setMesActual] = useState(0);
   const [showFilters, setShowFilters] = useState(false);
+
+  // Estado para edición inline
+  const [editandoId, setEditandoId] = useState(null);
+  const [nuevoNombre, setNuevoNombre] = useState('');
 
   // Estados de filtros
   const [filtroTarjeta, setFiltroTarjeta] = useState('');
@@ -2448,6 +2349,21 @@ const MovimientosView = ({ movimientos, tarjetas = [], searchQuery, formatCurren
     if (!cuotaTexto) return false;
     const match = cuotaTexto.match(/(\d+)\/(\d+)/);
     return match && match[1] === match[2];
+  };
+
+  // Guardar edición de descripción
+  const handleGuardarEdicion = (mov) => {
+    if (nuevoNombre.trim() && nuevoNombre.trim() !== (mov.referencia_limpia || mov.referencia_original)) {
+      onEditarDescripcion?.(mov.referencia_original, nuevoNombre.trim());
+    }
+    setEditandoId(null);
+    setNuevoNombre('');
+  };
+
+  // Iniciar edición
+  const handleIniciarEdicion = (mov) => {
+    setEditandoId(mov.id);
+    setNuevoNombre(mov.referencia_limpia || mov.referencia_original);
   };
 
   return (
@@ -2614,7 +2530,48 @@ const MovimientosView = ({ movimientos, tarjetas = [], searchQuery, formatCurren
                     </span>
                   </td>
                   <td className="p-4 text-sm text-[var(--text-primary)] font-medium">
-                    {mov.referencia_limpia || mov.referencia_original}
+                    {editandoId === mov.id ? (
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={nuevoNombre}
+                          onChange={(e) => setNuevoNombre(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleGuardarEdicion(mov);
+                            if (e.key === 'Escape') { setEditandoId(null); setNuevoNombre(''); }
+                          }}
+                          autoFocus
+                          className="flex-1 px-2 py-1 rounded-lg bg-[var(--glass-bg)] border border-[var(--accent-1)]
+                                     text-[var(--text-primary)] text-sm focus:outline-none"
+                        />
+                        <button
+                          onClick={() => handleGuardarEdicion(mov)}
+                          className="p-1.5 rounded-lg bg-emerald-500/20 text-emerald-500 hover:bg-emerald-500/30"
+                          title="Guardar"
+                        >
+                          <CheckCircle className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => { setEditandoId(null); setNuevoNombre(''); }}
+                          className="p-1.5 rounded-lg bg-red-500/20 text-red-500 hover:bg-red-500/30"
+                          title="Cancelar"
+                        >
+                          <XCircle className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 group">
+                        <span>{mov.referencia_limpia || mov.referencia_original}</span>
+                        <button
+                          onClick={() => handleIniciarEdicion(mov)}
+                          className="opacity-0 group-hover:opacity-100 p-1 rounded-lg hover:bg-[var(--glass-bg)]
+                                     text-[var(--text-muted)] hover:text-[var(--accent-1)] transition-all"
+                          title="Editar descripcion"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
                   </td>
                   <td className="p-4 text-sm">
                     {mov.cuota_texto ? (

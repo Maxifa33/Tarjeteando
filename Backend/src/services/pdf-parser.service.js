@@ -1190,24 +1190,57 @@ class PDFParserService {
     limpio = limpio.replace(/\s*\([A-Z0-9]+\)\s*$/i, '');
     limpio = limpio.replace(/[*\/\\#]/g, ' ');
     limpio = limpio.replace(/\s+/g, ' ').trim();
-    
+
     const reglas = this.cargarReglasLimpieza();
+    let aplicoRegla = false;
+
     for (const regla of reglas) {
       const regex = new RegExp(regla.patron, 'i');
       if (regex.test(limpio)) {
         limpio = regla.reemplazo;
+        aplicoRegla = true;
         break;
       }
     }
-    
+
+    // Si no se aplicó ninguna regla y es MERPAGO, extraer el nombre del comercio
+    if (!aplicoRegla && /^merpago|^mercpago/i.test(texto)) {
+      limpio = this.extraerNombreMerpago(texto);
+    }
+
     limpio = this.capitalizar(limpio);
     const esDudoso = this.esNombreDudoso(limpio);
-    
+
     return {
       limpio,
       dudoso: esDudoso,
       sugerencias: esDudoso ? this.generarSugerencias(texto) : []
     };
+  }
+
+  // Extraer nombre del comercio de una referencia MERPAGO*COMERCIO
+  extraerNombreMerpago(texto) {
+    // Patrones comunes: MERPAGO*NOMBRE, MERCPAGO*NOMBRE, MERPAGO NOMBRE
+    const match = texto.match(/^(?:merpago|mercpago)[*\s]+(.+)$/i);
+
+    if (match && match[1]) {
+      let nombre = match[1].trim();
+
+      // Eliminar sufijos comunes de Mercado Pago
+      nombre = nombre.replace(/\s*(?:CBA|CABA|BUE|ARG|Argentina|MP|MELI)\s*$/i, '').trim();
+
+      // Eliminar códigos/números al final (ej: "AUSOL 12345")
+      nombre = nombre.replace(/\s+\d{4,}$/g, '').trim();
+
+      // Si queda algo con al menos 2 caracteres alfabéticos, usarlo
+      const letras = nombre.replace(/[^a-zA-Z]/g, '');
+      if (letras.length >= 2) {
+        return nombre + ' (Mercado Pago)';
+      }
+    }
+
+    // Fallback
+    return 'Mercado Pago';
   }
 
   esNombreDudoso(texto) {
@@ -1402,7 +1435,7 @@ class PDFParserService {
       { patron: 'merpago.*greeneat', reemplazo: 'Green Eat (Mercado Pago)' },
       { patron: 'merpago.*estacionam', reemplazo: 'Estacionamiento (Mercado Pago)' },
       { patron: 'merpago.*temu', reemplazo: 'Temu (Mercado Pago)' },
-      { patron: 'merpago.*|mercpago.*', reemplazo: 'Mercado Pago' },
+      // Nota: El catch-all de MERPAGO* se maneja en extraerNombreMerpago() para extraer el nombre del comercio
       { patron: 'mercadolibre', reemplazo: 'Mercado Libre' },
       
       // === OTROS ===
