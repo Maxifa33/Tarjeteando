@@ -441,7 +441,7 @@ const CreditCardVisual = ({ tarjeta, stats, onClick, nombrePersonalizado, onEdit
 };
 
 // Settings Modal Component - Fondo sólido y cierre al clickear fuera
-const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumenes, cuotasActivas, onRefreshData, theme, setTheme, initialTab = 'tarjetas', pendientes = [], onResolvePendiente }) => {
+const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumenes, cuotasActivas, onRefreshData, theme, setTheme, initialTab = 'tarjetas' }) => {
   const [activeTab, setActiveTab] = useState(initialTab);
 
   // Actualizar tab cuando cambia initialTab
@@ -455,9 +455,6 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
       return JSON.parse(localStorage.getItem('preferencias') || '{}');
     } catch { return {}; }
   });
-  const [newRegla, setNewRegla] = useState({ patron: '', nombre_limpio: '' });
-  const [editingPendiente, setEditingPendiente] = useState(null);
-  const [pendienteNombreLimpio, setPendienteNombreLimpio] = useState('');
   const [alertas, setAlertas] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem('alertas') || '{"vencimiento": true, "cuotaFinal": true, "diasAntes": 3}');
@@ -1077,15 +1074,8 @@ const App = () => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeView, setActiveView] = useState('dashboard');
   const [searchQuery, setSearchQuery] = useState('');
-  const [notificationsOpen, setNotificationsOpen] = useState(false);
-  const [readNotifications, setReadNotifications] = useState(new Set());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState('tarjetas');
-  const [resolvedPendientes, setResolvedPendientes] = useState(() => {
-    try {
-      return new Set(JSON.parse(localStorage.getItem('resolved_pendientes') || '[]'));
-    } catch { return new Set(); }
-  });
 
   // Onboarding state - mostrar solo si es la primera vez
   const [showOnboarding, setShowOnboarding] = useState(() => {
@@ -1107,7 +1097,6 @@ const App = () => {
   const [proyeccionCuotas, setProyeccionCuotas] = useState([]);
   const [dashboard, setDashboard] = useState(null);
   const [proyecciones, setProyecciones] = useState(null);
-  const [pendientes, setPendientes] = useState([]);
   const [reglas, setReglas] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -1405,29 +1394,6 @@ const App = () => {
         }
       });
       setProyecciones({ evolucion_mensual: evolucion });
-      // Calcular pendientes desde movimientos dudosos (excluyendo los ya resueltos)
-      const resolved = JSON.parse(localStorage.getItem('resolved_pendientes') || '[]');
-      const resolvedSet = new Set(resolved);
-      const movimientosDudosos = movimientosData.filter(m => m.es_dudoso);
-      const pendientesUnicos = [];
-      const refVistas = new Set();
-      movimientosDudosos.forEach(m => {
-        const refNorm = (m.referencia_original || '').toLowerCase().replace(/[^a-z]/g, '').substring(0, 20);
-        // Excluir si ya fue resuelto (por ID o por referencia normalizada)
-        if (resolvedSet.has(m.id) || resolvedSet.has(refNorm)) return;
-        if (!refVistas.has(refNorm)) {
-          refVistas.add(refNorm);
-          pendientesUnicos.push({
-            id: m.id,
-            referencia_original: m.referencia_original,
-            sugerencias: m.sugerencias || [],
-            tarjeta: m.tarjeta,
-            monto: m.monto_pesos || m.monto_dolares,
-            refNorm: refNorm // Guardar para usar al resolver
-          });
-        }
-      });
-      setPendientes(pendientesUnicos);
       setReglas(reglasLocales);
 
       // Calcular proyección de cuotas desde cuotasActivasData (datos correctos del último resumen)
@@ -1600,113 +1566,6 @@ const App = () => {
                 />
               </div>
               
-              {/* Notifications */}
-              <div className="relative">
-                {(() => {
-                  const unreadCount = pendientes.filter(p => !readNotifications.has(p.id)).length;
-                  return (
-                    <>
-                      <button
-                        onClick={() => setNotificationsOpen(!notificationsOpen)}
-                        className="relative p-2.5 rounded-xl bg-[var(--glass-bg)]
-                                   border border-[var(--glass-border)] hover:bg-opacity-80 transition-all"
-                      >
-                        <Bell className="w-5 h-5 text-[var(--text-secondary)]" />
-                        {unreadCount > 0 && (
-                          <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full
-                                           bg-gradient-to-r from-[var(--accent-1)] to-[var(--accent-2)]
-                                           text-white text-xs flex items-center justify-center font-bold">
-                            {unreadCount}
-                          </span>
-                        )}
-                      </button>
-
-                      {/* Dropdown de notificaciones */}
-                      {notificationsOpen && (
-                        <div className="absolute right-0 top-12 w-80 glass-card p-4 z-50 shadow-xl">
-                          <div className="flex items-center justify-between mb-3">
-                            <h4 className="font-semibold text-[var(--text-primary)]">Pendientes de resolver</h4>
-                            <button
-                              onClick={() => setNotificationsOpen(false)}
-                              className="text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-                            >
-                              <X className="w-4 h-4" />
-                            </button>
-                          </div>
-
-                          {pendientes.length === 0 ? (
-                            <p className="text-sm text-[var(--text-muted)] text-center py-4">
-                              No hay pendientes
-                            </p>
-                          ) : (
-                            <div className="space-y-2 max-h-64 overflow-y-auto">
-                              {pendientes.slice(0, 5).map((p) => {
-                                const isRead = readNotifications.has(p.id);
-                                return (
-                                  <div
-                                    key={p.id}
-                                    onClick={() => {
-                                      setReadNotifications(prev => new Set([...prev, p.id]));
-                                      setSettingsInitialTab('reglas');
-                                      setSettingsOpen(true);
-                                      setNotificationsOpen(false);
-                                    }}
-                                    className={`p-3 rounded-lg cursor-pointer transition-all
-                                               ${isRead
-                                                 ? 'bg-[var(--glass-bg)]/50 opacity-60'
-                                                 : 'bg-[var(--glass-bg)] hover:bg-opacity-80'}`}
-                                  >
-                                    <p className="text-sm font-medium text-[var(--text-primary)] truncate">
-                                      {p.referencia_original}
-                                    </p>
-                                    {p.sugerencias?.length > 0 && (
-                                      <p className="text-xs text-[var(--text-muted)] truncate">
-                                        Sugerencia: {p.sugerencias[0]}
-                                      </p>
-                                    )}
-                                  </div>
-                                );
-                              })}
-                              {pendientes.length > 5 && (
-                                <p className="text-xs text-center text-[var(--text-muted)] pt-2">
-                                  +{pendientes.length - 5} más
-                                </p>
-                              )}
-                            </div>
-                          )}
-
-                          <div className="flex gap-2 mt-3">
-                            {unreadCount > 0 && (
-                              <button
-                                onClick={() => {
-                                  setReadNotifications(new Set(pendientes.map(p => p.id)));
-                                }}
-                                className="flex-1 py-2 text-xs font-medium text-[var(--text-muted)]
-                                           hover:bg-[var(--glass-bg)] rounded-lg transition-all"
-                              >
-                                Marcar leídas
-                              </button>
-                            )}
-                            {pendientes.length > 0 && (
-                              <button
-                                onClick={() => {
-                                  setSettingsInitialTab('reglas');
-                                  setSettingsOpen(true);
-                                  setNotificationsOpen(false);
-                                }}
-                                className="flex-1 py-2 text-sm font-medium text-[var(--accent-1)]
-                                           hover:bg-[var(--glass-bg)] rounded-lg transition-all"
-                              >
-                                Resolver →
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </>
-                  );
-                })()}
-              </div>
               
               {/* Settings */}
               <button
@@ -1787,17 +1646,6 @@ const App = () => {
         theme={theme}
         setTheme={setTheme}
         initialTab={settingsInitialTab}
-        pendientes={pendientes}
-        onResolvePendiente={(id, refNorm) => {
-          // Guardar en localStorage los pendientes resueltos
-          const resolved = JSON.parse(localStorage.getItem('resolved_pendientes') || '[]');
-          if (!resolved.includes(id)) resolved.push(id);
-          if (refNorm && !resolved.includes(refNorm)) resolved.push(refNorm);
-          localStorage.setItem('resolved_pendientes', JSON.stringify(resolved));
-          // Actualizar estado local inmediatamente
-          setPendientes(prev => prev.filter(p => p.id !== id));
-          setResolvedPendientes(new Set(resolved));
-        }}
       />
     </div>
   );
