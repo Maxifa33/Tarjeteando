@@ -6,7 +6,7 @@ import {
   Sun, Moon, Bell, Settings, Search, Menu, X, DollarSign,
   PieChart, BarChart3, Wallet, ArrowUpRight, ArrowDownRight,
   FileText, Clock, CheckCircle, XCircle, Sparkles, Trophy, Filter,
-  RefreshCcw, Trash2, Download, Edit3, Plus
+  RefreshCcw, Trash2, Download, Edit3, Plus, Repeat, Shuffle
 } from 'lucide-react';
 import {
   LineChart, Line, AreaChart, Area, BarChart, Bar, PieChart as RechartsPie, Pie, Cell,
@@ -245,6 +245,107 @@ const formatMonto = (value, prefix = '$') => {
 const formatMontoDolares = (value) => {
   const num = Number(value) || 0;
   return `USD ${num.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
+// ==================== GASTOS FIJOS/VARIABLES ====================
+// Analiza movimientos para detectar gastos fijos (recurrentes mensuales con monto similar)
+// Criterio: mismo comercio aparece 3+ meses con variación de monto <= 5%
+const analizarGastosFijosVariables = (movimientos) => {
+  if (!movimientos || movimientos.length === 0) {
+    return { gastosFijos: new Set(), analisis: {} };
+  }
+
+  // Agrupar por comercio (referencia_limpia o referencia_original)
+  const porComercio = {};
+
+  movimientos.forEach(mov => {
+    const nombre = (mov.referencia_limpia || mov.referencia_original || '').toLowerCase().trim();
+    if (!nombre || nombre.length < 3) return;
+
+    // Extraer mes/año del movimiento
+    const fecha = new Date(mov.fecha_compra);
+    const mesKey = `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, '0')}`;
+    const monto = mov.monto_pesos || 0;
+
+    if (monto <= 0) return; // Ignorar devoluciones
+
+    if (!porComercio[nombre]) {
+      porComercio[nombre] = { meses: {}, montos: [] };
+    }
+
+    // Guardar el monto más alto de cada mes (por si hay múltiples cargos)
+    if (!porComercio[nombre].meses[mesKey] || porComercio[nombre].meses[mesKey] < monto) {
+      porComercio[nombre].meses[mesKey] = monto;
+    }
+  });
+
+  // Analizar cada comercio
+  const gastosFijos = new Set();
+  const analisis = {};
+
+  Object.entries(porComercio).forEach(([nombre, data]) => {
+    const mesesUnicos = Object.keys(data.meses).sort();
+    const montos = mesesUnicos.map(m => data.meses[m]);
+
+    // Necesita aparecer en al menos 3 meses (más estricto)
+    if (mesesUnicos.length < 3) {
+      analisis[nombre] = { tipo: 'variable', razon: 'menos de 3 meses', meses: mesesUnicos.length };
+      return;
+    }
+
+    // Calcular variación entre montos
+    const montoPromedio = montos.reduce((a, b) => a + b, 0) / montos.length;
+    const variacionMaxima = Math.max(...montos.map(m => Math.abs(m - montoPromedio) / montoPromedio));
+
+    // Si la variación es <= 5%, es gasto fijo (más estricto)
+    if (variacionMaxima <= 0.05) {
+      gastosFijos.add(nombre);
+      analisis[nombre] = {
+        tipo: 'fijo',
+        meses: mesesUnicos.length,
+        montoPromedio,
+        variacion: (variacionMaxima * 100).toFixed(1) + '%'
+      };
+    } else {
+      analisis[nombre] = {
+        tipo: 'variable',
+        razon: `variación ${(variacionMaxima * 100).toFixed(1)}% > 10%`,
+        meses: mesesUnicos.length
+      };
+    }
+  });
+
+  return { gastosFijos, analisis };
+};
+
+// Función para determinar si un movimiento es gasto fijo
+const esGastoFijo = (mov, gastosFijos) => {
+  if (!gastosFijos || gastosFijos.size === 0) return false;
+  const nombre = (mov.referencia_limpia || mov.referencia_original || '').toLowerCase().trim();
+  return gastosFijos.has(nombre);
+};
+
+// Calcular totales de gastos fijos y variables
+const calcularTotalesGastos = (movimientos, gastosFijos) => {
+  let totalFijos = 0;
+  let totalVariables = 0;
+  let countFijos = 0;
+  let countVariables = 0;
+
+  movimientos.forEach(mov => {
+    const monto = mov.monto_pesos || 0;
+    if (monto <= 0) return; // Ignorar devoluciones
+
+    if (esGastoFijo(mov, gastosFijos)) {
+      totalFijos += monto;
+      countFijos++;
+    } else {
+      totalVariables += monto;
+      countVariables++;
+    }
+  });
+
+  return { totalFijos, totalVariables, countFijos, countVariables };
 };
 
 // Animated Number Component
@@ -1076,6 +1177,7 @@ const App = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState('tarjetas');
+  const [filtroTipoGastoInicial, setFiltroTipoGastoInicial] = useState('');
 
   // Onboarding state - mostrar solo si es la primera vez
   const [showOnboarding, setShowOnboarding] = useState(() => {
@@ -1099,6 +1201,9 @@ const App = () => {
   const [proyecciones, setProyecciones] = useState(null);
   const [reglas, setReglas] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // Estado para gastos fijos/variables (calculado de los movimientos)
+  const [gastosFijos, setGastosFijos] = useState(new Set());
 
   // Nombres personalizados de tarjetas (guardados en localStorage)
   const [nombresTarjetas, setNombresTarjetas] = useState(() => {
@@ -1172,6 +1277,13 @@ const App = () => {
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
+
+  // Limpiar filtro de tipo de gasto cuando se cambia de vista (excepto cuando vamos a movimientos)
+  useEffect(() => {
+    if (activeView !== 'movimientos') {
+      setFiltroTipoGastoInicial('');
+    }
+  }, [activeView]);
   
   // Fetch all data from localStorage
   const fetchData = useCallback(async () => {
@@ -1368,6 +1480,10 @@ const App = () => {
       setMovimientos(movimientosData);
       setResumenes(resumenesData);
       setCuotasActivas(cuotasFormateadas);
+
+      // Analizar gastos fijos vs variables
+      const { gastosFijos: fijosSet } = analizarGastosFijosVariables(movimientosData);
+      setGastosFijos(fijosSet);
       // Calcular totales de cuotas pendientes
       const totalPendienteCuotas = cuotasFormateadas.reduce((sum, c) => {
         return sum + (c.monto_cuota * c.cuotas_restantes);
@@ -1603,6 +1719,11 @@ const App = () => {
               cuotasActivas={cuotasActivas}
               nombresTarjetas={nombresTarjetas}
               onGuardarNombre={guardarNombreTarjeta}
+              gastosFijos={gastosFijos}
+              onFiltrarMovimientos={(tipo) => {
+                setFiltroTipoGastoInicial(tipo);
+                setActiveView('movimientos');
+              }}
             />
           ) : activeView === 'movimientos' ? (
             <MovimientosView
@@ -1611,6 +1732,8 @@ const App = () => {
               searchQuery={searchQuery}
               formatCurrency={formatCurrency}
               onEditarDescripcion={guardarEdicionDescripcion}
+              gastosFijos={gastosFijos}
+              filtroTipoGastoInicial={filtroTipoGastoInicial}
             />
           ) : activeView === 'cuotas' ? (
             <CuotasView
@@ -1652,7 +1775,7 @@ const App = () => {
 };
 
 // Dashboard View
-const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [], chartColors, formatCurrency, theme, resumenes = [], onDeleteResumen, setActiveView, searchQuery = '', movimientos = [], cuotasActivas = [], nombresTarjetas = {}, onGuardarNombre }) => {
+const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [], chartColors, formatCurrency, theme, resumenes = [], onDeleteResumen, setActiveView, searchQuery = '', movimientos = [], cuotasActivas = [], nombresTarjetas = {}, onGuardarNombre, gastosFijos = new Set(), onFiltrarMovimientos }) => {
   const [showResumenes, setShowResumenes] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
 
@@ -1832,39 +1955,63 @@ const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [
       )}
 
       {/* Stats Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          icon={FileText}
-          label="Resúmenes"
-          value={dashboard.total_resumenes || 0}
-          delay={100}
-          onClick={() => setShowResumenes(true)}
-        />
-        <StatCard
-          icon={Calendar}
-          label="Cuotas Activas"
-          value={dashboard.cuotas_activas || 0}
-          delay={200}
-          onClick={() => setActiveView?.('cuotas')}
-        />
-        <StatCard
-          icon={DollarSign}
-          label="Pendiente Cuotas"
-          value={formatCurrency(dashboard.total_pendiente_cuotas || 0)}
-          trend="down"
-          trendValue="Próx. mes"
-          delay={300}
-        />
-        <StatCard
-          icon={RefreshCcw}
-          label="Reintegros"
-          value={formatCurrency(dashboard.total_reintegros || 0)}
-          delay={400}
-          onClick={() => setActiveView?.('reintegros')}
-        />
-      </div>
-      
+      {(() => {
+        // Calcular gastos fijos del último resumen de CADA tarjeta
+        // Agrupar movimientos por tarjeta y obtener el último período de cada una
+        const ultimosPeriodosPorTarjeta = {};
+        movimientos.forEach(m => {
+          const tarjeta = m.tarjeta;
+          const periodo = `${m.anio_resumen}-${String(m.mes_resumen).padStart(2, '0')}`;
+          if (!ultimosPeriodosPorTarjeta[tarjeta] || periodo > ultimosPeriodosPorTarjeta[tarjeta]) {
+            ultimosPeriodosPorTarjeta[tarjeta] = periodo;
+          }
+        });
+
+        // Filtrar movimientos que pertenecen al último período de su tarjeta
+        const movsUltimosPeriodos = movimientos.filter(m => {
+          const periodo = `${m.anio_resumen}-${String(m.mes_resumen).padStart(2, '0')}`;
+          return periodo === ultimosPeriodosPorTarjeta[m.tarjeta];
+        });
+
+        const { totalFijos } = calcularTotalesGastos(movsUltimosPeriodos, gastosFijos);
+
+        return (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <StatCard
+              icon={Repeat}
+              label="Gastos Fijos"
+              value={formatCurrency(totalFijos)}
+              delay={100}
+              onClick={() => onFiltrarMovimientos?.('fijo')}
+            />
+            <StatCard
+              icon={Calendar}
+              label="Cuotas Activas"
+              value={dashboard.cuotas_activas || 0}
+              delay={200}
+              onClick={() => setActiveView?.('cuotas')}
+            />
+            <StatCard
+              icon={DollarSign}
+              label="Pendiente Cuotas"
+              value={formatCurrency(dashboard.total_pendiente_cuotas || 0)}
+              delay={300}
+            />
+          </div>
+        );
+      })()}
+
       {/* Cards Grid */}
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-lg font-semibold text-[var(--text-primary)]">Mis Tarjetas</h3>
+        <button
+          onClick={() => setShowResumenes(true)}
+          className="text-sm text-[var(--text-muted)] hover:text-[var(--accent-1)] transition-colors flex items-center gap-1"
+        >
+          <FileText className="w-4 h-4" />
+          {dashboard.total_resumenes || 0} resúmenes cargados
+        </button>
+      </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
         {tarjetas.map((tarjeta, idx) => (
           <div 
@@ -2099,7 +2246,7 @@ const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [
 };
 
 // Movimientos View con paginación por mes y filtros
-const MovimientosView = ({ movimientos, tarjetas = [], searchQuery, formatCurrency, onEditarDescripcion }) => {
+const MovimientosView = ({ movimientos, tarjetas = [], searchQuery, formatCurrency, onEditarDescripcion, gastosFijos = new Set(), filtroTipoGastoInicial = '' }) => {
   const [mesActual, setMesActual] = useState(0);
   const [showFilters, setShowFilters] = useState(false);
 
@@ -2114,6 +2261,15 @@ const MovimientosView = ({ movimientos, tarjetas = [], searchQuery, formatCurren
   const [filtroFechaHasta, setFiltroFechaHasta] = useState('');
   const [filtroMoneda, setFiltroMoneda] = useState('');
   const [filtroCuotas, setFiltroCuotas] = useState('');
+  const [filtroTipoGasto, setFiltroTipoGasto] = useState(filtroTipoGastoInicial); // '', 'fijo', 'variable'
+
+  // Actualizar filtro si cambia el prop inicial y mostrar filtros si hay uno activo
+  useEffect(() => {
+    if (filtroTipoGastoInicial) {
+      setFiltroTipoGasto(filtroTipoGastoInicial);
+      setShowFilters(true);
+    }
+  }, [filtroTipoGastoInicial]);
 
   // Obtener opciones únicas para los filtros
   const tarjetasUnicas = [...new Set(movimientos.map(m => m.tarjeta))].sort();
@@ -2127,10 +2283,11 @@ const MovimientosView = ({ movimientos, tarjetas = [], searchQuery, formatCurren
     setFiltroFechaHasta('');
     setFiltroMoneda('');
     setFiltroCuotas('');
+    setFiltroTipoGasto('');
   };
 
   // Contar filtros activos
-  const filtrosActivos = [filtroTarjeta, filtroBanco, filtroFechaDesde, filtroFechaHasta, filtroMoneda, filtroCuotas]
+  const filtrosActivos = [filtroTarjeta, filtroBanco, filtroFechaDesde, filtroFechaHasta, filtroMoneda, filtroCuotas, filtroTipoGasto]
     .filter(Boolean).length;
 
   // Obtener meses únicos ordenados (más reciente primero)
@@ -2189,6 +2346,10 @@ const MovimientosView = ({ movimientos, tarjetas = [], searchQuery, formatCurren
     if (filtroCuotas === 'si' && !m.cuota_texto) return false;
     if (filtroCuotas === 'no' && m.cuota_texto) return false;
 
+    // Filtro por tipo de gasto (fijo/variable)
+    if (filtroTipoGasto === 'fijo' && !esGastoFijo(m, gastosFijos)) return false;
+    if (filtroTipoGasto === 'variable' && esGastoFijo(m, gastosFijos)) return false;
+
     return true;
   });
 
@@ -2243,7 +2404,7 @@ const MovimientosView = ({ movimientos, tarjetas = [], searchQuery, formatCurren
         </div>
 
         {showFilters && (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 pt-3 border-t border-[var(--glass-border)]">
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 pt-3 border-t border-[var(--glass-border)]">
             {/* Filtro por Tarjeta */}
             <div>
               <label className="block text-xs text-[var(--text-muted)] mb-1">Tarjeta</label>
@@ -2329,6 +2490,21 @@ const MovimientosView = ({ movimientos, tarjetas = [], searchQuery, formatCurren
                 <option value="no">Sin cuotas</option>
               </select>
             </div>
+
+            {/* Filtro por Tipo de Gasto */}
+            <div>
+              <label className="block text-xs text-[var(--text-muted)] mb-1">Tipo</label>
+              <select
+                value={filtroTipoGasto}
+                onChange={(e) => setFiltroTipoGasto(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)]
+                           text-[var(--text-primary)] text-sm focus:outline-none focus:border-[var(--accent-1)]"
+              >
+                <option value="">Todos</option>
+                <option value="fijo">Fijos</option>
+                <option value="variable">Variables</option>
+              </select>
+            </div>
           </div>
         )}
       </div>
@@ -2356,6 +2532,7 @@ const MovimientosView = ({ movimientos, tarjetas = [], searchQuery, formatCurren
                 <th className="text-left p-4 text-sm font-medium text-[var(--text-muted)]">Fecha</th>
                 <th className="text-left p-4 text-sm font-medium text-[var(--text-muted)]">Tarjeta</th>
                 <th className="text-left p-4 text-sm font-medium text-[var(--text-muted)]">Descripción</th>
+                <th className="text-left p-4 text-sm font-medium text-[var(--text-muted)]">Tipo</th>
                 <th className="text-left p-4 text-sm font-medium text-[var(--text-muted)]">Cuota</th>
                 <th className="text-right p-4 text-sm font-medium text-[var(--text-muted)]">Monto</th>
               </tr>
@@ -2419,6 +2596,23 @@ const MovimientosView = ({ movimientos, tarjetas = [], searchQuery, formatCurren
                           <Edit3 className="w-3.5 h-3.5" />
                         </button>
                       </div>
+                    )}
+                  </td>
+                  <td className="p-4 text-sm">
+                    {esGastoFijo(mov, gastosFijos) ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full
+                                      bg-blue-500/15 text-blue-500 text-xs font-medium border border-blue-500/30"
+                            title="Gasto fijo - aparece todos los meses con monto similar">
+                        <Repeat className="w-3 h-3" />
+                        Fijo
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full
+                                      bg-amber-500/15 text-amber-500 text-xs font-medium border border-amber-500/30"
+                            title="Gasto variable">
+                        <Shuffle className="w-3 h-3" />
+                        Variable
+                      </span>
                     )}
                   </td>
                   <td className="p-4 text-sm">

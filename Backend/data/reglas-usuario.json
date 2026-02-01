@@ -2,17 +2,17 @@
   "reglasUsuario": [
     {
       "id": 1768329624210,
-      "patron": "ABL",
+      "patron": "^ABL",
       "nombre_limpio": "Abl",
       "fecha_creacion": "2026-01-13T18:40:24.210Z",
-      "veces_usado": 13
+      "veces_usado": 28
     },
     {
       "id": 1768599233628,
       "patron": "SEGURO.*VIDA",
       "nombre_limpio": "Seguro de vida",
       "fecha_creacion": "2026-01-16T21:33:53.628Z",
-      "veces_usado": 10
+      "veces_usado": 11
     },
     {
       "id": 1767812712892,

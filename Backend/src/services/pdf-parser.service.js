@@ -699,10 +699,10 @@ class PDFParserService {
     
     if (tieneMontoEnLinea) {
       const longitudComprobante = (this.formatoDetectado === 'GALICIA_MASTERCARD') ? 5 : 6;
-      
+
       const regexCuota = new RegExp(`^(.*)\\s+(\\d{1,2})\\/(\\d{1,2})(\\d{${longitudComprobante}})([\\d.]+,\\d{2})$`);
       let cuotaMatch = resto.match(regexCuota);
-      
+
       if (cuotaMatch) {
         referencia = cuotaMatch[1].trim();
         cuotaTexto = cuotaMatch[2] + '/' + cuotaMatch[3];
@@ -765,55 +765,60 @@ class PDFParserService {
 
   separarComprobanteYMonto(texto, formato) {
     const longitudComprobante = (formato === 'GALICIA_MASTERCARD') ? 5 : 6;
-    
+
     const posicionComa = texto.lastIndexOf(',');
     if (posicionComa === -1 || posicionComa < 2) {
       return { monto: 0, referencia: texto };
     }
-    
+
     const decimales = texto.substring(posicionComa + 1);
     if (decimales.length !== 2 || !/^\d{2}$/.test(decimales)) {
       return { monto: 0, referencia: texto };
     }
-    
+
     let posInicioMonto = posicionComa - 1;
     while (posInicioMonto >= 0 && /[\d.]/.test(texto[posInicioMonto])) {
       posInicioMonto--;
     }
-    
+
     let esNegativo = false;
     if (posInicioMonto >= 0 && texto[posInicioMonto] === '-') {
       esNegativo = true;
       posInicioMonto--;
     }
-    
+
     while (posInicioMonto >= 0 && /\d/.test(texto[posInicioMonto])) {
       posInicioMonto--;
     }
-    
+
     posInicioMonto++;
-    
+
     const bloqueCompleto = texto.substring(posInicioMonto, posicionComa + 3);
     const digitosPuros = bloqueCompleto.replace(/\./g, '').replace(',', '').replace('-', '');
-    
-    if (digitosPuros.length <= longitudComprobante) {
+
+    // Verificar si el bloque es un monto formateado correctamente (ej: 10.996,68 o 1.234.567,89)
+    // Los puntos deben estar en posiciones correctas de separador de miles
+    const parteEnteraBloqueRaw = bloqueCompleto.substring(0, bloqueCompleto.indexOf(','));
+    const esMontoFormateado = /^-?\d{1,3}(\.\d{3})*$/.test(parteEnteraBloqueRaw);
+
+    if (digitosPuros.length <= longitudComprobante || esMontoFormateado) {
       let monto = this.parsearMonto(bloqueCompleto);
       if (esNegativo && monto > 0) monto = -monto;
       const referencia = texto.substring(0, posInicioMonto).trim();
       return { monto, referencia };
     }
-    
+
     const montoDigitos = digitosPuros.substring(longitudComprobante);
     const parteEntera = montoDigitos.substring(0, montoDigitos.length - 2);
     const parteDecimal = montoDigitos.substring(montoDigitos.length - 2);
     let monto = parseFloat(parteEntera + '.' + parteDecimal) || 0;
-    
+
     if (esNegativo) {
       monto = -monto;
     }
-    
+
     const referencia = texto.substring(0, posInicioMonto).trim();
-    
+
     return { monto, referencia };
   }
 
