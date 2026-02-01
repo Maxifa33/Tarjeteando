@@ -700,9 +700,8 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
             nombre_limpio: newRegla.nombre_limpio
           })
         });
-        console.log('[Reglas] Sincronizada con backend:', newRegla.patron);
       } catch (backendError) {
-        console.warn('[Reglas] No se pudo sincronizar con backend:', backendError);
+        // Silently fail - backend sync is optional
       }
 
       setNewRegla({ patron: '', nombre_limpio: '' });
@@ -722,9 +721,8 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
       if (regla) {
         try {
           await fetch(`${API_BASE}/reglas/${id}`, { method: 'DELETE' });
-          console.log('[Reglas] Eliminada del backend:', id);
         } catch (backendError) {
-          console.warn('[Reglas] No se pudo eliminar del backend:', backendError);
+          // Silently fail - backend sync is optional
         }
       }
 
@@ -1226,14 +1224,13 @@ const App = () => {
         body: JSON.stringify({ nombre_personalizado: nuevoNombre })
       });
     } catch (e) {
-      console.log('No se pudo guardar en backend:', e);
+      // Silently fail
     }
   };
 
   // Función para guardar edición de descripción de movimiento
   // Guarda como regla local y aplica a todos los movimientos con la misma referencia_original
   const guardarEdicionDescripcion = async (referenciaOriginal, nombreLimpio) => {
-    console.log('[App] Guardando edición:', referenciaOriginal, '→', nombreLimpio);
 
     // 1. Guardar como regla local en storage
     const regla = {
@@ -1267,9 +1264,8 @@ const App = () => {
           referencia_original: referenciaOriginal
         })
       });
-      console.log('[App] Regla sincronizada con backend');
     } catch (e) {
-      console.log('[App] No se pudo sincronizar con backend:', e);
+      // Silently fail - backend sync is optional
     }
   };
 
@@ -1287,7 +1283,6 @@ const App = () => {
   
   // Fetch all data from localStorage
   const fetchData = useCallback(async () => {
-    console.log('[App] Iniciando fetchData...');
     setLoading(true);
     try {
       // Función para detectar banco desde nombre de tarjeta
@@ -1313,16 +1308,16 @@ const App = () => {
       // Función para detectar tipo de tarjeta
       const detectarTipo = (nombre) => {
         const n = (nombre || '').toUpperCase();
+        // AMEX primero porque "AMERICAN EXPRESS" no contiene "VISA"
+        if (n.includes('AMEX') || n.includes('AMERICAN')) return 'AMEX';
         if (n.includes('MASTERCARD')) return 'MASTERCARD';
         if (n.includes('VISA')) return 'VISA';
-        if (n.includes('AMEX') || n.includes('AMERICAN')) return 'AMEX';
         if (n.includes('CABAL')) return 'CABAL';
         if (n.includes('NARANJA')) return 'NARANJA';
         return 'VISA';
       };
 
       // Leer datos de localStorage
-      console.log('[App] Leyendo storage...');
       const resumenesData = storage.getResumenes();
       let movimientosData = storage.getMovimientos();
       let tarjetasData = storage.getTarjetas();
@@ -1353,15 +1348,22 @@ const App = () => {
         });
       }
 
-      // Corregir tarjetas con banco Desconocido
+      // Corregir tarjetas con banco Desconocido o tipo incorrecto
       let tarjetasActualizadas = false;
       tarjetasData = tarjetasData.map(t => {
-        if (!t.banco || t.banco === 'Desconocido') {
-          const bancoDet = detectarBanco(t.nombre);
-          if (bancoDet) {
-            tarjetasActualizadas = true;
-            return { ...t, banco: bancoDet, tipo: t.tipo || detectarTipo(t.nombre) };
-          }
+        const bancoDet = detectarBanco(t.nombre);
+        const tipoDet = detectarTipo(t.nombre);
+        const necesitaCorreccion =
+          (!t.banco || t.banco === 'Desconocido' || (bancoDet && t.banco !== bancoDet)) ||
+          (!t.tipo || t.tipo !== tipoDet);
+
+        if (necesitaCorreccion) {
+          tarjetasActualizadas = true;
+          return {
+            ...t,
+            banco: bancoDet || t.banco || 'Desconocido',
+            tipo: tipoDet
+          };
         }
         return t;
       });
@@ -1371,12 +1373,6 @@ const App = () => {
       const estadisticas = storage.getEstadisticas();
       const evolucion = storage.getEvolucionMensual(6);
       const proyeccionData = storage.getProyeccionCuotas(6);
-      console.log('[App] Datos cargados:', {
-        resumenes: resumenesData.length,
-        tarjetas: tarjetasData.length,
-        movimientos: movimientosData.length,
-        estadisticas
-      });
 
       // Obtener el último resumen de cada tarjeta
       const ultimoResumenPorTarjeta = {};
@@ -1538,10 +1534,9 @@ const App = () => {
       }
       setProyeccionCuotas(proyeccionCalculada);
     } catch (error) {
-      console.error('[App] Error loading data from localStorage:', error);
+      console.error('[App] Error loading data:', error);
     }
     setLoading(false);
-    console.log('[App] fetchData completado');
   }, []);
   
   useEffect(() => {
@@ -3156,16 +3151,12 @@ const ImportarView = ({ onSuccess }) => {
         body: formData
       });
       const data = await response.json();
-      console.log('[Upload] Respuesta del servidor:', data);
 
       // Guardar cada resultado exitoso en localStorage
       const resultados = data.data?.resultados || data.resultados || [];
-      console.log('[Upload] Resultados a procesar:', resultados);
       for (const resultado of resultados) {
-        console.log('[Upload] Procesando resultado:', resultado);
         if (resultado.exito && resultado.datos) {
           const { resumen, movimientos, tarjeta } = resultado.datos;
-          console.log('[Upload] Guardando datos:', { tarjeta, resumen, movimientosCount: movimientos?.length });
 
           // Guardar tarjeta (detectar banco desde nombre si no viene en resumen)
           if (tarjeta) {
@@ -3181,9 +3172,9 @@ const ImportarView = ({ onSuccess }) => {
             }
             if (!tipo) {
               const n = tarjeta.toUpperCase();
-              if (n.includes('MASTERCARD')) tipo = 'MASTERCARD';
+              if (n.includes('AMEX') || n.includes('AMERICAN EXPRESS')) tipo = 'AMEX';
+              else if (n.includes('MASTERCARD')) tipo = 'MASTERCARD';
               else if (n.includes('VISA')) tipo = 'VISA';
-              else if (n.includes('AMEX')) tipo = 'AMEX';
               else tipo = 'VISA';
             }
             storage.saveTarjeta({
@@ -3211,12 +3202,10 @@ const ImportarView = ({ onSuccess }) => {
               cantidad_movimientos: movimientos?.length || 0,
               fecha_importacion: new Date().toISOString()
             };
-            console.log('[Upload] Guardando resumen:', resumenData);
             storage.saveResumen(resumenData);
 
             // Guardar movimientos
             if (movimientos && movimientos.length > 0) {
-              console.log('[Upload] Guardando', movimientos.length, 'movimientos para', tarjeta);
               storage.saveMovimientos(resumenId, movimientos, tarjeta);
             }
           }
