@@ -409,7 +409,7 @@ const StatCard = ({ icon: Icon, label, value, trend, trendValue, delay = 0, onCl
 };
 
 // Credit Card Component
-const CreditCardVisual = ({ tarjeta, stats, onClick, nombrePersonalizado, onEditarNombre }) => {
+const CreditCardVisual = ({ tarjeta, stats, onClick, nombrePersonalizado, onEditarNombre, cotizacion = null }) => {
   const theme = getCardTheme(tarjeta.nombre);
   const ultimoResumen = stats?.ultimo_resumen;
   const [editando, setEditando] = useState(false);
@@ -513,9 +513,16 @@ const CreditCardVisual = ({ tarjeta, stats, onClick, nombrePersonalizado, onEdit
                 {formatMonto(ultimoResumen.total_a_pagar || 0)}
               </p>
               {ultimoResumen.total_a_pagar_dolares > 0 && (
-                <p className="text-emerald-500 text-sm font-medium">
-                  {formatMontoDolares(ultimoResumen.total_a_pagar_dolares)}
-                </p>
+                <div>
+                  <p className="text-emerald-500 text-sm font-medium">
+                    {formatMontoDolares(ultimoResumen.total_a_pagar_dolares)}
+                  </p>
+                  {cotizacion?.venta && (
+                    <p className={`${textMuted} text-xs`}>
+                      ≈ {formatMonto(ultimoResumen.total_a_pagar_dolares * cotizacion.venta)} ARS
+                    </p>
+                  )}
+                </div>
               )}
             </>
           ) : (
@@ -1200,6 +1207,15 @@ const App = () => {
   const [reglas, setReglas] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // Cotización USD
+  const [cotizacion, setCotizacion] = useState(() => {
+    try {
+      const cache = JSON.parse(localStorage.getItem('cotizacion_cache') || 'null');
+      if (cache && Date.now() - cache.cachedAt < 30 * 60 * 1000) return cache;
+    } catch {}
+    return null;
+  });
+
   // Estado para gastos fijos/variables (calculado de los movimientos)
   const [gastosFijos, setGastosFijos] = useState(new Set());
 
@@ -1372,7 +1388,6 @@ const App = () => {
       }
       const estadisticas = storage.getEstadisticas();
       const evolucion = storage.getEvolucionMensual(6);
-      const proyeccionData = storage.getProyeccionCuotas(6);
 
       // Obtener el último resumen de cada tarjeta
       const ultimoResumenPorTarjeta = {};
@@ -1467,6 +1482,8 @@ const App = () => {
         cuotas_pagadas: m.cuota_actual,
         cuotas_restantes: m.total_cuotas - m.cuota_actual,
         monto_cuota: m.monto_pesos || m.monto_dolares || 0,
+        monto_cuota_pesos: m.monto_pesos || 0,
+        monto_cuota_dolares: m.monto_dolares || 0,
         monto_total: (m.monto_pesos || m.monto_dolares || 0) * m.total_cuotas,
         es_ultima_cuota: m.cuota_actual === m.total_cuotas,
         fecha_compra: m.fecha_compra
@@ -1508,28 +1525,65 @@ const App = () => {
       setProyecciones({ evolucion_mensual: evolucion });
       setReglas(reglasLocales);
 
-      // Calcular proyección de cuotas desde cuotasActivasData (datos correctos del último resumen)
-      const ahora = new Date();
+      // Calcular proyección de cuotas anclada al PERÍODO del resumen de cada tarjeta
+      // (no a la fecha de hoy ni al orden de subida). Cada cuota se ubica en su mes
+      // calendario real: si la cuota N cae en el período P, la cuota N+k cae en P+k.
+      // El "próximo mes" (índice 0) es el mes siguiente al último resumen disponible.
+      const periodoDeTarjeta = (tarjeta) => {
+        const r = ultimoResumenPorTarjeta[tarjeta];
+        return r ? new Date(r.anio, r.mes - 1, 1) : null;
+      };
+      // Ancla global: período del resumen más reciente entre todas las tarjetas
+      let anclaProyeccion = null;
+      Object.values(ultimoResumenPorTarjeta).forEach(r => {
+        const d = new Date(r.anio, r.mes - 1, 1);
+        if (!anclaProyeccion || d > anclaProyeccion) anclaProyeccion = d;
+      });
+      if (!anclaProyeccion) anclaProyeccion = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+
+      // Orden determinístico: el orden de subida no debe influir en el detalle ni en
+      // los totales (ruido de punto flotante).
+      const cuotasOrdenadas = [...cuotasActivasData].sort((a, b) =>
+        (a.tarjeta || '').localeCompare(b.tarjeta || '')
+        || (a.referencia_limpia || '').localeCompare(b.referencia_limpia || '')
+        || (a.total_cuotas - b.total_cuotas)
+        || ((a.monto_pesos || 0) - (b.monto_pesos || 0))
+      );
+
       const proyeccionCalculada = [];
       for (let i = 0; i < 6; i++) {
-        const fecha = new Date(ahora.getFullYear(), ahora.getMonth() + i, 1);
+        // Mes objetivo = ancla + (i + 1): el primer bucket es el mes siguiente al último resumen
+        const fecha = new Date(anclaProyeccion.getFullYear(), anclaProyeccion.getMonth() + i + 1, 1);
         let totalMes = 0;
-        let cantidadCuotas = 0;
+        const detalles = [];
 
-        cuotasActivasData.forEach(m => {
-          const cuotasFaltantes = m.total_cuotas - m.cuota_actual;
-          // Si aún quedan cuotas para este mes futuro
-          if (cuotasFaltantes >= i) {
+        cuotasOrdenadas.forEach(m => {
+          const periodoCuota = periodoDeTarjeta(m.tarjeta);
+          if (!periodoCuota) return;
+          // Meses entre el período de la cuota y el mes objetivo
+          const diff = (fecha.getFullYear() - periodoCuota.getFullYear()) * 12
+            + (fecha.getMonth() - periodoCuota.getMonth());
+          const numeroCuota = m.cuota_actual + diff;
+          // Solo cuotas futuras respecto del período (diff >= 1) que aún no terminaron
+          if (diff >= 1 && numeroCuota <= m.total_cuotas) {
             totalMes += m.monto_pesos || 0;
-            cantidadCuotas++;
+            detalles.push({
+              id: m.id,
+              descripcion: m.referencia_limpia || m.referencia_original || 'Sin descripción',
+              tarjeta: m.tarjeta,
+              cuota_numero: numeroCuota,
+              total_cuotas: m.total_cuotas,
+              monto_cuota: m.monto_pesos || 0
+            });
           }
         });
 
         proyeccionCalculada.push({
           mes: fecha.toLocaleDateString('es-AR', { month: 'short', year: '2-digit' }),
           mes_nombre: fecha.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }),
-          total: totalMes,
-          cantidad_cuotas: cantidadCuotas
+          total: Math.round(totalMes * 100) / 100, // redondeo a 2 decimales (estable)
+          cantidad_cuotas: detalles.length,
+          detalles
         });
       }
       setProyeccionCuotas(proyeccionCalculada);
@@ -1542,7 +1596,49 @@ const App = () => {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
-  
+
+  // Fetch cotización dólar tarjeta (cache 30 min)
+  useEffect(() => {
+    const cached = (() => {
+      try {
+        const c = JSON.parse(localStorage.getItem('cotizacion_cache') || 'null');
+        return c && Date.now() - c.cachedAt < 30 * 60 * 1000 ? c : null;
+      } catch { return null; }
+    })();
+    if (cached) return;
+
+    fetch('https://dolarapi.com/v1/dolares/tarjeta')
+      .then(r => r.json())
+      .then(data => {
+        const entry = {
+          venta: data.venta,
+          compra: data.compra,
+          nombre: data.nombre || 'Tarjeta',
+          fechaActualizacion: data.fechaActualizacion,
+          cachedAt: Date.now()
+        };
+        localStorage.setItem('cotizacion_cache', JSON.stringify(entry));
+        setCotizacion(entry);
+      })
+      .catch(() => {
+        // Fallback a bluelytics
+        fetch('https://api.bluelytics.com.ar/v2/latest')
+          .then(r => r.json())
+          .then(data => {
+            const entry = {
+              venta: data.oficial?.value_sell,
+              compra: data.oficial?.value_buy,
+              nombre: 'Oficial',
+              fechaActualizacion: data.last_update,
+              cachedAt: Date.now()
+            };
+            localStorage.setItem('cotizacion_cache', JSON.stringify(entry));
+            setCotizacion(entry);
+          })
+          .catch(() => {});
+      });
+  }, []);
+
   // Calcular reintegros
   const reintegros = movimientos.filter(m =>
     m.monto_pesos < 0 ||
@@ -1715,6 +1811,7 @@ const App = () => {
               nombresTarjetas={nombresTarjetas}
               onGuardarNombre={guardarNombreTarjeta}
               gastosFijos={gastosFijos}
+              cotizacion={cotizacion}
               onFiltrarMovimientos={(tipo) => {
                 setFiltroTipoGastoInicial(tipo);
                 setActiveView('movimientos');
@@ -1770,9 +1867,11 @@ const App = () => {
 };
 
 // Dashboard View
-const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [], chartColors, formatCurrency, theme, resumenes = [], onDeleteResumen, setActiveView, searchQuery = '', movimientos = [], cuotasActivas = [], nombresTarjetas = {}, onGuardarNombre, gastosFijos = new Set(), onFiltrarMovimientos }) => {
+const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [], chartColors, formatCurrency, theme, resumenes = [], onDeleteResumen, setActiveView, searchQuery = '', movimientos = [], cuotasActivas = [], nombresTarjetas = {}, onGuardarNombre, gastosFijos = new Set(), cotizacion = null, onFiltrarMovimientos }) => {
   const [showResumenes, setShowResumenes] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+  const [mesDetalleIdx, setMesDetalleIdx] = useState(null);
+  const [resumenCombinado, setResumenCombinado] = useState(false);
 
   const handleDeleteResumen = async (resumenId) => {
     if (!confirm('¿Eliminar este resumen y todos sus movimientos?')) return;
@@ -1949,6 +2048,19 @@ const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [
         </div>
       )}
 
+      {/* Badge cotización dólar */}
+      {cotizacion && (
+        <div className="flex items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+            <DollarSign className="w-3.5 h-3.5" />
+            Dólar tarjeta: {formatMonto(cotizacion.venta || 0)}
+            <span className="text-emerald-500/60 ml-1">
+              · {new Date(cotizacion.cachedAt).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          </span>
+        </div>
+      )}
+
       {/* Stats Row */}
       {(() => {
         // Calcular gastos fijos del último resumen de CADA tarjeta
@@ -1970,8 +2082,24 @@ const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [
 
         const { totalFijos } = calcularTotalesGastos(movsUltimosPeriodos, gastosFijos);
 
+        // Total últimos 2 resúmenes de cada tarjeta (ARS + USD)
+        const totalUltimoResumenARS = tarjetas.reduce((sum, t) => {
+          const ultimos2 = resumenes
+            .filter(r => r.tarjeta === t.nombre)
+            .sort((a, b) => b.anio - a.anio || b.mes - a.mes)
+            .slice(0, 2);
+          return sum + ultimos2.reduce((s, r) => s + (r.total_a_pagar_pesos || 0), 0);
+        }, 0);
+        const totalUltimoResumenUSD = tarjetas.reduce((sum, t) => {
+          const ultimos2 = resumenes
+            .filter(r => r.tarjeta === t.nombre)
+            .sort((a, b) => b.anio - a.anio || b.mes - a.mes)
+            .slice(0, 2);
+          return sum + ultimos2.reduce((s, r) => s + (r.total_a_pagar_dolares || 0), 0);
+        }, 0);
+
         return (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <StatCard
               icon={Repeat}
               label="Gastos Fijos"
@@ -1988,10 +2116,56 @@ const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [
             />
             <StatCard
               icon={DollarSign}
-              label="Pendiente Cuotas"
-              value={formatCurrency(dashboard.total_pendiente_cuotas || 0)}
+              label="Último mes en cuotas"
+              value={formatCurrency(proyeccionCuotas[0]?.total || 0)}
               delay={300}
             />
+            {/* Card: total último resumen todas las tarjetas */}
+            <div
+              className="stat-card opacity-0 animate-fade-in-up"
+              style={{ animationDelay: '400ms', animationFillMode: 'forwards' }}
+            >
+              <div className="flex items-start justify-between mb-3">
+                <div className="p-2.5 rounded-xl bg-gradient-to-br from-[var(--accent-1)] to-[var(--accent-2)] bg-opacity-20">
+                  <CreditCard className="w-5 h-5 text-white" />
+                </div>
+                {totalUltimoResumenUSD > 0 && cotizacion?.venta && (
+                  <button
+                    onClick={() => setResumenCombinado(v => !v)}
+                    title={resumenCombinado ? 'Ver separado' : 'Ver total en ARS'}
+                    className={`text-xs px-2 py-1 rounded-lg border transition-colors font-medium ${
+                      resumenCombinado
+                        ? 'bg-[var(--accent-1)] text-white border-[var(--accent-1)]'
+                        : 'text-[var(--text-muted)] border-[var(--glass-border)] hover:border-[var(--accent-1)] hover:text-[var(--accent-1)]'
+                    }`}
+                  >
+                    {resumenCombinado ? '= ARS' : '+ USD→ARS'}
+                  </button>
+                )}
+              </div>
+              <p className="text-[var(--text-muted)] text-sm mb-2">Total últimos 2 resúmenes</p>
+              {resumenCombinado && cotizacion?.venta ? (
+                <>
+                  <p className="text-xl font-bold text-[var(--text-primary)] leading-tight">
+                    {formatCurrency(totalUltimoResumenARS + totalUltimoResumenUSD * cotizacion.venta)}
+                  </p>
+                  <p className="text-xs text-[var(--text-muted)] mt-1">
+                    {formatCurrency(totalUltimoResumenARS)} + {formatMontoDolares(totalUltimoResumenUSD)} × {formatMonto(cotizacion.venta)}
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-xl font-bold text-[var(--text-primary)] leading-tight">
+                    {formatCurrency(totalUltimoResumenARS)}
+                  </p>
+                  {totalUltimoResumenUSD > 0 && (
+                    <p className="text-sm font-semibold text-emerald-500 mt-0.5">
+                      + {formatMontoDolares(totalUltimoResumenUSD)}
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
           </div>
         );
       })()}
@@ -2019,6 +2193,7 @@ const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [
               stats={tarjeta}
               nombrePersonalizado={nombresTarjetas[tarjeta.id]}
               onEditarNombre={onGuardarNombre}
+              cotizacion={cotizacion}
             />
           </div>
         ))}
@@ -2168,21 +2343,21 @@ const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [
               <p className="text-xl font-bold text-[var(--text-primary)]">
                 {formatCurrency(proyeccionCuotas[0]?.total || 0)}
               </p>
-              <p className="text-xs text-[var(--accent-1)]">{proyeccionCuotas[0]?.cantidad_cuotas || 0} cuotas</p>
+              <p className="text-xs text-[var(--accent-1)]">{proyeccionCuotas[0]?.cantidad_cuotas || 0} consumos en cuotas pendientes</p>
             </div>
             <div className="p-4 rounded-xl bg-[var(--glass-bg)]">
               <p className="text-xs text-[var(--text-muted)] mb-1">Próximo mes</p>
               <p className="text-xl font-bold text-[var(--text-primary)]">
                 {formatCurrency(proyeccionCuotas[1]?.total || 0)}
               </p>
-              <p className="text-xs text-[var(--text-muted)]">{proyeccionCuotas[1]?.cantidad_cuotas || 0} cuotas</p>
+              <p className="text-xs text-[var(--text-muted)]">{proyeccionCuotas[1]?.cantidad_cuotas || 0} consumos en cuotas pendientes</p>
             </div>
             <div className="p-4 rounded-xl bg-[var(--glass-bg)]">
               <p className="text-xs text-[var(--text-muted)] mb-1">En 3 meses</p>
               <p className="text-xl font-bold text-[var(--text-primary)]">
                 {formatCurrency(proyeccionCuotas[2]?.total || 0)}
               </p>
-              <p className="text-xs text-[var(--text-muted)]">{proyeccionCuotas[2]?.cantidad_cuotas || 0} cuotas</p>
+              <p className="text-xs text-[var(--text-muted)]">{proyeccionCuotas[2]?.cantidad_cuotas || 0} consumos en cuotas pendientes</p>
             </div>
             <div className="p-4 rounded-xl bg-[var(--glass-bg)]">
               <p className="text-xs text-[var(--text-muted)] mb-1">Total 6 meses</p>
@@ -2193,13 +2368,24 @@ const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [
             </div>
           </div>
 
-          {/* Gráfico de barras */}
+          {/* Gráfico de barras — click para ver detalle */}
+          <p className="text-xs text-[var(--text-muted)] mb-3 text-center">Hacé click en una barra para ver el detalle</p>
           <ResponsiveContainer width="100%" height={280}>
-            <BarChart data={proyeccionCuotas.map(m => ({
-              mes: m.mes_nombre?.split(' ')[0] || m.mes,
-              total: m.total,
-              cantidad: m.cantidad_cuotas
-            }))} barCategoryGap="20%">
+            <BarChart
+              data={proyeccionCuotas.map((m, idx) => ({
+                mes: m.mes_nombre?.split(' ')[0] || m.mes,
+                total: m.total,
+                cantidad: m.cantidad_cuotas,
+                idx
+              }))}
+              barCategoryGap="20%"
+              onClick={(data) => {
+                if (data?.activeTooltipIndex !== undefined) {
+                  setMesDetalleIdx(prev => prev === data.activeTooltipIndex ? null : data.activeTooltipIndex);
+                }
+              }}
+              style={{ cursor: 'pointer' }}
+            >
               <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" />
               <XAxis
                 dataKey="mes"
@@ -2218,14 +2404,24 @@ const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [
                   borderRadius: '12px',
                   backdropFilter: 'blur(10px)'
                 }}
-                formatter={(v) => [formatMonto(v || 0), 'Total']}
+                formatter={(v, name, props) => [
+                  `${formatMonto(v || 0)} · ${props?.payload?.cantidad || 0} consumos`,
+                  'Total cuotas'
+                ]}
               />
               <Bar
                 dataKey="total"
                 name="Cuotas"
-                fill="url(#colorGradient)"
                 radius={[4, 4, 0, 0]}
-              />
+              >
+                {proyeccionCuotas.map((_, idx) => (
+                  <Cell
+                    key={idx}
+                    fill={mesDetalleIdx === idx ? 'var(--accent-1)' : 'url(#colorGradient)'}
+                    opacity={mesDetalleIdx !== null && mesDetalleIdx !== idx ? 0.4 : 1}
+                  />
+                ))}
+              </Bar>
               <defs>
                 <linearGradient id="colorGradient" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="var(--accent-1)" />
@@ -2234,6 +2430,59 @@ const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [
               </defs>
             </BarChart>
           </ResponsiveContainer>
+
+          {/* Panel de detalle por mes */}
+          {mesDetalleIdx !== null && (() => {
+            const i = mesDetalleIdx;
+            const mesInfo = proyeccionCuotas[i];
+            const cuotasDelMes = mesInfo?.detalles || [];
+            return (
+              <div className="mt-4 border-t border-[var(--glass-border)] pt-4">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-sm font-semibold text-[var(--text-primary)]">
+                    {mesInfo?.mes_nombre || `Mes ${i + 1}`} — {cuotasDelMes.length} consumos en cuotas pendientes
+                  </p>
+                  <button
+                    onClick={() => setMesDetalleIdx(null)}
+                    className="p-1 rounded-lg hover:bg-[var(--glass-bg)] text-[var(--text-muted)] transition-colors"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                {cuotasDelMes.length === 0 ? (
+                  <p className="text-sm text-[var(--text-muted)] text-center py-4">Sin cuotas comprometidas este mes</p>
+                ) : (
+                  <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                    {cuotasDelMes.map((c) => {
+                      const cuotaNumero = c.cuota_numero;
+                      const color = getTarjetaColor(c.tarjeta);
+                      return (
+                        <div key={c.id} className="flex items-center justify-between p-3 rounded-xl bg-[var(--glass-bg)]">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <span
+                              className="shrink-0 px-2 py-0.5 rounded-full text-xs font-medium text-white"
+                              style={{ backgroundColor: color }}
+                            >
+                              {c.tarjeta}
+                            </span>
+                            <p className="text-sm text-[var(--text-primary)] truncate">{c.descripcion}</p>
+                          </div>
+                          <div className="flex items-center gap-3 shrink-0 ml-3">
+                            <span className="text-xs text-[var(--text-muted)]">
+                              cuota {cuotaNumero}/{c.total_cuotas}
+                            </span>
+                            <span className="text-sm font-semibold text-[var(--text-primary)]">
+                              {formatMonto(c.monto_cuota || 0)}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
       )}
     </div>
