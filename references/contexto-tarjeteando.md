@@ -32,10 +32,14 @@ tarjetas-proyecto/
 │   └── .env.local                ← VITE_API_URL
 ├── Backend/
 │   ├── src/
-│   │   ├── app.js                ← 1134 líneas, Express server + db en RAM
+│   │   ├── app.js                ← Express server + db en RAM
 │   │   └── services/
 │   │       ├── pdf-parser.service.js    ← 1464 líneas, parser por banco
-│   │       └── vision-parser.service.js ← 565 líneas, Claude Vision API
+│   │       ├── vision-parser.service.js ← 565 líneas, Claude Vision API
+│   │       └── proyeccion.service.js    ← lógica pura de proyección de cuotas (anclada al período)
+│   ├── tests/
+│   │   ├── proyeccion.test.js    ← robustez al orden de subida (usa PDFs reales en fixtures/pdfs/)
+│   │   └── fixtures/pdfs/        ← resúmenes reales de prueba (Galicia/BBVA/Santander/Macro/AMEX)
 │   ├── data/
 │   │   └── reglas-usuario.json   ← ÚNICO archivo persistente del backend
 │   ├── package.json
@@ -110,14 +114,20 @@ storage.getMovimientos()        → setMovimientos
 storage.getTarjetas()           → setTarjetas (enriquecidas con último resumen y stats)
 storage.getReglas()             → setReglas
 storage.getEstadisticas()       → setDashboard
-storage.getEvolucionMensual(6)  → setProyecciones
-// Proyección de cuotas (calculada en App, NO usa storage.getProyeccionCuotas):
-for (let i = 0; i < 6; i++) {  // i=0 = mes actual
-  cuotasActivasData.forEach(m => {
-    if (m.total_cuotas - m.cuota_actual >= i) totalMes += m.monto_pesos || 0;
+storage.getEvolucionMensual(6)  → setProyecciones  // ventana anclada al período del resumen más reciente
+// Proyección de cuotas ANCLADA AL PERÍODO del resumen de cada tarjeta (NO a la fecha de hoy
+// ni al orden de subida). Si la cuota N cae en el período P, la cuota N+k cae en P+k.
+const ancla = max(período del último resumen de cada tarjeta);
+for (let i = 0; i < 6; i++) {
+  const fecha = ancla + (i + 1) meses;  // bucket 0 = mes siguiente al último resumen
+  cuotasOrdenadas.forEach(m => {       // cuotasOrdenadas = orden determinístico (tarjeta, ref, ...)
+    const diff = mesesEntre(períodoDeTarjeta(m), fecha);
+    const numeroCuota = m.cuota_actual + diff;
+    if (diff >= 1 && numeroCuota <= m.total_cuotas) { totalMes += m.monto_pesos; detalles.push({...}); }
   });
+  total = Math.round(totalMes * 100) / 100;  // redondeo estable a 2 decimales
 }
-setProyeccionCuotas(proyeccionCalculada); // [{mes, mes_nombre, total, cantidad_cuotas}]
+setProyeccionCuotas(proyeccionCalculada); // [{mes, mes_nombre, total, cantidad_cuotas, detalles[]}]
 ```
 
 ### Cotización dólar tarjeta
@@ -148,7 +158,7 @@ DashboardView({
 
 **StatCards del Dashboard:**
 1. Total a pagar (último resumen de cada tarjeta)
-2. Cuotas Próximo Mes = `proyeccionCuotas[0]?.total || 0`
+2. Cuotas Próximo Mes = `proyeccionCuotas[0]?.total || 0` (mes siguiente al último resumen, no la fecha de hoy)
 3. Movimientos (total del último resumen)
 4. Tarjetas activas
 
@@ -157,7 +167,7 @@ DashboardView({
 - Click en barra → toggle `mesDetalleIdx`
 - Barras no seleccionadas: `opacity 0.4`
 - Texto bajo barra: "X consumos en cuotas pendientes"
-- Panel de detalle expandible filtra: `cuotasActivas.filter(c => c.cuotas_restantes >= i)`
+- Panel de detalle expandible: lee directo de `proyeccionCuotas[i].detalles` (cada uno con `cuota_numero`, `total_cuotas`, `tarjeta`, `monto_cuota`). Ya NO recomputa con un criterio aparte → fuente única.
 
 ### CreditCardVisual — lógica clave
 ```jsx
@@ -206,11 +216,10 @@ storage.exportAll()                             // → { version, exportDate, da
 storage.importAll(data, merge=false)            // reemplaza o mergea
 storage.clearAll()                              // borra todas las keys
 storage.getEstadisticas()                       // calcula totales desde localStorage
-storage.getEvolucionMensual(meses=6)            // evolución mensual pesos
-storage.getProyeccionCuotas(mesesFuturos=6)     // ATENCIÓN: empieza en i=1, no i=0
+storage.getEvolucionMensual(meses=6)            // evolución mensual pesos, ventana anclada al período más reciente
 ```
 
-**⚠️ GOTCHA:** `storage.getProyeccionCuotas()` itera desde `i=1` (solo meses futuros, excluye el actual). En `fetchData` de App.jsx itera desde `i=0` (incluye mes actual). El gráfico usa la versión de App.jsx (i=0). Si alguien usa `storage.getProyeccionCuotas()` directo, el mes actual no aparece.
+**Nota:** `getEvolucionMensual()` ya NO se ancla a la fecha de hoy. Toma el período del resumen más reciente (`max(anio, mes)`) y muestra los últimos `meses` meses terminando ahí, así los resúmenes recientes siempre aparecen aunque sean de meses anteriores a hoy. `getProyeccionCuotas()` fue **eliminado** (estaba muerto y su criterio era inconsistente); la proyección vive en `fetchData` (frontend) y en `proyeccion.service.js` (backend).
 
 ---
 
@@ -241,7 +250,7 @@ GET    /movimientos              ← db.movimientos (con ?tarjeta=, ?mes=, ?anio
 GET    /resumenes                ← db.resumenes
 DELETE /resumenes/:id
 GET    /cuotas/activas           ← filtra movimientos con es_cuota
-GET    /cuotas/proyeccion        ← proyección de cuotas (similar a storage pero desde db)
+GET    /cuotas/proyeccion        ← proyección anclada al período (usa proyeccion.service.js)
 GET    /reglas                   ← db.reglasUsuario
 POST   /reglas                   ← agrega regla + guarda JSON
 DELETE /reglas/:id
@@ -305,6 +314,25 @@ async parsearPDF(buffer, nombreArchivo)
 
 ### Validación de totales
 El parser valida en consola: suma extraída vs total_a_pagar del PDF. Diferencias ≤ $100 se loguean como ℹ️ (pagos/créditos), mayores como ⚠️.
+
+---
+
+## Backend — proyeccion.service.js
+
+Lógica pura y testeable de la proyección de cuotas. **Invariante: se ancla SIEMPRE al período del resumen donde aparece cada cuota (`fecha_ultima_cuota`), nunca a la fecha de hoy ni al orden de subida.**
+
+```js
+proyectarCuotas(cuotasActivas, meses = 6, hoy = new Date())
+// - Ordena las cuotas determinísticamente (tarjeta, referencia, total_cuotas, monto) → el orden
+//   de subida no afecta ni el detalle ni el total (ruido de punto flotante).
+// - Ancla = período del resumen más reciente entre las cuotas activas.
+// - Bucket i = ancla + (i + 1) meses. numeroCuota = cuota_actual + mesesEntre(período, bucket).
+//   Incluye la cuota si diff >= 1 y numeroCuota <= total_cuotas.
+// - total redondeado a 2 decimales (Math.round(x*100)/100).
+// Returns: [{ mes, mes_nombre, total, cantidad_cuotas, detalles:[{referencia,tarjeta,cuota,monto}] }]
+```
+
+El endpoint `GET /cuotas/proyeccion` lo usa con `db.comprasCuotas`. El frontend (`fetchData`) implementa la misma lógica sobre los movimientos del último resumen de cada tarjeta (no puede importar el módulo del backend; arquitectura separada). Tests: `Backend/tests/proyeccion.test.js`.
 
 ---
 
@@ -428,18 +456,9 @@ async procesarArchivo(buffer, filename, mimetype)  // → mismo formato que pdfP
 
 ## Gotchas críticos
 
-### 1. Proyección de cuotas — criterio duplicado
-En `App.jsx/fetchData` (líneas ~1537-1543):
-```js
-for (let i = 0; i < 6; i++) {  // i=0 = mes actual
-  if (m.total_cuotas - m.cuota_actual >= i) totalMes += m.monto_pesos || 0;
-}
-```
-En el panel de detalle del gráfico de barras:
-```js
-cuotasActivas.filter(c => c.cuotas_restantes >= i)
-```
-**Si se cambia el criterio en uno, hay que cambiarlo en el otro.**
+### 1. Proyección de cuotas — anclada al período (RESUELTO el orden de subida)
+La proyección se ancla al **período del resumen** de cada tarjeta, no a la fecha de hoy ni al orden de subida. El criterio ya **no está duplicado**: `fetchData` construye `proyeccionCuotas[i].detalles` y el panel del gráfico lee de ahí (fuente única). El backend usa `proyeccion.service.js` con la misma fórmula.
+**Si tocás la fórmula, hay 2 copias inevitables (front no importa del back):** `App.jsx/fetchData` y `Backend/src/services/proyeccion.service.js` — mantenelas en sync.
 
 ### 2. Backend pierde datos al reiniciar
 Todo el `db` está en RAM. Railway reinicia el servidor → hay que volver a subir PDFs. `localStorage` del browser es la fuente de verdad.
@@ -447,8 +466,8 @@ Todo el `db` está en RAM. Railway reinicia el servidor → hay que volver a sub
 ### 3. Único dato persistente del backend
 `Backend/data/reglas-usuario.json` — se carga al arrancar y se guarda con cada `POST /reglas`. Si este archivo se borra, se pierden las reglas.
 
-### 4. storage.getProyeccionCuotas() vs fetchData
-`storage.getProyeccionCuotas()` empieza en `i=1` (no incluye mes actual). `fetchData` empieza en `i=0` (incluye mes actual). El dashboard usa fetchData, no `getProyeccionCuotas()`.
+### 4. getEvolucionMensual: ventana anclada al período más reciente
+`storage.getEvolucionMensual()` muestra los últimos N meses **terminando en el período del resumen más reciente**, no en la fecha de hoy. Así un resumen viejo de una tarjeta recién cargada siempre aparece en el gráfico. (`getProyeccionCuotas()` fue eliminado.)
 
 ### 5. App.jsx es monolítico
 ~3443 líneas, un solo archivo. Todos los componentes están en scope global del módulo. Variables como `TARJETA_COLORS`, `BANK_THEMES`, `formatMonto()` son accesibles desde todos los componentes sin props.
@@ -463,9 +482,18 @@ Si `cotizacion === null`, el badge no se muestra y el equivalente ARS en `Credit
 
 ## Cambios recientes (22/06/2026)
 
+### Fix: orden de subida no influye en cálculos (anclaje al período)
+- **Problema real:** la proyección de cuotas y la ventana del gráfico se anclaban a `new Date()` (hoy), no al período del resumen → con resúmenes viejos los meses NN/MM salían corridos y el gráfico mostraba todo en $0. (Las sumas mensuales ya eran order-independent; el orden de subida no las afectaba.)
+- **Fix:**
+  - `App.jsx/fetchData`: proyección anclada al período del último resumen de cada tarjeta; bucket 0 = mes siguiente. Lleva `detalles[]` por mes (el panel del gráfico ya no recomputa). Orden determinístico + redondeo a 2 decimales.
+  - `storage.getEvolucionMensual`: ventana anclada al período más reciente (no a hoy). `getProyeccionCuotas` eliminado (muerto).
+  - Backend: `proyeccion.service.js` (lógica pura) + endpoint `/cuotas/proyeccion` refactorizado.
+  - Tests: `tests/proyeccion.test.js` (11) — verifican order-independence al centavo con PDFs reales.
+- **Pre-existente (no tocado):** `tests/api.test.js` falla porque `app.js` no exporta `app` y hace `app.listen` al importarse; `tests/parser.test.js` tiene 4 fallos de detección/limpieza.
+
 ### StatCard "Cuotas Próximo Mes"
 - Antes: mostraba total acumulado de cuotas futuras
-- Ahora: `proyeccionCuotas[0]?.total || 0` (mes actual, i=0)
+- Ahora: `proyeccionCuotas[0]?.total || 0` (mes siguiente al período del último resumen)
 
 ### Cotización USD en tiempo real
 - API: `https://dolarapi.com/v1/dolares/tarjeta` + fallback bluelytics
@@ -473,11 +501,13 @@ Si `cotizacion === null`, el badge no se muestra y el equivalente ARS en `Credit
 - Badge en Dashboard: "💵 Dólar tarjeta: $X.XXX · HH:MM"
 - CreditCardVisual: tarjetas USD muestran `≈ $X.XXX ARS`
 
-### StatCard "Total últimos 2 resúmenes"
-- 4ta StatCard del Dashboard: suma los 2 resúmenes más recientes por tarjeta
-- Cálculo: `resumenes.filter(r => r.tarjeta === t.nombre).sort(...).slice(0,2).reduce(...)` usando `total_a_pagar_pesos` y `total_a_pagar_dolares`
-- Toggle `+ USD→ARS`: convierte USD a ARS usando `cotizacion.venta` y muestra total combinado
-- Estado: `resumenCombinado` (boolean) en `DashboardView`
+### StatCard "Total a pagar · {mes}"
+- 4ta StatCard del Dashboard. Representa **lo que hay que reservar del sueldo para pagar las tarjetas este mes**.
+- Se agrupa por **mes de `fecha_vencimiento`**, NO por el último resumen cargado de cada tarjeta (evita mezclar vencimientos de meses distintos si el usuario no cargó el mismo mes para todas).
+- `mesRef` = mes (`YYYY-MM`) del `fecha_vencimiento` **más reciente** entre TODOS los resúmenes (opción A). `mesVencimiento(r)` usa `fecha_vencimiento` → fallback `fecha_cierre` → fallback período (`anio`/`mes`).
+- Suma `total_a_pagar_pesos` / `total_a_pagar_dolares` solo de `resumenes.filter(r => mesVencimiento(r) === mesRef)`. Los resúmenes de meses previos y las tarjetas sin resumen de ese mes **se desestiman**.
+- Subtítulo muestra el mes (`mesRefLabel`) para que la mezcla de meses sea visible.
+- Toggle `+ USD→ARS`: convierte USD a ARS usando `cotizacion.venta` y muestra total combinado. Estado: `resumenCombinado` (boolean) en `DashboardView`.
 
 ### Gráfico de barras cuotas — interactivo
 - Click en barra → toggle panel de detalle

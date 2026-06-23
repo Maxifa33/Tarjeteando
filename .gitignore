@@ -34,6 +34,9 @@ Thumbs.db
 Backend/uploads/
 *.pdf
 
+# Fixtures de prueba con datos financieros reales (PDFs, imágenes de tarjetas, etc.) — NO versionar
+Backend/tests/fixtures/pdfs/
+
 # Base de datos local
 *.sqlite
 *.db

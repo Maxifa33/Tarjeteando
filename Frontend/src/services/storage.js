@@ -378,12 +378,20 @@ class StorageService {
    */
   getEvolucionMensual(meses = 6) {
     const resumenes = this.getResumenes();
-    const ahora = new Date();
+
+    if (resumenes.length === 0) return [];
+
+    // Anclar la ventana al período del resumen MÁS RECIENTE (no a la fecha de hoy),
+    // así los últimos resúmenes siempre aparecen aunque sean de meses anteriores.
+    const periodoMasReciente = resumenes.reduce((max, r) => {
+      const d = new Date(r.anio, r.mes - 1, 1);
+      return d > max ? d : max;
+    }, new Date(0));
 
     const resultado = [];
 
     for (let i = meses - 1; i >= 0; i--) {
-      const fecha = new Date(ahora.getFullYear(), ahora.getMonth() - i, 1);
+      const fecha = new Date(periodoMasReciente.getFullYear(), periodoMasReciente.getMonth() - i, 1);
       const mes = fecha.getMonth() + 1;
       const anio = fecha.getFullYear();
 
@@ -404,38 +412,6 @@ class StorageService {
     }
 
     return resultado;
-  }
-
-  /**
-   * Proyección de cuotas futuras
-   */
-  getProyeccionCuotas(mesesFuturos = 6) {
-    const movimientos = this.getMovimientos();
-    const ahora = new Date();
-
-    const proyeccion = [];
-
-    for (let i = 1; i <= mesesFuturos; i++) {
-      const fecha = new Date(ahora.getFullYear(), ahora.getMonth() + i, 1);
-
-      let totalCuotas = 0;
-
-      movimientos.forEach(m => {
-        if (m.es_cuota && m.cuota_actual && m.total_cuotas) {
-          const cuotasFaltantes = m.total_cuotas - m.cuota_actual;
-          if (cuotasFaltantes >= i) {
-            totalCuotas += m.monto_pesos || 0;
-          }
-        }
-      });
-
-      proyeccion.push({
-        mes: fecha.toLocaleDateString('es-AR', { month: 'short', year: '2-digit' }),
-        total: totalCuotas
-      });
-    }
-
-    return proyeccion;
   }
 }
 

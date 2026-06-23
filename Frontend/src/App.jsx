@@ -2082,21 +2082,28 @@ const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [
 
         const { totalFijos } = calcularTotalesGastos(movsUltimosPeriodos, gastosFijos);
 
-        // Total últimos 2 resúmenes de cada tarjeta (ARS + USD)
-        const totalUltimoResumenARS = tarjetas.reduce((sum, t) => {
-          const ultimos2 = resumenes
-            .filter(r => r.tarjeta === t.nombre)
-            .sort((a, b) => b.anio - a.anio || b.mes - a.mes)
-            .slice(0, 2);
-          return sum + ultimos2.reduce((s, r) => s + (r.total_a_pagar_pesos || 0), 0);
-        }, 0);
-        const totalUltimoResumenUSD = tarjetas.reduce((sum, t) => {
-          const ultimos2 = resumenes
-            .filter(r => r.tarjeta === t.nombre)
-            .sort((a, b) => b.anio - a.anio || b.mes - a.mes)
-            .slice(0, 2);
-          return sum + ultimos2.reduce((s, r) => s + (r.total_a_pagar_dolares || 0), 0);
-        }, 0);
+        // Total a pagar del MES DE VENCIMIENTO más reciente (lo que hay que reservar del
+        // sueldo este mes). Se agrupa por mes de fecha_vencimiento, NO por el último resumen
+        // cargado de cada tarjeta: así no se mezclan vencimientos de meses distintos.
+        // Mes (YYYY-MM) de vencimiento de un resumen, con fallback a cierre y luego al período.
+        const mesVencimiento = (r) => {
+          const f = r.fecha_vencimiento || r.fecha_cierre;
+          if (f && typeof f === 'string' && f.length >= 7) return f.slice(0, 7);
+          if (r.anio && r.mes) return `${r.anio}-${String(r.mes).padStart(2, '0')}`;
+          return null;
+        };
+        // mesRef = vencimiento más reciente entre TODOS los resúmenes cargados (opción A).
+        const mesRef = resumenes.reduce((max, r) => {
+          const m = mesVencimiento(r);
+          return m && (!max || m > max) ? m : max;
+        }, null);
+        // Solo resúmenes cuyo vencimiento cae en mesRef; los meses previos se desestiman.
+        const resumenesMesRef = resumenes.filter(r => mesVencimiento(r) === mesRef);
+        const totalUltimoResumenARS = resumenesMesRef.reduce((s, r) => s + (r.total_a_pagar_pesos || 0), 0);
+        const totalUltimoResumenUSD = resumenesMesRef.reduce((s, r) => s + (r.total_a_pagar_dolares || 0), 0);
+        const mesRefLabel = mesRef
+          ? new Date(mesRef + '-01T12:00:00').toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })
+          : null;
 
         return (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -2116,7 +2123,7 @@ const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [
             />
             <StatCard
               icon={DollarSign}
-              label="Último mes en cuotas"
+              label="Cuotas Próximo Mes"
               value={formatCurrency(proyeccionCuotas[0]?.total || 0)}
               delay={300}
             />
@@ -2143,7 +2150,9 @@ const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [
                   </button>
                 )}
               </div>
-              <p className="text-[var(--text-muted)] text-sm mb-2">Total últimos 2 resúmenes</p>
+              <p className="text-[var(--text-muted)] text-sm mb-2">
+                Total a pagar{mesRefLabel ? ` · ${mesRefLabel}` : ''}
+              </p>
               {resumenCombinado && cotizacion?.venta ? (
                 <>
                   <p className="text-xl font-bold text-[var(--text-primary)] leading-tight">

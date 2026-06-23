@@ -15,6 +15,7 @@ const fs = require('fs');
 const multer = require('multer');
 const PDFParserService = require('./services/pdf-parser.service');
 const VisionParserService = require('./services/vision-parser.service');
+const { proyectarCuotas } = require('./services/proyeccion.service');
 
 // Configurar multer para aceptar PDFs e imágenes
 const upload = multer({
@@ -425,37 +426,9 @@ app.get('/api/v1/cuotas/activas', (req, res) => {
 app.get('/api/v1/cuotas/proyeccion', (req, res) => {
   const meses = parseInt(req.query.meses) || 6;
   const cuotasActivas = Object.values(db.comprasCuotas).filter(c => c.cuotas_restantes > 0);
-  
-  const proyeccion = [];
-  const hoy = new Date();
-  
-  for (let i = 0; i < meses; i++) {
-    const fecha = new Date(hoy.getFullYear(), hoy.getMonth() + i, 1);
-    const mesKey = `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, '0')}`;
-    
-    let totalMes = 0;
-    const detalles = [];
-    
-    cuotasActivas.forEach(cuota => {
-      if (cuota.cuotas_restantes > i) {
-        totalMes += cuota.monto_cuota;
-        detalles.push({
-          referencia: cuota.referencia_limpia,
-          tarjeta: cuota.tarjeta,
-          cuota: `${cuota.cuota_actual + i + 1}/${cuota.total_cuotas}`,
-          monto: cuota.monto_cuota
-        });
-      }
-    });
-    
-    proyeccion.push({
-      mes: mesKey,
-      mes_nombre: fecha.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }),
-      total: totalMes,
-      cantidad_cuotas: detalles.length,
-      detalles
-    });
-  }
+
+  // Proyección anclada al período del resumen de cada cuota (ver proyeccion.service.js)
+  const proyeccion = proyectarCuotas(cuotasActivas, meses);
 
   res.json({
     success: true,
