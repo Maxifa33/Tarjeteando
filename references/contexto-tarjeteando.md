@@ -16,6 +16,8 @@
 **URL base API:** `import.meta.env.VITE_API_URL || 'http://localhost:3000'`  
 **Todos los endpoints:** `/api/v1/...`
 
+**Git / Deploy:** repo `github.com/Maxifa33/Tarjeteando`. Rama de trabajo: `develop`. **Producción deploya desde `main`** (Vercel + Railway via integración git, auto-deploy al pushear `main`). Flujo: commitear en `develop` → push → fast-forward `develop`→`main` → deploy. Railway healthcheck: `/api/v1/health`.
+
 ---
 
 ## Estructura de archivos
@@ -24,10 +26,10 @@
 tarjetas-proyecto/
 ├── Frontend/
 │   ├── src/
-│   │   ├── App.jsx               ← monolítico, ~3443 líneas, TODOS los componentes
+│   │   ├── App.jsx               ← monolítico, ~3553 líneas, TODOS los componentes
 │   │   ├── index.css             ← CSS variables, temas claro/oscuro
 │   │   └── services/
-│   │       └── storage.js        ← 446 líneas, helpers localStorage
+│   │       └── storage.js        ← ~422 líneas, helpers localStorage
 │   ├── package.json
 │   └── .env.local                ← VITE_API_URL
 ├── Backend/
@@ -38,8 +40,8 @@ tarjetas-proyecto/
 │   │       ├── vision-parser.service.js ← 565 líneas, Claude Vision API
 │   │       └── proyeccion.service.js    ← lógica pura de proyección de cuotas (anclada al período)
 │   ├── tests/
-│   │   ├── proyeccion.test.js    ← robustez al orden de subida (usa PDFs reales en fixtures/pdfs/)
-│   │   └── fixtures/pdfs/        ← resúmenes reales de prueba (Galicia/BBVA/Santander/Macro/AMEX)
+│   │   ├── proyeccion.test.js    ← robustez al orden de subida (se saltea si faltan los PDFs)
+│   │   └── fixtures/pdfs/        ← resúmenes reales de prueba — NO versionado (.gitignore, datos privados)
 │   ├── data/
 │   │   └── reglas-usuario.json   ← ÚNICO archivo persistente del backend
 │   ├── package.json
@@ -156,11 +158,11 @@ DashboardView({
 })
 ```
 
-**StatCards del Dashboard:**
-1. Total a pagar (último resumen de cada tarjeta)
-2. Cuotas Próximo Mes = `proyeccionCuotas[0]?.total || 0` (mes siguiente al último resumen, no la fecha de hoy)
-3. Movimientos (total del último resumen)
-4. Tarjetas activas
+**StatCards del Dashboard** (grid `lg:grid-cols-4`, en orden real en el código):
+1. **Gastos Fijos** — `totalFijos` (movimientos del último período, clasificados fijos)
+2. **Cuotas Activas** — `dashboard.cuotas_activas`
+3. **Cuotas Próximo Mes** — `proyeccionCuotas[0]?.total || 0` (mes siguiente al último resumen, no la fecha de hoy)
+4. **Total a pagar · {mes}** — suma de `total_a_pagar` (ARS+USD) de los resúmenes cuyo `fecha_vencimiento` cae en `mesRef` (el vencimiento más reciente); ver sección "Cambios recientes". Toggle `+ USD→ARS`.
 
 **Gráfico de barras proyección cuotas:**
 - Estado: `mesDetalleIdx` (null = ninguno seleccionado)
@@ -470,7 +472,7 @@ Todo el `db` está en RAM. Railway reinicia el servidor → hay que volver a sub
 `storage.getEvolucionMensual()` muestra los últimos N meses **terminando en el período del resumen más reciente**, no en la fecha de hoy. Así un resumen viejo de una tarjeta recién cargada siempre aparece en el gráfico. (`getProyeccionCuotas()` fue eliminado.)
 
 ### 5. App.jsx es monolítico
-~3443 líneas, un solo archivo. Todos los componentes están en scope global del módulo. Variables como `TARJETA_COLORS`, `BANK_THEMES`, `formatMonto()` son accesibles desde todos los componentes sin props.
+~3553 líneas, un solo archivo. Todos los componentes están en scope global del módulo. Variables como `TARJETA_COLORS`, `BANK_THEMES`, `formatMonto()` son accesibles desde todos los componentes sin props.
 
 ### 6. Cotización `null` no rompe nada
 Si `cotizacion === null`, el badge no se muestra y el equivalente ARS en `CreditCardVisual` tampoco. No hay error.
@@ -480,7 +482,7 @@ Si `cotizacion === null`, el badge no se muestra y el equivalente ARS en `Credit
 
 ---
 
-## Cambios recientes (22/06/2026)
+## Cambios recientes (22-23/06/2026)
 
 ### Fix: orden de subida no influye en cálculos (anclaje al período)
 - **Problema real:** la proyección de cuotas y la ventana del gráfico se anclaban a `new Date()` (hoy), no al período del resumen → con resúmenes viejos los meses NN/MM salían corridos y el gráfico mostraba todo en $0. (Las sumas mensuales ya eran order-independent; el orden de subida no las afectaba.)
