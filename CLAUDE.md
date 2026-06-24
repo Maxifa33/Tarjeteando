@@ -101,6 +101,16 @@ Para otros bancos, el backend usa Claude Vision API como fallback automático (r
 
 ---
 
+## Cambios recientes (23/06/2026)
+
+### Feature "Últimos consumos" (consumos pre-resumen, XLSX)
+- Nueva sección en sidebar (icon Zap). Importa el export "Últimos consumos" de Galicia (.xlsx) para ver gasto en curso antes del cierre.
+- **Independiente** de resúmenes/movimientos/cuotas. Vive en localStorage key `tarjetas_consumos_live`.
+- Parser nuevo: `Frontend/src/services/consumos-parser.js` (usa SheetJS). Componentes `ConsumosLiveView` + `CSVColumnMapper` en `App.jsx`.
+- **Nueva dependencia:** `xlsx`. Correr `cd Frontend && npm install` antes de levantar.
+
+---
+
 ## Cambios recientes (22/06/2026)
 
 ### 1. StatCard "Cuotas Próximo Mes"

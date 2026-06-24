@@ -9,6 +9,7 @@ const STORAGE_KEYS = {
   REGLAS: 'tarjetas_reglas',
   TARJETAS: 'tarjetas_lista',
   CONFIG: 'tarjetas_config',
+  CONSUMOS_LIVE: 'tarjetas_consumos_live',
   VERSION: 'tarjetas_version'
 };
 
@@ -243,6 +244,37 @@ class StorageService {
     return this.setItem(STORAGE_KEYS.CONFIG, { ...current, ...config });
   }
 
+  // ==================== CONSUMOS LIVE (pre-resumen) ====================
+
+  /**
+   * Obtiene todos los consumos live importados via XLSX/CSV
+   */
+  getConsumosLive() {
+    return this.getItem(STORAGE_KEYS.CONSUMOS_LIVE, []);
+  }
+
+  /**
+   * Guarda consumos live haciendo merge por id (dedup por hash).
+   * Los consumos nuevos con id ya existente se ignoran.
+   */
+  saveConsumosLive(nuevosConsumos) {
+    const existentes = this.getConsumosLive();
+    const idsExistentes = new Set(existentes.map(c => c.id));
+    const aAgregar = nuevosConsumos.filter(c => !idsExistentes.has(c.id));
+    return this.setItem(STORAGE_KEYS.CONSUMOS_LIVE, [...existentes, ...aAgregar]);
+  }
+
+  /**
+   * Elimina consumos live de una tarjeta específica, o todos si no se pasa tarjeta.
+   */
+  deleteConsumosLive(tarjeta = null) {
+    if (!tarjeta) {
+      return this.setItem(STORAGE_KEYS.CONSUMOS_LIVE, []);
+    }
+    const filtrados = this.getConsumosLive().filter(c => c.tarjeta !== tarjeta);
+    return this.setItem(STORAGE_KEYS.CONSUMOS_LIVE, filtrados);
+  }
+
   // ==================== EXPORT / IMPORT ====================
 
   /**
@@ -257,6 +289,7 @@ class StorageService {
         movimientos: this.getMovimientos(),
         tarjetas: this.getTarjetas(),
         reglas: this.getReglas(),
+        consumosLive: this.getConsumosLive(),
         config: this.getConfig()
       }
     };
@@ -271,7 +304,7 @@ class StorageService {
         throw new Error('Formato de datos inválido');
       }
 
-      const { resumenes, movimientos, tarjetas, reglas, config } = data.data;
+      const { resumenes, movimientos, tarjetas, reglas, consumosLive, config } = data.data;
 
       if (merge) {
         // Merge: combinar con datos existentes
@@ -300,12 +333,21 @@ class StorageService {
         const newReglas = reglas.filter(r => !reglaPatterns.has(r.patron));
         this.setItem(STORAGE_KEYS.REGLAS, [...existingReglas, ...newReglas]);
 
+        // Merge consumos live (dedup por id)
+        if (consumosLive) {
+          const existingConsumos = this.getConsumosLive();
+          const consumoIds = new Set(existingConsumos.map(c => c.id));
+          const newConsumos = consumosLive.filter(c => !consumoIds.has(c.id));
+          this.setItem(STORAGE_KEYS.CONSUMOS_LIVE, [...existingConsumos, ...newConsumos]);
+        }
+
       } else {
         // Replace: reemplazar todo
         if (resumenes) this.setItem(STORAGE_KEYS.RESUMENES, resumenes);
         if (movimientos) this.setItem(STORAGE_KEYS.MOVIMIENTOS, movimientos);
         if (tarjetas) this.setItem(STORAGE_KEYS.TARJETAS, tarjetas);
         if (reglas) this.setItem(STORAGE_KEYS.REGLAS, reglas);
+        if (consumosLive) this.setItem(STORAGE_KEYS.CONSUMOS_LIVE, consumosLive);
         if (config) this.setItem(STORAGE_KEYS.CONFIG, config);
       }
 

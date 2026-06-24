@@ -75,6 +75,17 @@ const API_BASE = `${API_URL}/api/v1`;
 7. **`CuotasView`** — cuotas activas con progress bars y proyección
 8. **`ReglasView`** — gestión de reglas limpieza de nombres + pendientes de nombre
 9. **`ImportarView`** — drag & drop para PDFs e imágenes
+10. **`ConsumosLiveView`** — vista "Últimos consumos": importa XLSX/CSV de Galicia, stats, gráficos (gasto/día + categoría), lista filtrable, dedup por período
+11. **`CSVColumnMapper`** — modal fallback para mapear columnas manualmente si el formato no se reconoce
+
+### Servicio: consumos-parser.js (`Frontend/src/services/`)
+Parser del export "Últimos consumos" de Galicia (XLSX jerárquico). **No es CSV plano.** Usa SheetJS (`xlsx`).
+- `parseConsumosFile(arrayBuffer)` → `{ consumos, metadata, warnings, subtotales }` (wrapper browser)
+- `parseRows(rows)` → mismo output, opera sobre matriz de filas (testeable en Node)
+- `categorizarConsumo(descripcion)` → categoría por diccionario `CATEGORIAS_CONSUMO`
+- `parsearMontoConsumo`, `normalizarFecha`, `parsearCuotas` → helpers exportados
+- **Lógica clave:** forward-fill de fechas vacías, detección de tarjetas por "terminada en XXXX" (soporta múltiples por archivo), separación de pagos/devoluciones (`es_pago`), pendientes (`es_pendiente`), validación contra "Subtotal de..." excluyendo pagos y pendientes.
+- **Validado** contra `Backend/tests/fixtures/Ultimos Consumos/` (Visa 3327 = 2 tarjetas, Amex 2017). Totales coinciden exacto con subtotales del Excel.
 
 ### Estado global en `App`
 ```js
@@ -191,6 +202,7 @@ const STORAGE_KEYS = {
   REGLAS:     'tarjetas_reglas',      // array de reglas
   TARJETAS:   'tarjetas_lista',       // array de tarjetas
   CONFIG:     'tarjetas_config',      // { theme, apiKey }
+  CONSUMOS_LIVE: 'tarjetas_consumos_live', // ConsumoLive[] — consumos pre-resumen (XLSX)
   VERSION:    'tarjetas_version'      // '1.1.0'
 };
 // Keys externas (manejadas fuera de storage.js):
@@ -198,6 +210,7 @@ const STORAGE_KEYS = {
 // 'onboarding_completed' → boolean
 // 'theme'               → 'dark'|'light'
 // 'nombresTarjetas'     → {[nombre]: alias}
+// 'dashboard_card_order' → string[] — orden manual de las stat cards del Dashboard
 ```
 
 ### Métodos principales
@@ -219,7 +232,12 @@ storage.importAll(data, merge=false)            // reemplaza o mergea
 storage.clearAll()                              // borra todas las keys
 storage.getEstadisticas()                       // calcula totales desde localStorage
 storage.getEvolucionMensual(meses=6)            // evolución mensual pesos, ventana anclada al período más reciente
+storage.getConsumosLive()                       // → ConsumoLive[]
+storage.saveConsumosLive(nuevos)                // merge por id (dedup hash), no duplica
+storage.deleteConsumosLive(tarjeta?)            // borra de una tarjeta o todos
 ```
+
+**Consumos live (`tarjetas_consumos_live`)** están incluidos en `exportAll()` (key `consumosLive`), `importAll()` (merge por id) y `clearAll()`.
 
 **Nota:** `getEvolucionMensual()` ya NO se ancla a la fecha de hoy. Toma el período del resumen más reciente (`max(anio, mes)`) y muestra los últimos `meses` meses terminando ahí, así los resúmenes recientes siempre aparecen aunque sean de meses anteriores a hoy. `getProyeccionCuotas()` fue **eliminado** (estaba muerto y su criterio era inconsistente); la proyección vive en `fetchData` (frontend) y en `proyeccion.service.js` (backend).
 
@@ -454,6 +472,28 @@ async procesarArchivo(buffer, filename, mimetype)  // → mismo formato que pdfP
 }
 ```
 
+### ConsumoLive (localStorage key: `tarjetas_consumos_live`)
+```typescript
+{
+  id: string;                  // hash base64(tarjeta+fecha+descripcion+montos+comprobante)
+  tarjeta: string;             // 'Visa 3327' / 'Amex 2017' (tipo + últimos 4)
+  tarjeta_ult4: string;        // '3327'
+  fecha: string;               // YYYY-MM-DD (forward-filled si venía vacío)
+  descripcion: string;
+  comprobante: string;
+  cuotas_texto: string;        // '2 de 3' o ''
+  es_cuota: boolean;
+  cuota_actual: number | null;
+  total_cuotas: number | null;
+  monto_pesos: number;         // negativo = devolución/pago
+  monto_dolares: number;
+  categoria: string;           // de categorizarConsumo()
+  es_pago: boolean;            // 'Su pago' o sección pagos → excluir del gasto
+  es_pendiente: boolean;       // comprobante '-' o 'Pendiente'
+  fecha_importacion: string;   // ISO
+}
+```
+
 ---
 
 ## Gotchas críticos
@@ -471,8 +511,11 @@ Todo el `db` está en RAM. Railway reinicia el servidor → hay que volver a sub
 ### 4. getEvolucionMensual: ventana anclada al período más reciente
 `storage.getEvolucionMensual()` muestra los últimos N meses **terminando en el período del resumen más reciente**, no en la fecha de hoy. Así un resumen viejo de una tarjeta recién cargada siempre aparece en el gráfico. (`getProyeccionCuotas()` fue eliminado.)
 
+### 4b. Consumos live son INDEPENDIENTES de resúmenes/cuotas
+`ConsumosLiveView` y `tarjetas_consumos_live` NO tocan `db`, `resumenes`, `movimientos`, `cuotasActivas` ni `proyeccionCuotas`. El "dedup por período" (toggle "Ocultar ya facturados") solo **filtra la vista**: oculta consumos con `fecha <= fecha_cierre` del último resumen de esa tarjeta (match por últimos 4 dígitos). Nunca borra datos. Requiere `xlsx` (SheetJS) en Frontend/package.json.
+
 ### 5. App.jsx es monolítico
-~3553 líneas, un solo archivo. Todos los componentes están en scope global del módulo. Variables como `TARJETA_COLORS`, `BANK_THEMES`, `formatMonto()` son accesibles desde todos los componentes sin props.
+~4000 líneas, un solo archivo. Todos los componentes están en scope global del módulo. Variables como `TARJETA_COLORS`, `BANK_THEMES`, `formatMonto()` son accesibles desde todos los componentes sin props.
 
 ### 6. Cotización `null` no rompe nada
 Si `cotizacion === null`, el badge no se muestra y el equivalente ARS en `CreditCardVisual` tampoco. No hay error.
@@ -483,6 +526,21 @@ Si `cotizacion === null`, el badge no se muestra y el equivalente ARS en `Credit
 ---
 
 ## Cambios recientes (22-23/06/2026)
+
+### Dashboard: stat cards compactas, reordenables + card "Últimos consumos"
+- **Nueva card** "Últimos consumos" (icon Zap, leftmost por default): muestra gasto live en ARS + USD (`consumosLive` filtrado por `!es_pago`, solo montos positivos). Click → vista consumos-live.
+- **Layout:** las 5 cards ahora en **una fila** flex (`flex flex-wrap lg:flex-nowrap`), cada una con ancho variable según `weight` (`flexGrow` + `flexBasis:0`). Usan `.stat-card-sm` (variante compacta en index.css).
+- **Reordenables:** drag & drop nativo (grip icon en hover). Orden persistido en localStorage `dashboard_card_order`. `moveCard(dragId, targetId)` + estado `cardOrder` en `DashboardView`. Default: `['live','fijos','cuotasActivas','cuotasProx','totalPagar']` (const `DEFAULT_CARD_ORDER`).
+- `DashboardView` recibe nueva prop `consumosLive`.
+
+### Feature: "Últimos consumos" (consumos pre-resumen, XLSX)
+- **Nueva sección** en sidebar (icon Zap, entre Movimientos y Cuotas). Independiente de resúmenes/cuotas.
+- **Parser nuevo:** `Frontend/src/services/consumos-parser.js` — formato "Últimos consumos" de Galicia (XLSX jerárquico). Usa SheetJS (`xlsx` agregado a package.json).
+- Maneja: forward-fill de fechas, múltiples tarjetas por archivo, cuotas "X de Y", pagos/devoluciones (negativos), pendientes. Categorización rule-based.
+- **Vista:** StatCards (total gastado, USD, % vs último cierre, cantidad), gráficos (gasto/día + pie por categoría), lista filtrable, toggle "Ocultar ya facturados" (dedup por período).
+- **storage.js:** key `tarjetas_consumos_live` + `getConsumosLive/saveConsumosLive/deleteConsumosLive`.
+- **Validado** contra fixtures reales (Visa 3327 = 2 tarjetas, Amex 2017): totales coinciden exacto con subtotales del Excel.
+- **Pendiente del usuario:** correr `cd Frontend && npm install` (agrega `xlsx`).
 
 ### Fix: orden de subida no influye en cálculos (anclaje al período)
 - **Problema real:** la proyección de cuotas y la ventana del gráfico se anclaban a `new Date()` (hoy), no al período del resumen → con resúmenes viejos los meses NN/MM salían corridos y el gráfico mostraba todo en $0. (Las sumas mensuales ya eran order-independent; el orden de subida no las afectaba.)

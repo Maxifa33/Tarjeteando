@@ -146,6 +146,16 @@ body {
   overflow: hidden;
 }
 
+/* Variante compacta: cards más chicas para que entren todas en una fila */
+.stat-card-sm {
+  padding: 0.85rem 1rem;
+  border-radius: 16px;
+}
+
+.stat-card-sm:hover {
+  transform: translateY(-2px);
+}
+
 .stat-card::before {
   content: '';
   position: absolute;

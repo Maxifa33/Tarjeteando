@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import storage from './services/storage';
+import { parseConsumosFile, categorizarConsumo } from './services/consumos-parser';
 import {
   LayoutDashboard, Receipt, CreditCard, Tag, Upload,
   TrendingUp, TrendingDown, Calendar, AlertCircle, ChevronRight,
   Sun, Moon, Bell, Settings, Search, Menu, X, DollarSign,
   PieChart, BarChart3, Wallet, ArrowUpRight, ArrowDownRight,
   FileText, Clock, CheckCircle, XCircle, Sparkles, Trophy, Filter,
-  RefreshCcw, Trash2, Download, Edit3, Plus, Repeat, Shuffle
+  RefreshCcw, Trash2, Download, Edit3, Plus, Repeat, Shuffle, Zap, Eye, EyeOff, GripVertical
 } from 'lucide-react';
 import {
   LineChart, Line, AreaChart, Area, BarChart, Bar, PieChart as RechartsPie, Pie, Cell,
@@ -1205,6 +1206,7 @@ const App = () => {
   const [dashboard, setDashboard] = useState(null);
   const [proyecciones, setProyecciones] = useState(null);
   const [reglas, setReglas] = useState([]);
+  const [consumosLive, setConsumosLive] = useState(() => storage.getConsumosLive());
   const [loading, setLoading] = useState(true);
 
   // Cotización USD
@@ -1242,6 +1244,17 @@ const App = () => {
     } catch (e) {
       // Silently fail
     }
+  };
+
+  // Handlers de consumos live (pre-resumen)
+  const handleImportConsumosLive = (nuevosConsumos) => {
+    storage.saveConsumosLive(nuevosConsumos);
+    setConsumosLive(storage.getConsumosLive());
+  };
+
+  const handleDeleteConsumosLive = (tarjeta = null) => {
+    storage.deleteConsumosLive(tarjeta);
+    setConsumosLive(storage.getConsumosLive());
   };
 
   // Función para guardar edición de descripción de movimiento
@@ -1650,6 +1663,7 @@ const App = () => {
   const menuItems = [
     { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     { id: 'movimientos', icon: Receipt, label: 'Movimientos' },
+    { id: 'consumos-live', icon: Zap, label: 'Últimos consumos', badge: consumosLive.length > 0 ? consumosLive.length : null },
     { id: 'cuotas', icon: Calendar, label: 'Cuotas', badge: cuotasActivas.length },
     { id: 'reintegros', icon: RefreshCcw, label: 'Reintegros', badge: reintegros.length > 0 ? reintegros.length : null },
     { id: 'importar', icon: Upload, label: 'Importar' },
@@ -1812,6 +1826,7 @@ const App = () => {
               onGuardarNombre={guardarNombreTarjeta}
               gastosFijos={gastosFijos}
               cotizacion={cotizacion}
+              consumosLive={consumosLive}
               onFiltrarMovimientos={(tipo) => {
                 setFiltroTipoGastoInicial(tipo);
                 setActiveView('movimientos');
@@ -1826,6 +1841,15 @@ const App = () => {
               onEditarDescripcion={guardarEdicionDescripcion}
               gastosFijos={gastosFijos}
               filtroTipoGastoInicial={filtroTipoGastoInicial}
+            />
+          ) : activeView === 'consumos-live' ? (
+            <ConsumosLiveView
+              consumosLive={consumosLive}
+              tarjetas={tarjetas}
+              resumenes={resumenes}
+              formatCurrency={formatCurrency}
+              onImport={handleImportConsumosLive}
+              onDeleteConsumos={handleDeleteConsumosLive}
             />
           ) : activeView === 'cuotas' ? (
             <CuotasView
@@ -1867,11 +1891,42 @@ const App = () => {
 };
 
 // Dashboard View
-const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [], chartColors, formatCurrency, theme, resumenes = [], onDeleteResumen, setActiveView, searchQuery = '', movimientos = [], cuotasActivas = [], nombresTarjetas = {}, onGuardarNombre, gastosFijos = new Set(), cotizacion = null, onFiltrarMovimientos }) => {
+const DEFAULT_CARD_ORDER = ['live', 'fijos', 'cuotasActivas', 'cuotasProx', 'totalPagar'];
+
+const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [], chartColors, formatCurrency, theme, resumenes = [], onDeleteResumen, setActiveView, searchQuery = '', movimientos = [], cuotasActivas = [], nombresTarjetas = {}, onGuardarNombre, gastosFijos = new Set(), cotizacion = null, onFiltrarMovimientos, consumosLive = [] }) => {
   const [showResumenes, setShowResumenes] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
   const [mesDetalleIdx, setMesDetalleIdx] = useState(null);
   const [resumenCombinado, setResumenCombinado] = useState(false);
+
+  // Orden manual de las stat cards (persistido en localStorage)
+  const [cardOrder, setCardOrder] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('dashboard_card_order') || 'null');
+      if (Array.isArray(saved)) {
+        return [
+          ...saved.filter((id) => DEFAULT_CARD_ORDER.includes(id)),
+          ...DEFAULT_CARD_ORDER.filter((id) => !saved.includes(id)),
+        ];
+      }
+    } catch {}
+    return DEFAULT_CARD_ORDER;
+  });
+  const [dragCardId, setDragCardId] = useState(null);
+
+  const moveCard = (dragId, targetId) => {
+    if (!dragId || dragId === targetId) return;
+    setCardOrder((prev) => {
+      const next = [...prev];
+      const from = next.indexOf(dragId);
+      const to = next.indexOf(targetId);
+      if (from < 0 || to < 0) return prev;
+      next.splice(from, 1);
+      next.splice(to, 0, dragId);
+      localStorage.setItem('dashboard_card_order', JSON.stringify(next));
+      return next;
+    });
+  };
 
   const handleDeleteResumen = async (resumenId) => {
     if (!confirm('¿Eliminar este resumen y todos sus movimientos?')) return;
@@ -2105,76 +2160,135 @@ const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [
           ? new Date(mesRef + '-01T12:00:00').toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })
           : null;
 
-        return (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <StatCard
-              icon={Repeat}
-              label="Gastos Fijos"
-              value={formatCurrency(totalFijos)}
-              delay={100}
-              onClick={() => onFiltrarMovimientos?.('fijo')}
-            />
-            <StatCard
-              icon={Calendar}
-              label="Cuotas Activas"
-              value={dashboard.cuotas_activas || 0}
-              delay={200}
-              onClick={() => setActiveView?.('cuotas')}
-            />
-            <StatCard
-              icon={DollarSign}
-              label="Cuotas Próximo Mes"
-              value={formatCurrency(proyeccionCuotas[0]?.total || 0)}
-              delay={300}
-            />
-            {/* Card: total último resumen todas las tarjetas */}
-            <div
-              className="stat-card opacity-0 animate-fade-in-up"
-              style={{ animationDelay: '400ms', animationFillMode: 'forwards' }}
-            >
-              <div className="flex items-start justify-between mb-3">
-                <div className="p-2.5 rounded-xl bg-gradient-to-br from-[var(--accent-1)] to-[var(--accent-2)] bg-opacity-20">
-                  <CreditCard className="w-5 h-5 text-white" />
+        // Total gastado en "Últimos consumos" (pre-resumen), excluye pagos/devoluciones
+        const consumosGasto = consumosLive.filter(c => !c.es_pago);
+        const liveTotalPesos = consumosGasto.reduce((s, c) => s + (c.monto_pesos > 0 ? c.monto_pesos : 0), 0);
+        const liveTotalUSD = consumosGasto.reduce((s, c) => s + (c.monto_dolares > 0 ? c.monto_dolares : 0), 0);
+
+        // Card compacta simple (icono + label + valor)
+        const simpleCard = (Icon, label, value, onClick) => (
+          <div
+            className={`stat-card stat-card-sm h-full ${onClick ? 'cursor-pointer' : ''}`}
+            onClick={onClick}
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <div className="p-2 rounded-lg bg-gradient-to-br from-[var(--accent-1)] to-[var(--accent-2)] bg-opacity-20">
+                <Icon className="w-4 h-4 text-white" />
+              </div>
+              <p className="text-[var(--text-muted)] text-xs leading-tight">{label}</p>
+            </div>
+            <p className="text-xl font-bold text-[var(--text-primary)] leading-tight whitespace-nowrap">{value}</p>
+          </div>
+        );
+
+        // Definición de cada card: weight controla el ancho relativo en la fila
+        const cardDefs = {
+          live: {
+            weight: 1.3,
+            node: (
+              <div className="stat-card stat-card-sm h-full cursor-pointer" onClick={() => setActiveView?.('consumos-live')}>
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="p-2 rounded-lg bg-gradient-to-br from-[var(--accent-1)] to-[var(--accent-2)] bg-opacity-20">
+                    <Zap className="w-4 h-4 text-white" />
+                  </div>
+                  <p className="text-[var(--text-muted)] text-xs leading-tight">Últimos consumos</p>
                 </div>
-                {totalUltimoResumenUSD > 0 && cotizacion?.venta && (
-                  <button
-                    onClick={() => setResumenCombinado(v => !v)}
-                    title={resumenCombinado ? 'Ver separado' : 'Ver total en ARS'}
-                    className={`text-xs px-2 py-1 rounded-lg border transition-colors font-medium ${
-                      resumenCombinado
-                        ? 'bg-[var(--accent-1)] text-white border-[var(--accent-1)]'
-                        : 'text-[var(--text-muted)] border-[var(--glass-border)] hover:border-[var(--accent-1)] hover:text-[var(--accent-1)]'
-                    }`}
-                  >
-                    {resumenCombinado ? '= ARS' : '+ USD→ARS'}
-                  </button>
+                <p className="text-xl font-bold text-[var(--text-primary)] leading-tight whitespace-nowrap">{formatCurrency(liveTotalPesos)}</p>
+                {liveTotalUSD > 0 && (
+                  <p className="text-sm font-semibold text-emerald-500 mt-0.5 whitespace-nowrap">+ {formatMontoDolares(liveTotalUSD)}</p>
                 )}
               </div>
-              <p className="text-[var(--text-muted)] text-sm mb-2">
-                Total a pagar{mesRefLabel ? ` · ${mesRefLabel}` : ''}
-              </p>
-              {resumenCombinado && cotizacion?.venta ? (
-                <>
-                  <p className="text-xl font-bold text-[var(--text-primary)] leading-tight">
-                    {formatCurrency(totalUltimoResumenARS + totalUltimoResumenUSD * cotizacion.venta)}
-                  </p>
-                  <p className="text-xs text-[var(--text-muted)] mt-1">
-                    {formatCurrency(totalUltimoResumenARS)} + {formatMontoDolares(totalUltimoResumenUSD)} × {formatMonto(cotizacion.venta)}
-                  </p>
-                </>
-              ) : (
-                <>
-                  <p className="text-xl font-bold text-[var(--text-primary)] leading-tight">
-                    {formatCurrency(totalUltimoResumenARS)}
-                  </p>
-                  {totalUltimoResumenUSD > 0 && (
-                    <p className="text-sm font-semibold text-emerald-500 mt-0.5">
-                      + {formatMontoDolares(totalUltimoResumenUSD)}
+            ),
+          },
+          fijos: {
+            weight: 1.1,
+            node: simpleCard(Repeat, 'Gastos Fijos', formatCurrency(totalFijos), () => onFiltrarMovimientos?.('fijo')),
+          },
+          cuotasActivas: {
+            weight: 0.7,
+            node: simpleCard(Calendar, 'Cuotas Activas', dashboard.cuotas_activas || 0, () => setActiveView?.('cuotas')),
+          },
+          cuotasProx: {
+            weight: 1.1,
+            node: simpleCard(DollarSign, 'Cuotas Próximo Mes', formatCurrency(proyeccionCuotas[0]?.total || 0)),
+          },
+          totalPagar: {
+            weight: 1.5,
+            node: (
+              <div className="stat-card stat-card-sm h-full">
+                <div className="flex items-start justify-between mb-2 gap-2">
+                  <div className="flex items-center gap-2">
+                    <div className="p-2 rounded-lg bg-gradient-to-br from-[var(--accent-1)] to-[var(--accent-2)] bg-opacity-20">
+                      <CreditCard className="w-4 h-4 text-white" />
+                    </div>
+                    <p className="text-[var(--text-muted)] text-xs leading-tight">
+                      Total a pagar{mesRefLabel ? ` · ${mesRefLabel}` : ''}
                     </p>
+                  </div>
+                  {totalUltimoResumenUSD > 0 && cotizacion?.venta && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setResumenCombinado(v => !v); }}
+                      title={resumenCombinado ? 'Ver separado' : 'Ver total en ARS'}
+                      className={`text-[10px] px-1.5 py-0.5 rounded-md border transition-colors font-medium shrink-0 ${
+                        resumenCombinado
+                          ? 'bg-[var(--accent-1)] text-white border-[var(--accent-1)]'
+                          : 'text-[var(--text-muted)] border-[var(--glass-border)] hover:border-[var(--accent-1)] hover:text-[var(--accent-1)]'
+                      }`}
+                    >
+                      {resumenCombinado ? '= ARS' : '+ USD→ARS'}
+                    </button>
                   )}
-                </>
-              )}
-            </div>
+                </div>
+                {resumenCombinado && cotizacion?.venta ? (
+                  <>
+                    <p className="text-xl font-bold text-[var(--text-primary)] leading-tight whitespace-nowrap">
+                      {formatCurrency(totalUltimoResumenARS + totalUltimoResumenUSD * cotizacion.venta)}
+                    </p>
+                    <p className="text-[10px] text-[var(--text-muted)] mt-0.5">
+                      {formatCurrency(totalUltimoResumenARS)} + {formatMontoDolares(totalUltimoResumenUSD)} × {formatMonto(cotizacion.venta)}
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-xl font-bold text-[var(--text-primary)] leading-tight whitespace-nowrap">
+                      {formatCurrency(totalUltimoResumenARS)}
+                    </p>
+                    {totalUltimoResumenUSD > 0 && (
+                      <p className="text-sm font-semibold text-emerald-500 mt-0.5 whitespace-nowrap">
+                        + {formatMontoDolares(totalUltimoResumenUSD)}
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
+            ),
+          },
+        };
+
+        const orderedIds = cardOrder.filter((id) => cardDefs[id]);
+
+        return (
+          <div className="flex flex-wrap lg:flex-nowrap gap-3 items-stretch">
+            {orderedIds.map((id) => (
+              <div
+                key={id}
+                draggable
+                onDragStart={() => setDragCardId(id)}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={() => { moveCard(dragCardId, id); setDragCardId(null); }}
+                onDragEnd={() => setDragCardId(null)}
+                style={{ flexGrow: cardDefs[id].weight, flexBasis: 0 }}
+                className={`relative group min-w-[150px] transition-opacity ${dragCardId === id ? 'opacity-40' : ''}`}
+              >
+                <span
+                  className="absolute top-1.5 right-1.5 z-10 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing text-[var(--text-muted)]"
+                  title="Arrastrá para reordenar"
+                >
+                  <GripVertical className="w-3.5 h-3.5" />
+                </span>
+                {cardDefs[id].node}
+              </div>
+            ))}
           </div>
         );
       })()}
@@ -3544,6 +3658,426 @@ const ImportarView = ({ onSuccess }) => {
             </div>
           ))}
         </div>
+      )}
+    </div>
+  );
+};
+
+// ==================== Últimos Consumos (pre-resumen) ====================
+
+const COLORES_CATEGORIA = {
+  Marketplace: '#8b5cf6',
+  Suscripciones: '#06b6d4',
+  Viajes: '#f59e0b',
+  Supermercado: '#10b981',
+  'Servicios/Impuestos': '#ef4444',
+  Hogar: '#ec4899',
+  Gastronomia: '#f97316',
+  Salud: '#14b8a6',
+  Otros: '#64748b',
+};
+
+// Modal de mapeo manual de columnas (fallback si el formato no se reconoce)
+const CSVColumnMapper = ({ headers, preview, onConfirm, onCancel }) => {
+  const [map, setMap] = useState({ fecha: '', descripcion: '', monto: '', montoDolares: '', cuotas: '' });
+  const campos = [
+    { key: 'fecha', label: 'Fecha', req: true },
+    { key: 'descripcion', label: 'Descripción', req: true },
+    { key: 'monto', label: 'Monto en pesos', req: true },
+    { key: 'montoDolares', label: 'Monto en dólares', req: false },
+    { key: 'cuotas', label: 'Cuotas', req: false },
+  ];
+  const valido = map.fecha && map.descripcion && map.monto;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="glass-card p-6 max-w-lg w-full max-h-[80vh] overflow-y-auto">
+        <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-1">Mapear columnas</h3>
+        <p className="text-sm text-[var(--text-muted)] mb-4">
+          No reconocimos el formato. Indicá qué columna es cada campo.
+        </p>
+        <div className="space-y-3">
+          {campos.map(({ key, label, req }) => (
+            <div key={key} className="flex items-center gap-3">
+              <label className="w-40 text-sm text-[var(--text-secondary)]">
+                {label}{req && <span className="text-red-400"> *</span>}
+              </label>
+              <select
+                value={map[key]}
+                onChange={(e) => setMap({ ...map, [key]: e.target.value })}
+                className="flex-1 px-3 py-2 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--text-primary)] text-sm"
+              >
+                <option value="">— Ninguna —</option>
+                {headers.map((h, i) => (
+                  <option key={i} value={String(i)}>{h || `Columna ${i + 1}`}</option>
+                ))}
+              </select>
+            </div>
+          ))}
+        </div>
+        <div className="flex justify-end gap-2 mt-6">
+          <button onClick={onCancel} className="px-4 py-2 rounded-lg bg-[var(--glass-bg)] text-[var(--text-muted)] text-sm">
+            Cancelar
+          </button>
+          <button
+            onClick={() => onConfirm(map)}
+            disabled={!valido}
+            className="px-4 py-2 rounded-lg bg-[var(--accent-1)] text-white font-medium text-sm disabled:opacity-50"
+          >
+            Confirmar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const ConsumosLiveView = ({ consumosLive = [], tarjetas = [], resumenes = [], formatCurrency, onImport, onDeleteConsumos }) => {
+  const [showUploader, setShowUploader] = useState(consumosLive.length === 0);
+  const [parsing, setParsing] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const [parseResult, setParseResult] = useState(null);
+  const [filtroTexto, setFiltroTexto] = useState('');
+  const [filtroTarjeta, setFiltroTarjeta] = useState('');
+  const [filtroCategoria, setFiltroCategoria] = useState('');
+  const [ocultarOficializados, setOcultarOficializados] = useState(true);
+
+  // Fecha de cierre del último resumen por tarjeta (para dedup por período)
+  const cierrePorTarjeta = {};
+  resumenes.forEach((r) => {
+    // Match por últimos 4 dígitos del nombre de la tarjeta
+    const ult4 = (r.tarjeta || '').match(/(\d{4})/)?.[1];
+    if (!ult4 || !r.fecha_cierre) return;
+    const fechaIso = normalizarFechaResumen(r.fecha_cierre);
+    if (!fechaIso) return;
+    if (!cierrePorTarjeta[ult4] || fechaIso > cierrePorTarjeta[ult4]) {
+      cierrePorTarjeta[ult4] = fechaIso;
+    }
+  });
+
+  function normalizarFechaResumen(f) {
+    if (!f) return '';
+    if (/^\d{4}-\d{2}-\d{2}$/.test(f)) return f;
+    const m = String(f).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+    return '';
+  }
+
+  // Aplicar dedup por período + filtros
+  const visibles = consumosLive.filter((c) => {
+    if (ocultarOficializados) {
+      const cierre = cierrePorTarjeta[c.tarjeta_ult4];
+      if (cierre && c.fecha && c.fecha <= cierre) return false;
+    }
+    if (filtroTarjeta && c.tarjeta !== filtroTarjeta) return false;
+    if (filtroCategoria && c.categoria !== filtroCategoria) return false;
+    if (filtroTexto && !c.descripcion.toLowerCase().includes(filtroTexto.toLowerCase())) return false;
+    return true;
+  });
+
+  // Stats (sobre visibles, excluyendo pagos)
+  const consumosGasto = visibles.filter((c) => !c.es_pago);
+  const totalGastado = consumosGasto.reduce((s, c) => s + (c.monto_pesos > 0 ? c.monto_pesos : 0), 0);
+  const totalDevoluciones = consumosGasto.reduce((s, c) => s + (c.monto_pesos < 0 ? c.monto_pesos : 0), 0);
+  const totalDolares = consumosGasto.reduce((s, c) => s + (c.monto_dolares > 0 ? c.monto_dolares : 0), 0);
+  const cantConsumos = consumosGasto.filter((c) => c.monto_pesos > 0 || c.monto_dolares > 0).length;
+
+  // Comparación vs último resumen de las tarjetas presentes
+  const ult4Presentes = [...new Set(consumosGasto.map((c) => c.tarjeta_ult4))];
+  let totalResumenRef = 0;
+  ult4Presentes.forEach((ult4) => {
+    const resumenesTarjeta = resumenes
+      .filter((r) => (r.tarjeta || '').includes(ult4))
+      .sort((a, b) => (b.anio - a.anio) || (b.mes - a.mes));
+    if (resumenesTarjeta[0]) totalResumenRef += resumenesTarjeta[0].total_consumos_pesos || 0;
+  });
+  const pctVsResumen = totalResumenRef > 0 ? Math.round((totalGastado / totalResumenRef) * 100) : null;
+
+  // Gasto por día
+  const porDia = {};
+  consumosGasto.forEach((c) => {
+    if (!c.fecha || c.monto_pesos <= 0) return;
+    porDia[c.fecha] = (porDia[c.fecha] || 0) + c.monto_pesos;
+  });
+  const dataPorDia = Object.entries(porDia)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([fecha, total]) => ({ fecha: fecha.slice(5), total }));
+
+  // Gasto por categoría
+  const porCategoria = {};
+  consumosGasto.forEach((c) => {
+    if (c.monto_pesos <= 0) return;
+    porCategoria[c.categoria] = (porCategoria[c.categoria] || 0) + c.monto_pesos;
+  });
+  const dataCategoria = Object.entries(porCategoria)
+    .sort(([, a], [, b]) => b - a)
+    .map(([name, value]) => ({ name, value }));
+
+  const tarjetasUnicas = [...new Set(consumosLive.map((c) => c.tarjeta))];
+  const categoriasUnicas = [...new Set(consumosLive.filter((c) => !c.es_pago).map((c) => c.categoria))];
+
+  const handleFile = async (files) => {
+    const file = files?.[0];
+    if (!file) return;
+    setParsing(true);
+    setParseResult(null);
+    try {
+      const buffer = await file.arrayBuffer();
+      const result = parseConsumosFile(buffer);
+      setParseResult(result);
+    } catch (err) {
+      setParseResult({ consumos: [], metadata: {}, warnings: [`Error al leer el archivo: ${err.message}`] });
+    }
+    setParsing(false);
+  };
+
+  const confirmarImport = () => {
+    if (!parseResult?.consumos?.length) return;
+    onImport?.(parseResult.consumos, parseResult.metadata);
+    setParseResult(null);
+    setShowUploader(false);
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h2 className="text-2xl font-bold text-[var(--text-primary)] flex items-center gap-2">
+            <Zap className="w-6 h-6 text-[var(--accent-1)]" />
+            Últimos consumos
+          </h2>
+          <p className="text-sm text-[var(--text-muted)]">Gasto en curso antes del cierre del resumen</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {consumosLive.length > 0 && (
+            <button
+              onClick={() => { if (confirm('¿Limpiar todos los consumos importados?')) onDeleteConsumos?.(); }}
+              className="px-3 py-2 rounded-lg bg-[var(--glass-bg)] text-[var(--text-muted)] text-sm hover:text-red-400 transition-colors flex items-center gap-1.5"
+            >
+              <Trash2 className="w-4 h-4" /> Limpiar
+            </button>
+          )}
+          <button
+            onClick={() => setShowUploader((v) => !v)}
+            className="px-4 py-2 rounded-lg bg-[var(--accent-1)] text-white font-medium text-sm flex items-center gap-1.5"
+          >
+            <Plus className="w-4 h-4" /> Importar Excel
+          </button>
+        </div>
+      </div>
+
+      {/* Uploader */}
+      {showUploader && (
+        <div className="glass-card p-6">
+          {!parseResult ? (
+            <div
+              className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all
+                          ${dragOver ? 'border-[var(--accent-1)] bg-[var(--accent-1)]/10' : 'border-[var(--glass-border)]'}`}
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={(e) => { e.preventDefault(); setDragOver(false); handleFile(e.dataTransfer.files); }}
+              onClick={() => document.getElementById('consumos-file-input').click()}
+            >
+              <input
+                id="consumos-file-input"
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                className="hidden"
+                onChange={(e) => handleFile(e.target.files)}
+              />
+              {parsing ? (
+                <div className="animate-pulse">
+                  <Sparkles className="w-12 h-12 mx-auto mb-3 text-[var(--accent-1)]" />
+                  <p className="text-[var(--text-primary)]">Procesando archivo...</p>
+                </div>
+              ) : (
+                <>
+                  <Upload className="w-12 h-12 mx-auto mb-3 text-[var(--accent-1)] opacity-70" />
+                  <p className="font-medium text-[var(--text-primary)] mb-1">
+                    Arrastrá el Excel de "Últimos consumos"
+                  </p>
+                  <p className="text-sm text-[var(--text-muted)]">
+                    Export de home banking Galicia (.xlsx) o CSV
+                  </p>
+                </>
+              )}
+            </div>
+          ) : (
+            <div>
+              <h4 className="font-semibold text-[var(--text-primary)] mb-3">Vista previa</h4>
+              {parseResult.warnings?.length > 0 && (
+                <div className="mb-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30">
+                  {parseResult.warnings.map((w, i) => (
+                    <p key={i} className="text-sm text-amber-500 flex items-start gap-2">
+                      <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" /> {w}
+                    </p>
+                  ))}
+                </div>
+              )}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                <div className="p-3 rounded-lg bg-[var(--glass-bg)]">
+                  <p className="text-xs text-[var(--text-muted)]">Consumos</p>
+                  <p className="text-lg font-bold text-[var(--text-primary)]">{parseResult.consumos.length}</p>
+                </div>
+                <div className="p-3 rounded-lg bg-[var(--glass-bg)]">
+                  <p className="text-xs text-[var(--text-muted)]">Tarjetas</p>
+                  <p className="text-lg font-bold text-[var(--text-primary)]">{parseResult.metadata.tarjetas_detectadas?.length || 0}</p>
+                </div>
+                <div className="p-3 rounded-lg bg-[var(--glass-bg)]">
+                  <p className="text-xs text-[var(--text-muted)]">Consumido</p>
+                  <p className="text-lg font-bold text-[var(--text-primary)]">{formatCurrency(parseResult.metadata.consumido_pesos || 0)}</p>
+                </div>
+                <div className="p-3 rounded-lg bg-[var(--glass-bg)]">
+                  <p className="text-xs text-[var(--text-muted)]">Cierre</p>
+                  <p className="text-sm font-bold text-[var(--text-primary)]">{parseResult.metadata.fecha_cierre || '—'}</p>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2">
+                <button onClick={() => setParseResult(null)} className="px-4 py-2 rounded-lg bg-[var(--glass-bg)] text-[var(--text-muted)] text-sm">
+                  Cancelar
+                </button>
+                <button
+                  onClick={confirmarImport}
+                  disabled={!parseResult.consumos.length}
+                  className="px-4 py-2 rounded-lg bg-emerald-500 text-white font-medium text-sm disabled:opacity-50"
+                >
+                  Importar {parseResult.consumos.length} consumos
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {consumosLive.length === 0 ? (
+        !showUploader && (
+          <div className="glass-card p-12 text-center">
+            <Zap className="w-12 h-12 mx-auto mb-3 text-[var(--text-muted)] opacity-50" />
+            <p className="text-[var(--text-muted)]">Todavía no importaste consumos. Subí el Excel de "Últimos consumos" de tu banco.</p>
+          </div>
+        )
+      ) : (
+        <>
+          {/* StatCards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <StatCard icon={DollarSign} label="Total gastado" value={formatCurrency(totalGastado)} delay={0} />
+            <StatCard icon={DollarSign} label="Consumido USD" value={`USD ${totalDolares.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} delay={100} />
+            <StatCard
+              icon={TrendingUp}
+              label={pctVsResumen != null ? 'vs último cierre' : 'Devoluciones'}
+              value={pctVsResumen != null ? `${pctVsResumen}%` : formatCurrency(Math.abs(totalDevoluciones))}
+              delay={200}
+            />
+            <StatCard icon={Receipt} label="Consumos" value={cantConsumos} delay={300} />
+          </div>
+
+          {/* Gráficos */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {dataPorDia.length > 0 && (
+              <div className="glass-card p-6">
+                <h3 className="font-semibold text-[var(--text-primary)] mb-4">Gasto por día</h3>
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart data={dataPorDia}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" />
+                    <XAxis dataKey="fecha" tick={{ fontSize: 11, fill: 'var(--text-muted)' }} />
+                    <YAxis tick={{ fontSize: 11, fill: 'var(--text-muted)' }} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
+                    <Tooltip formatter={(v) => formatCurrency(v)} contentStyle={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', borderRadius: 8 }} />
+                    <Bar dataKey="total" fill="var(--accent-1)" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+            {dataCategoria.length > 0 && (
+              <div className="glass-card p-6">
+                <h3 className="font-semibold text-[var(--text-primary)] mb-4">Gasto por categoría</h3>
+                <ResponsiveContainer width="100%" height={220}>
+                  <RechartsPie>
+                    <Pie data={dataCategoria} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={(e) => e.name}>
+                      {dataCategoria.map((entry, i) => (
+                        <Cell key={i} fill={COLORES_CATEGORIA[entry.name] || '#64748b'} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(v) => formatCurrency(v)} contentStyle={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', borderRadius: 8 }} />
+                  </RechartsPie>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </div>
+
+          {/* Filtros */}
+          <div className="glass-card p-4 flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2 flex-1 min-w-[180px]">
+              <Search className="w-4 h-4 text-[var(--text-muted)]" />
+              <input
+                type="text"
+                placeholder="Buscar comercio..."
+                value={filtroTexto}
+                onChange={(e) => setFiltroTexto(e.target.value)}
+                className="flex-1 bg-transparent text-sm text-[var(--text-primary)] focus:outline-none"
+              />
+            </div>
+            <select value={filtroTarjeta} onChange={(e) => setFiltroTarjeta(e.target.value)} className="px-3 py-1.5 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)] text-sm text-[var(--text-primary)]">
+              <option value="">Todas las tarjetas</option>
+              {tarjetasUnicas.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+            <select value={filtroCategoria} onChange={(e) => setFiltroCategoria(e.target.value)} className="px-3 py-1.5 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)] text-sm text-[var(--text-primary)]">
+              <option value="">Todas las categorías</option>
+              {categoriasUnicas.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <button
+              onClick={() => setOcultarOficializados((v) => !v)}
+              className={`px-3 py-1.5 rounded-lg text-sm flex items-center gap-1.5 border transition-colors ${
+                ocultarOficializados ? 'bg-[var(--accent-1)] text-white border-[var(--accent-1)]' : 'bg-[var(--glass-bg)] text-[var(--text-muted)] border-[var(--glass-border)]'
+              }`}
+              title="Oculta los consumos previos al cierre del último resumen importado"
+            >
+              {ocultarOficializados ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              Ocultar ya facturados
+            </button>
+          </div>
+
+          {/* Lista */}
+          <div className="glass-card divide-y divide-[var(--glass-border)]">
+            {visibles.length === 0 ? (
+              <p className="p-6 text-center text-[var(--text-muted)]">No hay consumos con estos filtros.</p>
+            ) : (
+              [...visibles].sort((a, b) => (b.fecha || '').localeCompare(a.fecha || '')).map((c) => (
+                <div key={c.id} className="flex items-center gap-3 p-3 sm:px-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className={`font-medium truncate ${c.es_pago ? 'text-[var(--text-muted)]' : 'text-[var(--text-primary)]'}`}>
+                        {c.descripcion || '(sin descripción)'}
+                      </p>
+                      {c.es_cuota && (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-[var(--accent-1)]/15 text-[var(--accent-1)]">
+                          {c.cuota_actual}/{c.total_cuotas}
+                        </span>
+                      )}
+                      {c.es_pendiente && (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-500 flex items-center gap-1">
+                          <Clock className="w-3 h-3" /> Pendiente
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-[var(--text-muted)]">
+                      {c.fecha} · {c.tarjeta} · {c.es_pago ? 'Pago/devolución' : c.categoria}
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    {c.monto_dolares > 0 ? (
+                      <p className="font-semibold text-emerald-500">USD {c.monto_dolares.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</p>
+                    ) : (
+                      <p className={`font-semibold ${c.monto_pesos < 0 ? 'text-emerald-500' : 'text-[var(--text-primary)]'}`}>
+                        {formatCurrency(c.monto_pesos)}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </>
       )}
     </div>
   );

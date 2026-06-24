@@ -36,6 +36,9 @@ Backend/uploads/
 
 # Fixtures de prueba con datos financieros reales (PDFs, imágenes de tarjetas, etc.) — NO versionar
 Backend/tests/fixtures/pdfs/
+Backend/tests/fixtures/Ultimos Consumos/
+*.xlsx
+*.xls
 
 # Base de datos local
 *.sqlite
