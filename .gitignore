@@ -56,3 +56,6 @@ node_modules_old*/
 
 # Claude Code
 .claude/
+
+# Playwright MCP (snapshots/logs de testing manual)
+.playwright-mcp/
