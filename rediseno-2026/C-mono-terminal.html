@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tarjeteando · Opción C — Mono Terminal</title>
+<style>
+  :root{
+    --bg:#0b0c0e; --panel:#121317; --panel2:#16181d; --line:#262a31;
+    --text:#e9ecef; --muted:#7c828d; --accent:#c6f24e; --accent-dim:#8fae35;
+    --bbva:#5b9bff; --santa:#ff6b6b; --gali:#ffb454; --radius:8px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:var(--text);min-height:100vh;
+    font-family:'Geist','Inter',-apple-system,system-ui,Segoe UI,Roboto,sans-serif;
+    -webkit-font-smoothing:antialiased;}
+  .mono{font-family:'Geist Mono','SF Mono',ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums;}
+  .wrap{max-width:1200px;margin:0 auto;padding:0 0 60px;}
+
+  /* top status bar */
+  .topbar{display:flex;align-items:center;justify-content:space-between;padding:14px 24px;border-bottom:1px solid var(--line);position:sticky;top:0;background:rgba(11,12,14,.85);backdrop-filter:blur(10px);z-index:5;}
+  .logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:16px;letter-spacing:-.01em;}
+  .logo .mark{width:26px;height:26px;border:1.5px solid var(--accent);border-radius:6px;display:grid;place-items:center;color:var(--accent);font-size:14px;font-weight:800;}
+  .ticker{display:flex;align-items:center;gap:18px;font-size:12.5px;}
+  .ticker .k{color:var(--muted);text-transform:uppercase;letter-spacing:.08em;font-size:11px;}
+  .ticker .up{color:var(--santa);} .ticker .dn{color:var(--accent);}
+  .dotlive{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent);display:inline-block;animation:pulse 1.6s infinite;}
+  @keyframes pulse{50%{opacity:.3}}
+
+  nav{display:flex;border-bottom:1px solid var(--line);padding:0 24px;}
+  nav button{border:0;background:transparent;color:var(--muted);font:inherit;font-size:13px;font-weight:600;padding:14px 18px;cursor:pointer;border-bottom:2px solid transparent;text-transform:uppercase;letter-spacing:.05em;transition:.15s;}
+  nav button:hover{color:var(--text);}
+  nav button.on{color:var(--accent);border-bottom-color:var(--accent);}
+
+  .pad{padding:24px;}
+  .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:1px;background:var(--line);border-bottom:1px solid var(--line);}
+  .cell{background:var(--bg);padding:22px 24px;}
+  .klabel{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;font-weight:600;margin-bottom:12px;display:flex;align-items:center;gap:7px;}
+  .num{font-size:34px;font-weight:600;letter-spacing:-.02em;}
+  .num.hero{font-size:50px;}
+  .delta{font-size:12.5px;margin-top:8px;font-weight:600;}
+  .delta.up{color:var(--santa);} .delta.dn{color:var(--accent);}
+  .foot{font-size:12px;color:var(--muted);margin-top:6px;}
+
+  .c4{grid-column:span 4;} .c3{grid-column:span 3;} .c6{grid-column:span 6;} .c12{grid-column:span 12;} .c5{grid-column:span 5;} .c7{grid-column:span 7;} .c8{grid-column:span 8;}
+
+  /* card rows (account list) */
+  .acct{display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-bottom:1px solid var(--line);cursor:pointer;transition:.15s;}
+  .acct:last-child{border-bottom:0;} .acct:hover{padding-left:6px;}
+  .acct .l{display:flex;align-items:center;gap:13px;}
+  .tag{width:4px;height:34px;border-radius:2px;}
+  .acct .bank{font-weight:600;font-size:14px;} .acct .meta{font-size:11.5px;color:var(--muted);margin-top:2px;}
+  .acct .r{text-align:right;} .acct .bal{font-weight:600;font-size:15px;} .acct .cls{font-size:11px;color:var(--muted);margin-top:2px;}
+
+  /* projection */
+  .bars{display:flex;align-items:flex-end;gap:2px;height:170px;margin-top:18px;border-bottom:1px solid var(--line);}
+  .bw{flex:1;display:flex;flex-direction:column;align-items:center;cursor:pointer;height:100%;justify-content:flex-end;gap:0;}
+  .bcap{font-size:11px;color:var(--muted);margin-bottom:6px;}
+  .bar{width:100%;background:repeating-linear-gradient(45deg,var(--accent-dim),var(--accent-dim) 2px,transparent 2px,transparent 5px);border-top:2px solid var(--accent-dim);transition:.2s;min-height:4px;opacity:.5;}
+  .bw.on .bar,.bw:hover .bar{background:var(--accent);border-top-color:var(--accent);opacity:1;}
+  .bw .m{font-size:11px;color:var(--muted);padding:8px 0;text-transform:uppercase;letter-spacing:.05em;}
+  .bw.on .m{color:var(--accent);}
+  .detail{margin-top:0;display:none;}
+  .detail.show{display:block;}
+  .drow{display:grid;grid-template-columns:1fr auto auto;gap:16px;align-items:center;padding:11px 0;border-bottom:1px solid var(--line);font-size:13px;}
+  .drow:last-child{border:0;}
+  .drow .d{display:flex;align-items:center;gap:10px;} .dot{width:8px;height:8px;}
+  .drow .q{color:var(--muted);font-size:11px;}
+
+  /* cuotas table */
+  table{width:100%;border-collapse:collapse;margin-top:6px;}
+  th{text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;font-weight:600;padding:10px 12px;border-bottom:1px solid var(--line);}
+  th.r,td.r{text-align:right;}
+  td{padding:14px 12px;border-bottom:1px solid var(--line);font-size:13.5px;}
+  tr:last-child td{border-bottom:0;} tbody tr{transition:.15s;cursor:pointer;} tbody tr:hover{background:var(--panel);}
+  .nmcell{display:flex;align-items:center;gap:11px;font-weight:500;}
+  .prog{width:90px;height:5px;background:var(--line);position:relative;}
+  .prog i{position:absolute;left:0;top:0;height:100%;background:var(--accent);}
+  .pct{color:var(--muted);font-size:11px;margin-left:8px;}
+
+  .insight{border-left:2px solid var(--accent);background:linear-gradient(90deg,rgba(198,242,78,.06),transparent);}
+  .insight p{font-size:14px;line-height:1.55;color:#d4d8de;} .insight b{color:var(--accent);font-weight:600;}
+
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--panel2);border:1px solid var(--line);padding:12px 20px;border-radius:8px;font-size:13px;color:var(--accent);transition:.4s;opacity:0;}
+  .toast.show{transform:translateX(-50%) translateY(0);opacity:1;}
+  @media(max-width:880px){.cell{grid-column:span 12 !important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <div class="logo"><span class="mark">T</span> TARJETEANDO</div>
+    <div class="ticker">
+      <span><span class="k">USD TARJETA</span> <b class="mono">$1.485</b> <span class="dn">▲0,8%</span></span>
+      <span><span class="dotlive"></span> <span class="k mono">14:30</span></span>
+    </div>
+  </div>
+
+  <nav>
+    <button class="on" data-t="Dashboard">Dashboard</button>
+    <button data-t="Movimientos">Movimientos</button>
+    <button data-t="Cuotas">Cuotas</button>
+    <button data-t="Importar">Importar</button>
+  </nav>
+
+  <div class="grid">
+    <div class="cell c5">
+      <div class="klabel">Saldo total · Junio 2026</div>
+      <div class="num hero mono">$701.250</div>
+      <div class="delta up">▲ 12,4% &nbsp;($77.300) vs. mayo</div>
+      <div class="foot">3 cuentas activas · cierre BBVA T-4d</div>
+    </div>
+    <div class="cell c4">
+      <div class="klabel">Cuotas · próximo mes</div>
+      <div class="num mono">$184.900</div>
+      <div class="delta dn">7 consumos en cuotas</div>
+      <div class="foot">26,4% del saldo total</div>
+    </div>
+    <div class="cell c3">
+      <div class="klabel">Próx. vencimiento</div>
+      <div class="num mono">28/06</div>
+      <div class="delta up">T-4 días</div>
+      <div class="foot">BBVA Visa Gold</div>
+    </div>
+
+    <div class="cell c5">
+      <div class="klabel">Cuentas</div>
+      <div id="accts"></div>
+    </div>
+
+    <div class="cell c7">
+      <div class="klabel">Proyección de cuotas — 6M &nbsp;·&nbsp; click p/ detalle</div>
+      <div class="bars" id="bars"></div>
+      <div class="detail" id="detail"></div>
+    </div>
+
+    <div class="cell c12 insight">
+      <div class="klabel" style="color:var(--accent)">◢ Insight automático</div>
+      <p>Gasto en <b>Restaurantes</b> +34% MoM. Proyección: <b>+$92.000</b> comprometidos para agosto si se mantiene la tasa. Recomendación: fijar límite mensual de <b>$120.000</b>.</p>
+    </div>
+
+    <div class="cell c12">
+      <div class="klabel">Cuotas activas</div>
+      <table>
+        <thead><tr><th>Comercio</th><th>Tarjeta</th><th>Progreso</th><th class="r">Cuota mensual</th><th class="r">Restante</th></tr></thead>
+        <tbody id="ctable"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const tarjetas={bbva:{c:'var(--bbva)',n:'BBVA Visa Gold'},santa:{c:'var(--santa)',n:'Santander Visa'},gali:{c:'var(--gali)',n:'Galicia Master'}};
+const accts=[
+  {t:'bbva',num:'•••• 4821',bal:'$487.350',cls:'Cierre 28/06'},
+  {t:'santa',num:'•••• 7733',bal:'$213.900',cls:'Cierre 02/07'},
+  {t:'gali',num:'•••• 1290',bal:'USD 340 · ≈$504.900',cls:'Cierre 05/07'},
+];
+const proj=[
+  {m:'Jun',total:184900,items:[{d:'iPhone 15 Pro',t:'bbva',c:'6/12',v:62500},{d:'Notebook Lenovo',t:'santa',c:'3/9',v:48000},{d:'Heladera Samsung',t:'gali',c:'4/6',v:41200},{d:'Cubiertas Bridgestone',t:'bbva',c:'2/3',v:33200}]},
+  {m:'Jul',total:171300,items:[{d:'iPhone 15 Pro',t:'bbva',c:'7/12',v:62500},{d:'Notebook Lenovo',t:'santa',c:'4/9',v:48000},{d:'Heladera Samsung',t:'gali',c:'5/6',v:41200},{d:'Curso UX',t:'bbva',c:'2/4',v:19600}]},
+  {m:'Ago',total:130100,items:[{d:'iPhone 15 Pro',t:'bbva',c:'8/12',v:62500},{d:'Notebook Lenovo',t:'santa',c:'5/9',v:48000},{d:'Curso UX',t:'bbva',c:'3/4',v:19600}]},
+  {m:'Sep',total:110500,items:[{d:'iPhone 15 Pro',t:'bbva',c:'9/12',v:62500},{d:'Notebook Lenovo',t:'santa',c:'6/9',v:48000}]},
+  {m:'Oct',total:110500,items:[{d:'iPhone 15 Pro',t:'bbva',c:'10/12',v:62500},{d:'Notebook Lenovo',t:'santa',c:'7/9',v:48000}]},
+  {m:'Nov',total:62500,items:[{d:'iPhone 15 Pro',t:'bbva',c:'11/12',v:62500}]},
+];
+const cuotas=[
+  {d:'iPhone 15 Pro',t:'bbva',p:6,tot:12,v:62500,rest:375000},{d:'Notebook Lenovo',t:'santa',p:3,tot:9,v:48000,rest:288000},
+  {d:'Heladera Samsung',t:'gali',p:4,tot:6,v:41200,rest:82400},{d:'Cubiertas Bridgestone',t:'bbva',p:2,tot:3,v:33200,rest:33200},
+  {d:'Curso UX',t:'bbva',p:1,tot:4,v:19600,rest:58800},
+];
+const fmt=n=>'$'+n.toLocaleString('es-AR');
+document.getElementById('accts').innerHTML=accts.map(a=>`
+  <div class="acct"><div class="l"><div class="tag" style="background:${tarjetas[a.t].c}"></div><div><div class="bank">${tarjetas[a.t].n}</div><div class="meta mono">${a.num}</div></div></div>
+  <div class="r"><div class="bal mono">${a.bal}</div><div class="cls">${a.cls}</div></div></div>`).join('');
+const max=Math.max(...proj.map(p=>p.total));
+const barsEl=document.getElementById('bars'),detEl=document.getElementById('detail');
+let sel=-1;
+proj.forEach((p,i)=>{
+  const w=document.createElement('div');w.className='bw';
+  w.innerHTML=`<span class="bcap mono">${(p.total/1000).toFixed(0)}k</span><div class="bar" style="height:${p.total/max*120+4}px"></div><span class="m">${p.m}</span>`;
+  w.onclick=()=>{sel=sel===i?-1:i;render();};barsEl.appendChild(w);
+});
+function render(){
+  [...barsEl.children].forEach((c,i)=>c.classList.toggle('on',i===sel));
+  if(sel<0){detEl.classList.remove('show');return;}
+  const p=proj[sel];
+  detEl.innerHTML=`<div class="klabel" style="margin:16px 0 4px;color:var(--accent)">${p.m} · ${fmt(p.total)} · ${p.items.length} cuotas</div>`+
+    p.items.map(it=>`<div class="drow"><div class="d"><span class="dot" style="background:${tarjetas[it.t].c}"></span>${it.d}</div><span class="q mono">${it.c}</span><span class="mono">${fmt(it.v)}</span></div>`).join('');
+  detEl.classList.add('show');
+}
+document.getElementById('ctable').innerHTML=cuotas.map(c=>`
+  <tr><td><div class="nmcell"><span class="dot" style="background:${tarjetas[c.t].c}"></span>${c.d}</div></td>
+  <td>${tarjetas[c.t].n}</td>
+  <td><span class="prog"><i style="width:${c.p/c.tot*100}%"></i></span><span class="pct mono">${c.p}/${c.tot}</span></td>
+  <td class="r mono">${fmt(c.v)}</td><td class="r mono" style="color:var(--muted)">${fmt(c.rest)}</td></tr>`).join('');
+const toast=document.getElementById('toast');
+function showToast(m){toast.textContent=m;toast.classList.add('show');clearTimeout(toast._t);toast._t=setTimeout(()=>toast.classList.remove('show'),2200);}
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{document.querySelectorAll('nav button').forEach(x=>x.classList.remove('on'));b.classList.add('on');if(b.dataset.t!=='Dashboard')showToast('> Vista "'+b.dataset.t+'" — demo visual');});
+document.querySelectorAll('.acct').forEach(c=>c.onclick=()=>showToast('> Detalle de cuenta — demo visual'));
+</script>
+</body>
+</html>

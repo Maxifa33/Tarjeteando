@@ -4,7 +4,7 @@ import { parseConsumosFile, categorizarConsumo } from './services/consumos-parse
 import {
   LayoutDashboard, Receipt, CreditCard, Tag, Upload,
   TrendingUp, TrendingDown, Calendar, AlertCircle, ChevronRight,
-  Sun, Moon, Bell, Settings, Search, Menu, X, DollarSign,
+  Sun, Moon, Bell, Settings, Search, X, DollarSign,
   PieChart, BarChart3, Wallet, ArrowUpRight, ArrowDownRight,
   FileText, Clock, CheckCircle, XCircle, Sparkles, Trophy, Filter,
   RefreshCcw, Trash2, Download, Edit3, Plus, Repeat, Shuffle, Zap, Eye, EyeOff, GripVertical
@@ -771,6 +771,7 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
   };
 
   const themeOptions = [
+    { id: 'liquid', label: 'Liquid Glass', icon: Sparkles, colors: ['#7c8cff', '#41e0c8'] },
     { id: 'light', label: 'Claro', icon: Sun, colors: ['#f8fafc', '#e2e8f0'] },
     { id: 'dark', label: 'Oscuro', icon: Moon, colors: ['#1e293b', '#0f172a'] },
   ];
@@ -783,23 +784,23 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
     >
       <div
         className="rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden mx-4"
-        style={{ backgroundColor: theme === 'dark' ? '#1e293b' : '#ffffff' }}
+        style={{ backgroundColor: (theme === 'dark' || theme === 'liquid') ? '#1e293b' : '#ffffff' }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: theme === 'dark' ? '#374151' : '#e5e7eb' }}>
-          <h2 className="text-lg font-semibold" style={{ color: theme === 'dark' ? '#f5f5f5' : '#1f2937' }}>Configuración</h2>
+        <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: (theme === 'dark' || theme === 'liquid') ? '#374151' : '#e5e7eb' }}>
+          <h2 className="text-lg font-semibold" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937' }}>Configuración</h2>
           <button
             onClick={onClose}
             className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
             style={{ backgroundColor: 'transparent' }}
           >
-            <X className="w-5 h-5" style={{ color: theme === 'dark' ? '#9ca3af' : '#6b7280' }} />
+            <X className="w-5 h-5" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#9ca3af' : '#6b7280' }} />
           </button>
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b overflow-x-auto" style={{ borderColor: theme === 'dark' ? '#374151' : '#e5e7eb' }}>
+        <div className="flex border-b overflow-x-auto" style={{ borderColor: (theme === 'dark' || theme === 'liquid') ? '#374151' : '#e5e7eb' }}>
           {tabs.map(tab => (
             <button
               key={tab.id}
@@ -808,7 +809,7 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
                          ${activeTab === tab.id
                            ? 'border-b-2 border-violet-500 text-violet-600'
                            : 'hover:bg-gray-50'}`}
-              style={activeTab !== tab.id ? { color: theme === 'dark' ? '#9ca3af' : '#6b7280' } : {}}
+              style={activeTab !== tab.id ? { color: (theme === 'dark' || theme === 'liquid') ? '#9ca3af' : '#6b7280' } : {}}
             >
               <tab.icon className="w-4 h-4" />
               {tab.label}
@@ -826,11 +827,11 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
           {/* Gestión de Tarjetas */}
             {activeTab === 'tarjetas' && (
               <div className="space-y-6">
-                <h3 className="text-lg font-semibold" style={{ color: theme === 'dark' ? '#f5f5f5' : '#1f2937' }}>Gestión de Tarjetas</h3>
+                <h3 className="text-lg font-semibold" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937' }}>Gestión de Tarjetas</h3>
 
                 {/* Nueva tarjeta */}
-                <div className="p-4 rounded-xl space-y-3" style={{ backgroundColor: theme === 'dark' ? '#374151' : '#f3f4f6' }}>
-                  <p className="text-sm font-medium" style={{ color: theme === 'dark' ? '#d1d5db' : '#374151' }}>Agregar nueva tarjeta</p>
+                <div className="p-4 rounded-xl space-y-3" style={{ backgroundColor: (theme === 'dark' || theme === 'liquid') ? '#374151' : '#f3f4f6' }}>
+                  <p className="text-sm font-medium" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#d1d5db' : '#374151' }}>Agregar nueva tarjeta</p>
                   <div className="grid grid-cols-3 gap-3">
                     <input
                       type="text"
@@ -839,9 +840,9 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
                       onChange={(e) => setNewTarjeta({...newTarjeta, nombre: e.target.value})}
                       className="px-3 py-2 rounded-lg border text-sm"
                       style={{
-                        backgroundColor: theme === 'dark' ? '#1f2937' : '#ffffff',
-                        borderColor: theme === 'dark' ? '#4b5563' : '#d1d5db',
-                        color: theme === 'dark' ? '#f5f5f5' : '#1f2937'
+                        backgroundColor: (theme === 'dark' || theme === 'liquid') ? '#1f2937' : '#ffffff',
+                        borderColor: (theme === 'dark' || theme === 'liquid') ? '#4b5563' : '#d1d5db',
+                        color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937'
                       }}
                     />
                     <select
@@ -849,9 +850,9 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
                       onChange={(e) => setNewTarjeta({...newTarjeta, tipo: e.target.value})}
                       className="px-3 py-2 rounded-lg border text-sm"
                       style={{
-                        backgroundColor: theme === 'dark' ? '#1f2937' : '#ffffff',
-                        borderColor: theme === 'dark' ? '#4b5563' : '#d1d5db',
-                        color: theme === 'dark' ? '#f5f5f5' : '#1f2937'
+                        backgroundColor: (theme === 'dark' || theme === 'liquid') ? '#1f2937' : '#ffffff',
+                        borderColor: (theme === 'dark' || theme === 'liquid') ? '#4b5563' : '#d1d5db',
+                        color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937'
                       }}
                     >
                       <option value="VISA">VISA</option>
@@ -865,9 +866,9 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
                       onChange={(e) => setNewTarjeta({...newTarjeta, banco: e.target.value})}
                       className="px-3 py-2 rounded-lg border text-sm"
                       style={{
-                        backgroundColor: theme === 'dark' ? '#1f2937' : '#ffffff',
-                        borderColor: theme === 'dark' ? '#4b5563' : '#d1d5db',
-                        color: theme === 'dark' ? '#f5f5f5' : '#1f2937'
+                        backgroundColor: (theme === 'dark' || theme === 'liquid') ? '#1f2937' : '#ffffff',
+                        borderColor: (theme === 'dark' || theme === 'liquid') ? '#4b5563' : '#d1d5db',
+                        color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937'
                       }}
                     />
                   </div>
@@ -885,7 +886,7 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
                 {/* Lista de tarjetas */}
                 <div className="space-y-3">
                   {tarjetas.map(t => (
-                    <div key={t.id} className="flex items-center justify-between p-4 rounded-xl" style={{ backgroundColor: theme === 'dark' ? '#374151' : '#f3f4f6' }}>
+                    <div key={t.id} className="flex items-center justify-between p-4 rounded-xl" style={{ backgroundColor: (theme === 'dark' || theme === 'liquid') ? '#374151' : '#f3f4f6' }}>
                       {editingTarjeta === t.id ? (
                         <div className="flex-1 flex items-center gap-3">
                           <input
@@ -894,9 +895,9 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
                             id={`edit-nombre-${t.id}`}
                             className="px-3 py-1.5 rounded-lg border text-sm flex-1"
                             style={{
-                              backgroundColor: theme === 'dark' ? '#1f2937' : '#ffffff',
-                              borderColor: theme === 'dark' ? '#4b5563' : '#d1d5db',
-                              color: theme === 'dark' ? '#f5f5f5' : '#1f2937'
+                              backgroundColor: (theme === 'dark' || theme === 'liquid') ? '#1f2937' : '#ffffff',
+                              borderColor: (theme === 'dark' || theme === 'liquid') ? '#4b5563' : '#d1d5db',
+                              color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937'
                             }}
                           />
                           <button
@@ -910,7 +911,7 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
                           <button
                             onClick={() => setEditingTarjeta(null)}
                             className="px-3 py-1.5 rounded-lg text-sm"
-                            style={{ backgroundColor: theme === 'dark' ? '#4b5563' : '#d1d5db', color: theme === 'dark' ? '#f5f5f5' : '#374151' }}
+                            style={{ backgroundColor: (theme === 'dark' || theme === 'liquid') ? '#4b5563' : '#d1d5db', color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#374151' }}
                           >
                             Cancelar
                           </button>
@@ -918,15 +919,15 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
                       ) : (
                         <>
                           <div>
-                            <p className="font-medium" style={{ color: theme === 'dark' ? '#f5f5f5' : '#1f2937' }}>{t.nombre}</p>
-                            <p className="text-sm" style={{ color: theme === 'dark' ? '#9ca3af' : '#6b7280' }}>{t.tipo} - {t.banco}</p>
+                            <p className="font-medium" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937' }}>{t.nombre}</p>
+                            <p className="text-sm" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#9ca3af' : '#6b7280' }}>{t.tipo} - {t.banco}</p>
                           </div>
                           <div className="flex gap-2">
                             <button
                               onClick={() => setEditingTarjeta(t.id)}
                               className="p-2 rounded-lg hover:bg-gray-200 transition-colors"
                             >
-                              <Edit3 className="w-4 h-4" style={{ color: theme === 'dark' ? '#9ca3af' : '#6b7280' }} />
+                              <Edit3 className="w-4 h-4" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#9ca3af' : '#6b7280' }} />
                             </button>
                             <button
                               onClick={() => handleDeleteTarjeta(t.nombre)}
@@ -940,7 +941,7 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
                     </div>
                   ))}
                   {tarjetas.length === 0 && (
-                    <p className="text-center py-8" style={{ color: theme === 'dark' ? '#9ca3af' : '#6b7280' }}>No hay tarjetas registradas</p>
+                    <p className="text-center py-8" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#9ca3af' : '#6b7280' }}>No hay tarjetas registradas</p>
                   )}
                 </div>
               </div>
@@ -949,11 +950,11 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
             {/* Preferencias */}
             {activeTab === 'preferencias' && (
               <div className="space-y-6">
-                <h3 className="text-lg font-semibold" style={{ color: theme === 'dark' ? '#f5f5f5' : '#1f2937' }}>Preferencias de Usuario</h3>
+                <h3 className="text-lg font-semibold" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937' }}>Preferencias de Usuario</h3>
 
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium mb-2" style={{ color: theme === 'dark' ? '#d1d5db' : '#374151' }}>
+                    <label className="block text-sm font-medium mb-2" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#d1d5db' : '#374151' }}>
                       Moneda por defecto
                     </label>
                     <select
@@ -961,9 +962,9 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
                       onChange={(e) => setPreferencias({...preferencias, monedaDefault: e.target.value})}
                       className="w-full px-4 py-2.5 rounded-xl border"
                       style={{
-                        backgroundColor: theme === 'dark' ? '#1f2937' : '#ffffff',
-                        borderColor: theme === 'dark' ? '#4b5563' : '#d1d5db',
-                        color: theme === 'dark' ? '#f5f5f5' : '#1f2937'
+                        backgroundColor: (theme === 'dark' || theme === 'liquid') ? '#1f2937' : '#ffffff',
+                        borderColor: (theme === 'dark' || theme === 'liquid') ? '#4b5563' : '#d1d5db',
+                        color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937'
                       }}
                     >
                       <option value="ARS">Pesos Argentinos (ARS)</option>
@@ -972,7 +973,7 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium mb-2" style={{ color: theme === 'dark' ? '#d1d5db' : '#374151' }}>
+                    <label className="block text-sm font-medium mb-2" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#d1d5db' : '#374151' }}>
                       Formato de fechas
                     </label>
                     <select
@@ -980,9 +981,9 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
                       onChange={(e) => setPreferencias({...preferencias, formatoFecha: e.target.value})}
                       className="w-full px-4 py-2.5 rounded-xl border"
                       style={{
-                        backgroundColor: theme === 'dark' ? '#1f2937' : '#ffffff',
-                        borderColor: theme === 'dark' ? '#4b5563' : '#d1d5db',
-                        color: theme === 'dark' ? '#f5f5f5' : '#1f2937'
+                        backgroundColor: (theme === 'dark' || theme === 'liquid') ? '#1f2937' : '#ffffff',
+                        borderColor: (theme === 'dark' || theme === 'liquid') ? '#4b5563' : '#d1d5db',
+                        color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937'
                       }}
                     >
                       <option value="dd/mm/yyyy">DD/MM/YYYY</option>
@@ -997,13 +998,13 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
             {/* Alertas */}
             {activeTab === 'alertas' && (
               <div className="space-y-6">
-                <h3 className="text-lg font-semibold" style={{ color: theme === 'dark' ? '#f5f5f5' : '#1f2937' }}>Configuración de Alertas</h3>
+                <h3 className="text-lg font-semibold" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937' }}>Configuración de Alertas</h3>
 
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between p-4 rounded-xl" style={{ backgroundColor: theme === 'dark' ? '#374151' : '#f3f4f6' }}>
+                  <div className="flex items-center justify-between p-4 rounded-xl" style={{ backgroundColor: (theme === 'dark' || theme === 'liquid') ? '#374151' : '#f3f4f6' }}>
                     <div>
-                      <p className="font-medium" style={{ color: theme === 'dark' ? '#f5f5f5' : '#1f2937' }}>Alerta de vencimiento</p>
-                      <p className="text-sm" style={{ color: theme === 'dark' ? '#9ca3af' : '#6b7280' }}>Notificar antes del vencimiento de pago</p>
+                      <p className="font-medium" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937' }}>Alerta de vencimiento</p>
+                      <p className="text-sm" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#9ca3af' : '#6b7280' }}>Notificar antes del vencimiento de pago</p>
                     </div>
                     <button
                       onClick={() => setAlertas({...alertas, vencimiento: !alertas.vencimiento})}
@@ -1015,10 +1016,10 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
                     </button>
                   </div>
 
-                  <div className="flex items-center justify-between p-4 rounded-xl" style={{ backgroundColor: theme === 'dark' ? '#374151' : '#f3f4f6' }}>
+                  <div className="flex items-center justify-between p-4 rounded-xl" style={{ backgroundColor: (theme === 'dark' || theme === 'liquid') ? '#374151' : '#f3f4f6' }}>
                     <div>
-                      <p className="font-medium" style={{ color: theme === 'dark' ? '#f5f5f5' : '#1f2937' }}>Alerta de última cuota</p>
-                      <p className="text-sm" style={{ color: theme === 'dark' ? '#9ca3af' : '#6b7280' }}>Notificar cuando una compra llega a su última cuota</p>
+                      <p className="font-medium" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937' }}>Alerta de última cuota</p>
+                      <p className="text-sm" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#9ca3af' : '#6b7280' }}>Notificar cuando una compra llega a su última cuota</p>
                     </div>
                     <button
                       onClick={() => setAlertas({...alertas, cuotaFinal: !alertas.cuotaFinal})}
@@ -1030,8 +1031,8 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
                     </button>
                   </div>
 
-                  <div className="p-4 rounded-xl" style={{ backgroundColor: theme === 'dark' ? '#374151' : '#f3f4f6' }}>
-                    <label className="block font-medium mb-2" style={{ color: theme === 'dark' ? '#f5f5f5' : '#1f2937' }}>
+                  <div className="p-4 rounded-xl" style={{ backgroundColor: (theme === 'dark' || theme === 'liquid') ? '#374151' : '#f3f4f6' }}>
+                    <label className="block font-medium mb-2" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937' }}>
                       Días de anticipación
                     </label>
                     <select
@@ -1039,9 +1040,9 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
                       onChange={(e) => setAlertas({...alertas, diasAntes: parseInt(e.target.value)})}
                       className="w-full px-4 py-2.5 rounded-xl border"
                       style={{
-                        backgroundColor: theme === 'dark' ? '#1f2937' : '#ffffff',
-                        borderColor: theme === 'dark' ? '#4b5563' : '#d1d5db',
-                        color: theme === 'dark' ? '#f5f5f5' : '#1f2937'
+                        backgroundColor: (theme === 'dark' || theme === 'liquid') ? '#1f2937' : '#ffffff',
+                        borderColor: (theme === 'dark' || theme === 'liquid') ? '#4b5563' : '#d1d5db',
+                        color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937'
                       }}
                     >
                       <option value={1}>1 día antes</option>
@@ -1057,16 +1058,16 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
             {/* Importar/Exportar Datos */}
             {activeTab === 'datos' && (
               <div className="space-y-6">
-                <h3 className="text-lg font-semibold" style={{ color: theme === 'dark' ? '#f5f5f5' : '#1f2937' }}>Importar / Exportar Datos</h3>
+                <h3 className="text-lg font-semibold" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937' }}>Importar / Exportar Datos</h3>
 
                 {/* Exportar CSV */}
-                <div className="p-4 rounded-xl space-y-4" style={{ backgroundColor: theme === 'dark' ? '#374151' : '#f3f4f6' }}>
-                  <p className="font-medium" style={{ color: theme === 'dark' ? '#f5f5f5' : '#1f2937' }}>Exportar a CSV</p>
+                <div className="p-4 rounded-xl space-y-4" style={{ backgroundColor: (theme === 'dark' || theme === 'liquid') ? '#374151' : '#f3f4f6' }}>
+                  <p className="font-medium" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937' }}>Exportar a CSV</p>
                   <div className="grid grid-cols-3 gap-3">
                     <button
                       onClick={() => exportarCSV('movimientos')}
                       className="px-4 py-3 rounded-xl border text-center transition-colors hover:bg-gray-100"
-                      style={{ borderColor: theme === 'dark' ? '#4b5563' : '#d1d5db', color: theme === 'dark' ? '#d1d5db' : '#374151' }}
+                      style={{ borderColor: (theme === 'dark' || theme === 'liquid') ? '#4b5563' : '#d1d5db', color: (theme === 'dark' || theme === 'liquid') ? '#d1d5db' : '#374151' }}
                     >
                       <FileText className="w-5 h-5 mx-auto mb-1" />
                       <span className="text-sm">Movimientos</span>
@@ -1074,7 +1075,7 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
                     <button
                       onClick={() => exportarCSV('cuotas')}
                       className="px-4 py-3 rounded-xl border text-center transition-colors hover:bg-gray-100"
-                      style={{ borderColor: theme === 'dark' ? '#4b5563' : '#d1d5db', color: theme === 'dark' ? '#d1d5db' : '#374151' }}
+                      style={{ borderColor: (theme === 'dark' || theme === 'liquid') ? '#4b5563' : '#d1d5db', color: (theme === 'dark' || theme === 'liquid') ? '#d1d5db' : '#374151' }}
                     >
                       <Calendar className="w-5 h-5 mx-auto mb-1" />
                       <span className="text-sm">Cuotas</span>
@@ -1082,7 +1083,7 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
                     <button
                       onClick={() => exportarCSV('resumenes')}
                       className="px-4 py-3 rounded-xl border text-center transition-colors hover:bg-gray-100"
-                      style={{ borderColor: theme === 'dark' ? '#4b5563' : '#d1d5db', color: theme === 'dark' ? '#d1d5db' : '#374151' }}
+                      style={{ borderColor: (theme === 'dark' || theme === 'liquid') ? '#4b5563' : '#d1d5db', color: (theme === 'dark' || theme === 'liquid') ? '#d1d5db' : '#374151' }}
                     >
                       <Receipt className="w-5 h-5 mx-auto mb-1" />
                       <span className="text-sm">Resúmenes</span>
@@ -1091,8 +1092,8 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
                 </div>
 
                 {/* Backup completo */}
-                <div className="p-4 rounded-xl space-y-4" style={{ backgroundColor: theme === 'dark' ? '#374151' : '#f3f4f6' }}>
-                  <p className="font-medium" style={{ color: theme === 'dark' ? '#f5f5f5' : '#1f2937' }}>Backup de Configuración</p>
+                <div className="p-4 rounded-xl space-y-4" style={{ backgroundColor: (theme === 'dark' || theme === 'liquid') ? '#374151' : '#f3f4f6' }}>
+                  <p className="font-medium" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937' }}>Backup de Configuración</p>
                   <div className="flex gap-3">
                     <button
                       onClick={handleExportAll}
@@ -1102,7 +1103,7 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
                       <span className="text-sm">Exportar Todo</span>
                     </button>
                     <label className="flex-1 px-4 py-3 rounded-xl border-2 border-dashed cursor-pointer transition-colors text-center hover:border-violet-500"
-                           style={{ borderColor: theme === 'dark' ? '#4b5563' : '#d1d5db', color: theme === 'dark' ? '#d1d5db' : '#374151' }}>
+                           style={{ borderColor: (theme === 'dark' || theme === 'liquid') ? '#4b5563' : '#d1d5db', color: (theme === 'dark' || theme === 'liquid') ? '#d1d5db' : '#374151' }}>
                       <Upload className="w-5 h-5 mx-auto mb-1" />
                       <span className="text-sm">Importar</span>
                       <input type="file" accept=".json" onChange={handleImportData} className="hidden" />
@@ -1111,11 +1112,11 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
                 </div>
 
                 {/* Refrescar datos */}
-                <div className="p-4 rounded-xl" style={{ backgroundColor: theme === 'dark' ? '#374151' : '#f3f4f6' }}>
+                <div className="p-4 rounded-xl" style={{ backgroundColor: (theme === 'dark' || theme === 'liquid') ? '#374151' : '#f3f4f6' }}>
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="font-medium" style={{ color: theme === 'dark' ? '#f5f5f5' : '#1f2937' }}>Refrescar datos</p>
-                      <p className="text-sm" style={{ color: theme === 'dark' ? '#9ca3af' : '#6b7280' }}>Recargar todos los datos desde el servidor</p>
+                      <p className="font-medium" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937' }}>Refrescar datos</p>
+                      <p className="text-sm" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#9ca3af' : '#6b7280' }}>Recargar todos los datos desde el servidor</p>
                     </div>
                     <button
                       onClick={() => { onRefreshData(); onClose(); }}
@@ -1132,7 +1133,7 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
             {/* Temas */}
             {activeTab === 'temas' && (
               <div className="space-y-6">
-                <h3 className="text-lg font-semibold" style={{ color: theme === 'dark' ? '#f5f5f5' : '#1f2937' }}>Temas Personalizados</h3>
+                <h3 className="text-lg font-semibold" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937' }}>Temas Personalizados</h3>
 
                 <div className="grid grid-cols-2 gap-4">
                   {themeOptions.map(t => (
@@ -1143,7 +1144,7 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
                                  ${theme === t.id
                                    ? 'border-violet-500 ring-2 ring-violet-500/30'
                                    : ''}`}
-                      style={{ borderColor: theme === t.id ? '#8b5cf6' : (theme === 'dark' ? '#374151' : '#e5e7eb') }}
+                      style={{ borderColor: theme === t.id ? '#8b5cf6' : ((theme === 'dark' || theme === 'liquid') ? '#374151' : '#e5e7eb') }}
                     >
                       <div
                         className="w-full h-20 rounded-lg mb-3 flex items-center justify-center"
@@ -1151,7 +1152,7 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
                       >
                         <t.icon className={`w-8 h-8 ${t.id === 'dark' ? 'text-white' : 'text-gray-800'}`} />
                       </div>
-                      <p className="font-medium" style={{ color: theme === t.id ? '#8b5cf6' : (theme === 'dark' ? '#d1d5db' : '#374151') }}>
+                      <p className="font-medium" style={{ color: theme === t.id ? '#8b5cf6' : ((theme === 'dark' || theme === 'liquid') ? '#d1d5db' : '#374151') }}>
                         {t.label}
                       </p>
                     </button>
@@ -1159,10 +1160,10 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
                 </div>
 
                 <div className="p-4 rounded-xl border" style={{
-                  backgroundColor: theme === 'dark' ? 'rgba(251, 191, 36, 0.1)' : 'rgba(251, 191, 36, 0.1)',
-                  borderColor: theme === 'dark' ? 'rgba(251, 191, 36, 0.3)' : 'rgba(251, 191, 36, 0.3)'
+                  backgroundColor: (theme === 'dark' || theme === 'liquid') ? 'rgba(251, 191, 36, 0.1)' : 'rgba(251, 191, 36, 0.1)',
+                  borderColor: (theme === 'dark' || theme === 'liquid') ? 'rgba(251, 191, 36, 0.3)' : 'rgba(251, 191, 36, 0.3)'
                 }}>
-                  <p className="text-sm" style={{ color: theme === 'dark' ? '#fbbf24' : '#b45309' }}>
+                  <p className="text-sm" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#fbbf24' : '#b45309' }}>
                     <Sparkles className="w-4 h-4 inline mr-2" />
                     Próximamente: más temas y colores personalizados
                   </p>
@@ -1177,9 +1178,9 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
 
 // Main App Component
 const App = () => {
-  const [theme, setTheme] = useState('light');
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [activeView, setActiveView] = useState('dashboard');
+  const [theme, setTheme] = useState(() => {
+    try { return localStorage.getItem('tarjetas_theme') || 'liquid'; } catch { return 'liquid'; }
+  });  const [activeView, setActiveView] = useState('dashboard');
   const [searchQuery, setSearchQuery] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState('tarjetas');
@@ -1301,6 +1302,7 @@ const App = () => {
   // Theme toggle
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
+    try { localStorage.setItem('tarjetas_theme', theme); } catch {}
   }, [theme]);
 
   // Limpiar filtro de tipo de gasto cuando se cambia de vista (excepto cuando vamos a movimientos)
@@ -1678,8 +1680,10 @@ const App = () => {
   };
   
   // Chart colors based on theme
-  const chartColors = theme === 'dark' 
+  const chartColors = theme === 'dark'
     ? ['#D4AF37', '#FFD700', '#F59E0B', '#FBBF24']
+    : theme === 'liquid'
+    ? ['#7c8cff', '#41e0c8', '#c45bff', '#ffb454']
     : ['#8B5CF6', '#EC4899', '#06B6D4', '#10B981'];
 
   // Mostrar Onboarding si es la primera vez
@@ -1688,121 +1692,83 @@ const App = () => {
   }
 
   return (
-    <div className="min-h-screen flex">
+    <div className="min-h-screen">
       {/* Animated Background */}
       <div className="animated-bg" />
 
-      {/* Sidebar */}
-      <aside className={`sidebar fixed lg:relative w-72 h-screen flex flex-col z-40 transition-all duration-300
-                        ${sidebarOpen ? 'left-0' : '-left-72 lg:left-0 lg:w-20'}`}>
-        {/* Logo */}
-        <div className="p-6 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[var(--accent-1)] to-[var(--accent-2)] 
-                          flex items-center justify-center shadow-lg">
-            <Wallet className="w-5 h-5 text-white" />
-          </div>
-          {sidebarOpen && (
-            <div className="animate-fade-in-left">
-              <h1 className="font-bold text-lg text-[var(--text-primary)]">Tarjeteando</h1>
-              <p className="text-xs text-[var(--text-muted)]">Control financiero</p>
+      {/* Navegación flotante (pill) — fija, permanece visible en el scroll */}
+      <div className="fixed bottom-4 md:bottom-auto md:top-4 inset-x-0 z-50 flex justify-center px-3 pointer-events-none">
+        <nav className="nav-pill glass pointer-events-auto max-w-full overflow-x-auto">
+          {/* Marca */}
+          <div className="hidden md:flex items-center gap-2 pl-1 pr-1 shrink-0">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[var(--accent-1)] to-[var(--accent-2)]
+                            flex items-center justify-center shadow-lg shrink-0">
+              <Wallet className="w-5 h-5 text-white" />
             </div>
-          )}
-        </div>
-        
-        {/* Menu */}
-        <nav className="flex-1 px-4 py-2">
-          {menuItems.map((item, idx) => (
+            <span className="hidden xl:block font-bold text-[var(--text-primary)] pr-1">Tarjeteando</span>
+          </div>
+
+          <div className="nav-pill-divider hidden md:block" />
+
+          {menuItems.map((item) => (
             <button
               key={item.id}
               onClick={() => setActiveView(item.id)}
-              className={`menu-item w-full mb-1 ${activeView === item.id ? 'active' : ''}`}
-              style={{ animationDelay: `${idx * 50}ms` }}
+              className={`nav-pill-item ${activeView === item.id ? 'active' : ''}`}
+              title={item.label}
             >
-              <item.icon className="w-5 h-5" />
-              {sidebarOpen && (
-                <>
-                  <span className="flex-1 text-left">{item.label}</span>
-                  {item.badge > 0 && (
-                    <span className="badge">{item.badge}</span>
-                  )}
-                </>
-              )}
+              <item.icon className="w-5 h-5 shrink-0" />
+              <span className="hidden lg:inline">{item.label}</span>
+              {item.badge > 0 && <span className="nav-pill-badge">{item.badge}</span>}
             </button>
           ))}
-        </nav>
-        
-        {/* Theme Toggle */}
-        <div className="p-4 border-t border-[var(--glass-border)]">
-          <button
-            onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
-            className="w-full flex items-center justify-center p-3 rounded-xl
-                       bg-[var(--glass-bg)] hover:bg-opacity-80 transition-all"
-          >
-            <div className="flex items-center gap-2">
-              <Sun className={`w-4 h-4 ${theme === 'light' ? 'text-[var(--accent-1)]' : 'text-[var(--text-muted)]'}`} />
-              <div className="theme-toggle" />
-              <Moon className={`w-4 h-4 ${theme === 'dark' ? 'text-[var(--accent-1)]' : 'text-[var(--text-muted)]'}`} />
-            </div>
-          </button>
-        </div>
-      </aside>
-      
-      {/* Main Content */}
-      <main className="flex-1 min-h-screen overflow-y-auto">
-        {/* Header */}
-        <header className="sticky top-0 z-30 glass mx-4 mt-4 mb-6 px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <button 
-                onClick={() => setSidebarOpen(!sidebarOpen)}
-                className="p-2 rounded-xl hover:bg-[var(--glass-bg)] transition-colors lg:hidden"
-              >
-                {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-              </button>
-              
-              <div>
-                <h2 className="text-xl font-bold text-[var(--text-primary)]">
-                  {menuItems.find(m => m.id === activeView)?.label || 'Dashboard'}
-                </h2>
-                <p className="text-sm text-[var(--text-muted)]">
-                  {new Date().toLocaleDateString('es-AR', { 
-                    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' 
-                  })}
-                </p>
-              </div>
-            </div>
-            
-            <div className="flex items-center gap-3">
-              {/* Search */}
-              <div className="hidden md:flex items-center gap-2 px-4 py-2 rounded-xl 
-                              bg-[var(--glass-bg)] border border-[var(--glass-border)]">
-                <Search className="w-4 h-4 text-[var(--text-muted)]" />
-                <input
-                  type="text"
-                  placeholder="Buscar..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="bg-transparent outline-none text-sm w-40 text-[var(--text-primary)]
-                             placeholder:text-[var(--text-muted)]"
-                />
-              </div>
-              
-              
-              {/* Settings */}
-              <button
-                onClick={() => setSettingsOpen(true)}
-                className="p-2.5 rounded-xl bg-[var(--glass-bg)]
-                           border border-[var(--glass-border)] hover:bg-opacity-80 transition-all"
-              >
-                <Settings className="w-5 h-5 text-[var(--text-secondary)]" />
-              </button>
-            </div>
-          </div>
 
-        </header>
-        
-        {/* Content Area */}
-        <div className="px-4 pb-8">
+          <div className="nav-pill-divider hidden md:block" />
+
+          {/* Tema */}
+          <button
+            onClick={() => setTheme(theme === 'liquid' ? 'light' : theme === 'light' ? 'dark' : 'liquid')}
+            className="nav-pill-icon"
+            title="Cambiar tema (Liquid / Claro / Oscuro)"
+          >
+            {theme === 'light' ? <Sun className="w-5 h-5" /> : theme === 'dark' ? <Moon className="w-5 h-5" /> : <Sparkles className="w-5 h-5" />}
+          </button>
+
+          {/* Configuración */}
+          <button onClick={() => setSettingsOpen(true)} className="nav-pill-icon" title="Configuración">
+            <Settings className="w-5 h-5" />
+          </button>
+        </nav>
+      </div>
+
+      {/* Contenido principal — ancho completo */}
+      <main className="min-h-screen pt-6 md:pt-24">
+        <div className="max-w-7xl mx-auto px-4 pb-28 md:pb-10">
+          {/* Encabezado contextual */}
+          <header className="flex items-center justify-between gap-4 mb-6 flex-wrap">
+            <div>
+              <h2 className="text-2xl font-bold text-[var(--text-primary)]">
+                {menuItems.find(m => m.id === activeView)?.label || 'Dashboard'}
+              </h2>
+              <p className="text-sm text-[var(--text-muted)] capitalize">
+                {new Date().toLocaleDateString('es-AR', {
+                  weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+                })}
+              </p>
+            </div>
+            <div className="flex items-center gap-2 px-4 py-2 rounded-xl
+                            bg-[var(--glass-bg)] border border-[var(--glass-border)]">
+              <Search className="w-4 h-4 text-[var(--text-muted)]" />
+              <input
+                type="text"
+                placeholder="Buscar..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="bg-transparent outline-none text-sm w-40 text-[var(--text-primary)]
+                           placeholder:text-[var(--text-muted)]"
+              />
+            </div>
+          </header>
           {loading ? (
             <div className="flex items-center justify-center h-64">
               <div className="animate-spin rounded-full h-12 w-12 border-4 border-[var(--accent-1)] border-t-transparent" />
@@ -1836,6 +1802,7 @@ const App = () => {
             <MovimientosView
               movimientos={movimientos}
               tarjetas={tarjetas}
+              resumenes={resumenes}
               searchQuery={searchQuery}
               formatCurrency={formatCurrency}
               onEditarDescripcion={guardarEdicionDescripcion}
@@ -2613,9 +2580,55 @@ const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [
 };
 
 // Movimientos View con paginación por mes y filtros
-const MovimientosView = ({ movimientos, tarjetas = [], searchQuery, formatCurrency, onEditarDescripcion, gastosFijos = new Set(), filtroTipoGastoInicial = '' }) => {
+const MovimientosView = ({ movimientos, tarjetas = [], resumenes = [], searchQuery, formatCurrency, onEditarDescripcion, gastosFijos = new Set(), filtroTipoGastoInicial = '' }) => {
   const [mesActual, setMesActual] = useState(0);
   const [showFilters, setShowFilters] = useState(false);
+
+  // Resúmenes ordenados de más reciente a más antiguo (fecha_cierre, fallback anio/mes)
+  const resumenesOrdenados = [...resumenes].sort((a, b) => {
+    const fechaA = a.fecha_cierre || `${a.anio}-${String(a.mes).padStart(2, '0')}-01`;
+    const fechaB = b.fecha_cierre || `${b.anio}-${String(b.mes).padStart(2, '0')}-01`;
+    return fechaB.localeCompare(fechaA);
+  });
+
+  const [modoFiltro, setModoFiltro] = useState(() => {
+    const guardado = localStorage.getItem('movimientos_modo_filtro');
+    return guardado === 'resumen' ? 'resumen' : 'mes';
+  });
+  const [resumenSeleccionado, setResumenSeleccionado] = useState('');
+
+  // Inicializar/resetear resumen seleccionado al resumen más reciente disponible
+  useEffect(() => {
+    if (modoFiltro !== 'resumen') return;
+    const existe = resumenesOrdenados.some(r => r.id === resumenSeleccionado);
+    if (!existe) {
+      if (resumenesOrdenados.length > 0) {
+        setResumenSeleccionado(resumenesOrdenados[0].id);
+      } else {
+        setModoFiltro('mes');
+      }
+    }
+  }, [modoFiltro, resumenesOrdenados, resumenSeleccionado]);
+
+  const cambiarModoFiltro = (modo) => {
+    setModoFiltro(modo);
+    localStorage.setItem('movimientos_modo_filtro', modo);
+  };
+
+  const periodoResumen = (r) => {
+    return r.fecha_cierre
+      ? new Date(r.fecha_cierre + 'T12:00:00').toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })
+      : (r.anio && r.mes ? new Date(r.anio, r.mes - 1).toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }) : 'período desconocido');
+  };
+
+  const labelResumen = (r) => {
+    const tarjetaInfo = tarjetas.find(t => t.nombre === r.tarjeta);
+    const banco = tarjetaInfo?.banco || 'Banco desconocido';
+    return `${banco} ${r.tarjeta} — ${periodoResumen(r)}`;
+  };
+
+  const resumenActivo = resumenesOrdenados.find(r => r.id === resumenSeleccionado);
+  const periodoResumenActivo = resumenActivo ? periodoResumen(resumenActivo) : '';
 
   // Estado para edición inline
   const [editandoId, setEditandoId] = useState(null);
@@ -2667,8 +2680,11 @@ const MovimientosView = ({ movimientos, tarjetas = [], searchQuery, formatCurren
 
   // Filtrar movimientos
   const filtered = movimientos.filter(m => {
-    // Filtro por mes (paginación)
-    if (mesSeleccionado && !filtroFechaDesde && !filtroFechaHasta) {
+    if (modoFiltro === 'resumen') {
+      // Filtro por resumen seleccionado
+      if (resumenSeleccionado && m.resumen_id !== resumenSeleccionado) return false;
+    } else if (mesSeleccionado && !filtroFechaDesde && !filtroFechaHasta) {
+      // Filtro por mes (paginación)
       const fechaMov = new Date(m.fecha_compra);
       const mesMov = `${fechaMov.getFullYear()}-${String(fechaMov.getMonth() + 1).padStart(2, '0')}`;
       if (mesMov !== mesSeleccionado) return false;
@@ -2744,6 +2760,47 @@ const MovimientosView = ({ movimientos, tarjetas = [], searchQuery, formatCurren
 
   return (
     <div className="space-y-4">
+      {/* Toggle modo de agrupación: por mes / por resumen */}
+      <div className="glass-card p-4 flex flex-wrap items-center gap-3">
+        <div
+          className="inline-flex gap-1 p-1 rounded-lg bg-[var(--glass-bg)]"
+          title={resumenesOrdenados.length === 0 ? 'Importá un resumen primero' : ''}
+        >
+          <button
+            onClick={() => cambiarModoFiltro('mes')}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all
+                       ${modoFiltro === 'mes'
+                         ? 'bg-gradient-to-r from-[var(--accent-1)] to-[var(--accent-2)] text-white'
+                         : 'text-[var(--text-secondary)] hover:bg-opacity-80'}`}
+          >
+            Por mes
+          </button>
+          <button
+            onClick={() => cambiarModoFiltro('resumen')}
+            disabled={resumenesOrdenados.length === 0}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed
+                       ${modoFiltro === 'resumen'
+                         ? 'bg-gradient-to-r from-[var(--accent-1)] to-[var(--accent-2)] text-white'
+                         : 'text-[var(--text-secondary)] hover:bg-opacity-80'}`}
+          >
+            Por resumen
+          </button>
+        </div>
+
+        {modoFiltro === 'resumen' && resumenesOrdenados.length > 0 && (
+          <select
+            value={resumenSeleccionado}
+            onChange={(e) => setResumenSeleccionado(e.target.value)}
+            className="px-3 py-2 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)]
+                       text-[var(--text-primary)] text-sm focus:outline-none focus:border-[var(--accent-1)]"
+          >
+            {resumenesOrdenados.map(r => (
+              <option key={r.id} value={r.id}>{labelResumen(r)}</option>
+            ))}
+          </select>
+        )}
+      </div>
+
       {/* Panel de filtros */}
       <div className="glass-card p-4">
         <div className="flex items-center justify-between mb-4">
@@ -2881,7 +2938,11 @@ const MovimientosView = ({ movimientos, tarjetas = [], searchQuery, formatCurren
           <h3 className="text-lg font-semibold text-[var(--text-primary)]">
             {filtered.length} movimientos
           </h3>
-          {mesSeleccionado && !filtroFechaDesde && !filtroFechaHasta && (() => {
+          {modoFiltro === 'resumen' && resumenActivo ? (
+            <span className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-[var(--accent-1)] to-[var(--accent-2)] text-white text-sm font-medium">
+              Período: {periodoResumenActivo}
+            </span>
+          ) : mesSeleccionado && !filtroFechaDesde && !filtroFechaHasta && (() => {
             const [anio, mesNum] = mesSeleccionado.split('-');
             const nombreMes = new Date(anio, parseInt(mesNum) - 1).toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
             return (
@@ -3021,8 +3082,8 @@ const MovimientosView = ({ movimientos, tarjetas = [], searchQuery, formatCurren
           )}
         </div>
 
-        {/* Paginación por mes - solo si no hay filtros de fecha */}
-        {mesesUnicos.length > 1 && !filtroFechaDesde && !filtroFechaHasta && (
+        {/* Paginación por mes - solo si no hay filtros de fecha ni modo "por resumen" */}
+        {modoFiltro !== 'resumen' && mesesUnicos.length > 1 && !filtroFechaDesde && !filtroFechaHasta && (
           <div className="p-4 border-t border-[var(--glass-border)] flex items-center justify-between">
             <button
               onClick={() => setMesActual(prev => Math.min(prev + 1, mesesUnicos.length - 1))}

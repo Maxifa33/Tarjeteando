@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tarjeteando · Opción A — Liquid Glass</title>
+<style>
+  :root{
+    --accent:#7c8cff; --accent2:#41e0c8; --warn:#ffb454; --danger:#ff6b8a;
+    --glass:rgba(255,255,255,0.06); --glass-strong:rgba(255,255,255,0.10);
+    --border:rgba(255,255,255,0.12); --text:#eef0ff; --muted:#9aa0bf;
+    --radius:24px;
+  }
+  *{box-sizing:border-box; margin:0; padding:0; -webkit-font-smoothing:antialiased;}
+  body{
+    font-family:'SF Pro Display',-apple-system,system-ui,Segoe UI,Roboto,sans-serif;
+    color:var(--text); min-height:100vh; overflow-x:hidden;
+    background:#05060f;
+  }
+  /* Aurora mesh background */
+  .aurora{position:fixed; inset:0; z-index:-1; overflow:hidden;}
+  .blob{position:absolute; border-radius:50%; filter:blur(90px); opacity:.55; animation:float 18s ease-in-out infinite;}
+  .b1{width:520px;height:520px; background:#5b6cff; top:-120px; left:-80px;}
+  .b2{width:480px;height:480px; background:#19c4a8; bottom:-140px; right:-60px; animation-delay:-6s;}
+  .b3{width:420px;height:420px; background:#c45bff; top:30%; right:20%; animation-delay:-11s; opacity:.4;}
+  @keyframes float{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(40px,-30px) scale(1.12)}}
+
+  .wrap{max-width:1180px; margin:0 auto; padding:22px 20px 60px;}
+  header{display:flex; align-items:center; justify-content:space-between; margin-bottom:22px;}
+  .logo{display:flex; align-items:center; gap:11px; font-weight:700; font-size:19px; letter-spacing:-.02em;}
+  .logo .mark{width:34px;height:34px;border-radius:11px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:grid;place-items:center;font-size:18px;box-shadow:0 8px 24px rgba(124,140,255,.45);}
+  .usd{display:flex;align-items:center;gap:8px;padding:9px 15px;border-radius:14px;background:var(--glass);backdrop-filter:blur(20px);border:1px solid var(--border);font-size:13px;font-weight:600;}
+  .usd b{color:var(--accent2);}
+  .usd .t{color:var(--muted);font-weight:500;}
+
+  nav{display:flex;gap:6px;padding:6px;border-radius:18px;background:var(--glass);backdrop-filter:blur(20px);border:1px solid var(--border);margin-bottom:24px;width:fit-content;}
+  nav button{border:0;background:transparent;color:var(--muted);font:inherit;font-weight:600;font-size:14px;padding:9px 18px;border-radius:13px;cursor:pointer;transition:.25s;}
+  nav button.on{background:linear-gradient(135deg,var(--accent),#9b6cff);color:#fff;box-shadow:0 6px 18px rgba(124,140,255,.4);}
+
+  .bento{display:grid;grid-template-columns:repeat(12,1fr);gap:16px;}
+  .card{background:var(--glass);backdrop-filter:blur(24px);border:1px solid var(--border);border-radius:var(--radius);padding:22px;position:relative;overflow:hidden;}
+  .card::before{content:"";position:absolute;inset:0;border-radius:var(--radius);padding:1px;background:linear-gradient(140deg,rgba(255,255,255,.25),transparent 40%);-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none;}
+  .label{font-size:12.5px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;}
+  .big{font-size:42px;font-weight:700;letter-spacing:-.03em;font-variant-numeric:tabular-nums;}
+  .sub{font-size:13px;color:var(--muted);margin-top:6px;}
+
+  .hero{grid-column:span 7;}
+  .hero .big{font-size:54px;background:linear-gradient(120deg,#fff,#b9c0ff);-webkit-background-clip:text;background-clip:text;color:transparent;}
+  .chip{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;padding:5px 11px;border-radius:10px;margin-top:14px;}
+  .chip.up{background:rgba(255,107,138,.16);color:#ff8fa6;}
+  .chip.dn{background:rgba(65,224,200,.16);color:var(--accent2);}
+
+  .stat{grid-column:span 5;display:grid;grid-template-rows:1fr 1fr;gap:16px;}
+  .stat .mini{display:flex;flex-direction:column;justify-content:center;}
+  .stat .mini .big{font-size:30px;}
+
+  /* credit cards */
+  .cards-col{grid-column:span 5;display:flex;flex-direction:column;gap:14px;}
+  .cc{border-radius:20px;padding:20px;color:#fff;position:relative;overflow:hidden;cursor:pointer;transition:transform .3s cubic-bezier(.2,.8,.2,1),box-shadow .3s;transform-style:preserve-3d;min-height:140px;display:flex;flex-direction:column;justify-content:space-between;}
+  .cc:hover{transform:perspective(900px) rotateX(6deg) rotateY(-7deg) translateY(-4px);box-shadow:0 24px 50px rgba(0,0,0,.5);}
+  .cc .row{display:flex;justify-content:space-between;align-items:flex-start;}
+  .cc .bank{font-weight:700;font-size:15px;}
+  .cc .net{font-size:12px;opacity:.85;font-weight:600;letter-spacing:.1em;}
+  .cc .num{font-family:monospace;letter-spacing:.18em;font-size:14px;opacity:.85;}
+  .cc .amt{font-size:24px;font-weight:700;font-variant-numeric:tabular-nums;}
+  .cc .amt small{font-size:12px;opacity:.7;font-weight:500;display:block;margin-top:2px;}
+  .cc.bbva{background:linear-gradient(135deg,#0a3d8f,#1464d6);}
+  .cc.santa{background:linear-gradient(135deg,#9e1b1b,#d63333);}
+  .cc.gali{background:linear-gradient(135deg,#5a3a00,#c97b1a);}
+  .cc .glow{position:absolute;width:200px;height:200px;border-radius:50%;background:rgba(255,255,255,.18);filter:blur(40px);top:-60px;right:-40px;}
+
+  /* projection chart */
+  .proj{grid-column:span 7;}
+  .bars{display:flex;align-items:flex-end;gap:12px;height:180px;margin-top:18px;}
+  .bar-wrap{flex:1;display:flex;flex-direction:column;align-items:center;gap:8px;cursor:pointer;}
+  .bar{width:100%;border-radius:11px 11px 4px 4px;background:linear-gradient(180deg,var(--accent),#5b6cff);transition:.3s;position:relative;min-height:8px;opacity:.45;}
+  .bar-wrap.on .bar,.bar-wrap:hover .bar{opacity:1;box-shadow:0 0 24px rgba(124,140,255,.55);}
+  .bar-wrap .m{font-size:12px;color:var(--muted);font-weight:600;}
+  .bar-wrap .v{font-size:11.5px;color:var(--text);font-weight:600;font-variant-numeric:tabular-nums;}
+  .detail{margin-top:16px;border-top:1px solid var(--border);padding-top:14px;display:none;}
+  .detail.show{display:block;animation:fade .35s;}
+  @keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  .di{display:flex;align-items:center;justify-content:space-between;padding:9px 0;font-size:13.5px;border-bottom:1px solid rgba(255,255,255,.06);}
+  .di:last-child{border:0;}
+  .di .left{display:flex;align-items:center;gap:10px;}
+  .dot{width:9px;height:9px;border-radius:50%;}
+  .di .cuota{font-size:11px;color:var(--muted);background:var(--glass-strong);padding:2px 7px;border-radius:6px;}
+  .di .mny{font-weight:700;font-variant-numeric:tabular-nums;}
+
+  /* AI insight */
+  .ai{grid-column:span 5;background:linear-gradient(140deg,rgba(124,140,255,.16),rgba(65,224,200,.10));}
+  .ai .ico{width:38px;height:38px;border-radius:12px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:grid;place-items:center;font-size:19px;margin-bottom:12px;}
+  .ai p{font-size:15px;line-height:1.5;}
+  .ai p b{color:var(--accent2);}
+
+  /* cuotas list */
+  .cuotas{grid-column:span 12;}
+  .ctable{display:flex;flex-direction:column;gap:2px;margin-top:8px;}
+  .crow{display:grid;grid-template-columns:1.6fr .9fr 1fr 1fr;align-items:center;gap:10px;padding:13px 8px;border-radius:12px;transition:.2s;font-size:14px;}
+  .crow:hover{background:var(--glass-strong);}
+  .crow .nm{display:flex;align-items:center;gap:11px;font-weight:600;}
+  .prog{height:6px;background:rgba(255,255,255,.1);border-radius:6px;overflow:hidden;}
+  .prog i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:6px;}
+  .crow .mny{text-align:right;font-weight:700;font-variant-numeric:tabular-nums;}
+  .crow .muted{color:var(--muted);font-size:12.5px;}
+  .ch{display:grid;grid-template-columns:1.6fr .9fr 1fr 1fr;gap:10px;padding:0 8px 6px;font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:600;}
+
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--glass-strong);backdrop-filter:blur(20px);border:1px solid var(--border);padding:13px 22px;border-radius:14px;font-size:14px;font-weight:600;transition:.4s;opacity:0;}
+  .toast.show{transform:translateX(-50%) translateY(0);opacity:1;}
+  @media(max-width:880px){.bento>*{grid-column:span 12 !important}.stat{grid-template-rows:none;grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+<div class="aurora"><div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div></div>
+<div class="wrap">
+  <header>
+    <div class="logo"><div class="mark">◈</div> Tarjeteando</div>
+    <div class="usd"><span class="t">💵 Dólar tarjeta</span> <b>$1.485</b> <span class="t">· 14:30</span></div>
+  </header>
+
+  <nav>
+    <button class="on" data-t="Dashboard">Dashboard</button>
+    <button data-t="Movimientos">Movimientos</button>
+    <button data-t="Cuotas">Cuotas</button>
+    <button data-t="Importar">Importar</button>
+  </nav>
+
+  <div class="bento">
+    <div class="card hero">
+      <div class="label">Saldo total del mes</div>
+      <div class="big">$701.250</div>
+      <div class="sub">3 tarjetas · próximo cierre BBVA en 4 días</div>
+      <span class="chip up">▲ 12,4% vs. mayo</span>
+    </div>
+
+    <div class="stat">
+      <div class="card mini">
+        <div class="label">Cuotas próximo mes</div>
+        <div class="big">$184.900</div>
+        <div class="sub">7 consumos en cuotas</div>
+      </div>
+      <div class="card mini">
+        <div class="label">Próximo vencimiento</div>
+        <div class="big">28/06</div>
+        <div class="sub">BBVA Visa Gold</div>
+      </div>
+    </div>
+
+    <div class="cards-col">
+      <div class="cc bbva"><div class="glow"></div>
+        <div class="row"><span class="bank">BBVA</span><span class="net">VISA GOLD</span></div>
+        <div class="num">•••• 4821</div>
+        <div class="amt">$487.350<small>Cierre 28/06</small></div>
+      </div>
+      <div class="cc santa"><div class="glow"></div>
+        <div class="row"><span class="bank">Santander</span><span class="net">VISA</span></div>
+        <div class="num">•••• 7733</div>
+        <div class="amt">$213.900<small>Cierre 02/07</small></div>
+      </div>
+      <div class="cc gali"><div class="glow"></div>
+        <div class="row"><span class="bank">Galicia</span><span class="net">MASTERCARD</span></div>
+        <div class="num">•••• 1290</div>
+        <div class="amt">USD 340 <small>≈ $504.900 ARS · Cierre 05/07</small></div>
+      </div>
+    </div>
+
+    <div class="card proj">
+      <div class="label">Proyección de cuotas — próximos 6 meses</div>
+      <div class="sub">Tocá una barra para ver el detalle</div>
+      <div class="bars" id="bars"></div>
+      <div class="detail" id="detail"></div>
+    </div>
+
+    <div class="card ai">
+      <div class="ico">✦</div>
+      <div class="label">Insight</div>
+      <p>Tu gasto en <b>Restaurantes</b> subió <b>34%</b> este mes. Si mantenés el ritmo vas a comprometer <b>$92.000</b> extra para agosto. ¿Querés fijar un límite?</p>
+    </div>
+
+    <div class="card cuotas">
+      <div class="label">Cuotas activas</div>
+      <div class="ch"><span>Comercio</span><span>Tarjeta</span><span>Progreso</span><span>Cuota</span></div>
+      <div class="ctable" id="ctable"></div>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const tarjetas={bbva:{c:'#3a7bff',n:'BBVA'},santa:{c:'#ff5757',n:'Santander'},gali:{c:'#e89a3c',n:'Galicia'}};
+const proj=[
+  {m:'Jun',total:184900,items:[{d:'iPhone 15 Pro',t:'bbva',c:'6/12',v:62500},{d:'Notebook Lenovo',t:'santa',c:'3/9',v:48000},{d:'Heladera Samsung',t:'gali',c:'4/6',v:41200},{d:'Cubiertas Bridgestone',t:'bbva',c:'2/3',v:33200}]},
+  {m:'Jul',total:171300,items:[{d:'iPhone 15 Pro',t:'bbva',c:'7/12',v:62500},{d:'Notebook Lenovo',t:'santa',c:'4/9',v:48000},{d:'Heladera Samsung',t:'gali',c:'5/6',v:41200},{d:'Curso UX',t:'bbva',c:'2/4',v:19600}]},
+  {m:'Ago',total:130100,items:[{d:'iPhone 15 Pro',t:'bbva',c:'8/12',v:62500},{d:'Notebook Lenovo',t:'santa',c:'5/9',v:48000},{d:'Curso UX',t:'bbva',c:'3/4',v:19600}]},
+  {m:'Sep',total:110500,items:[{d:'iPhone 15 Pro',t:'bbva',c:'9/12',v:62500},{d:'Notebook Lenovo',t:'santa',c:'6/9',v:48000}]},
+  {m:'Oct',total:110500,items:[{d:'iPhone 15 Pro',t:'bbva',c:'10/12',v:62500},{d:'Notebook Lenovo',t:'santa',c:'7/9',v:48000}]},
+  {m:'Nov',total:62500,items:[{d:'iPhone 15 Pro',t:'bbva',c:'11/12',v:62500}]},
+];
+const cuotas=[
+  {d:'iPhone 15 Pro',t:'bbva',p:6,tot:12,v:62500},
+  {d:'Notebook Lenovo',t:'santa',p:3,tot:9,v:48000},
+  {d:'Heladera Samsung',t:'gali',p:4,tot:6,v:41200},
+  {d:'Cubiertas Bridgestone',t:'bbva',p:2,tot:3,v:33200},
+  {d:'Curso UX',t:'bbva',p:1,tot:4,v:19600},
+];
+const fmt=n=>'$'+n.toLocaleString('es-AR');
+const max=Math.max(...proj.map(p=>p.total));
+const barsEl=document.getElementById('bars'), detEl=document.getElementById('detail');
+let sel=-1;
+proj.forEach((p,i)=>{
+  const w=document.createElement('div');w.className='bar-wrap';
+  w.innerHTML=`<span class="v">${(p.total/1000).toFixed(0)}k</span><div class="bar" style="height:${p.total/max*150+8}px"></div><span class="m">${p.m}</span>`;
+  w.onclick=()=>{sel=sel===i?-1:i;render();};
+  barsEl.appendChild(w);
+});
+function render(){
+  [...barsEl.children].forEach((c,i)=>c.classList.toggle('on',i===sel));
+  if(sel<0){detEl.classList.remove('show');return;}
+  const p=proj[sel];
+  detEl.innerHTML=`<div class="label" style="margin-bottom:6px">${p.m} · ${fmt(p.total)} en ${p.items.length} cuotas</div>`+
+    p.items.map(it=>`<div class="di"><div class="left"><span class="dot" style="background:${tarjetas[it.t].c}"></span>${it.d} <span class="cuota">${it.c}</span></div><span class="mny">${fmt(it.v)}</span></div>`).join('');
+  detEl.classList.add('show');
+}
+document.getElementById('ctable').innerHTML=cuotas.map(c=>`
+  <div class="crow">
+    <div class="nm"><span class="dot" style="background:${tarjetas[c.t].c}"></span>${c.d}</div>
+    <div class="muted">${tarjetas[c.t].n}</div>
+    <div><div class="prog"><i style="width:${c.p/c.tot*100}%"></i></div><div class="muted" style="margin-top:4px">${c.p} de ${c.tot}</div></div>
+    <div class="mny">${fmt(c.v)}</div>
+  </div>`).join('');
+
+const toast=document.getElementById('toast');
+function showToast(m){toast.textContent=m;toast.classList.add('show');clearTimeout(toast._t);toast._t=setTimeout(()=>toast.classList.remove('show'),2200);}
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('nav button').forEach(x=>x.classList.remove('on'));b.classList.add('on');
+  if(b.dataset.t!=='Dashboard')showToast('Vista "'+b.dataset.t+'" — demo visual');
+});
+document.querySelectorAll('.cc').forEach(c=>c.onclick=()=>showToast('Detalle de tarjeta — demo visual'));
+</script>
+</body>
+</html>
