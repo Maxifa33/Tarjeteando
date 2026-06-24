@@ -2788,47 +2788,6 @@ const MovimientosView = ({ movimientos, tarjetas = [], resumenes = [], searchQue
 
   return (
     <div className="space-y-4">
-      {/* Toggle modo de agrupación: por mes / por resumen */}
-      <div className="glass-card p-4 flex flex-wrap items-center gap-3">
-        <div
-          className="inline-flex gap-1 p-1 rounded-lg bg-[var(--glass-bg)]"
-          title={resumenesOrdenados.length === 0 ? 'Importá un resumen primero' : ''}
-        >
-          <button
-            onClick={() => cambiarModoFiltro('mes')}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all
-                       ${modoFiltro === 'mes'
-                         ? 'bg-gradient-to-r from-[var(--accent-1)] to-[var(--accent-2)] text-white'
-                         : 'text-[var(--text-secondary)] hover:bg-opacity-80'}`}
-          >
-            Por mes
-          </button>
-          <button
-            onClick={() => cambiarModoFiltro('resumen')}
-            disabled={resumenesOrdenados.length === 0}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed
-                       ${modoFiltro === 'resumen'
-                         ? 'bg-gradient-to-r from-[var(--accent-1)] to-[var(--accent-2)] text-white'
-                         : 'text-[var(--text-secondary)] hover:bg-opacity-80'}`}
-          >
-            Por resumen
-          </button>
-        </div>
-
-        {modoFiltro === 'resumen' && resumenesOrdenados.length > 0 && (
-          <select
-            value={resumenSeleccionado}
-            onChange={(e) => setResumenSeleccionado(e.target.value)}
-            className="px-3 py-2 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)]
-                       text-[var(--text-primary)] text-sm focus:outline-none focus:border-[var(--accent-1)]"
-          >
-            {resumenesOrdenados.map(r => (
-              <option key={r.id} value={r.id}>{labelResumen(r)}</option>
-            ))}
-          </select>
-        )}
-      </div>
-
       {/* Panel de filtros */}
       <div className="glass-card p-4">
         <div className="flex items-center justify-between mb-4">
@@ -2856,7 +2815,50 @@ const MovimientosView = ({ movimientos, tarjetas = [], resumenes = [], searchQue
         </div>
 
         {showFilters && (
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 pt-3 border-t border-[var(--glass-border)]">
+          <div className="pt-3 border-t border-[var(--glass-border)] space-y-4">
+            {/* Modo de agrupación: por mes / por resumen */}
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="block text-xs text-[var(--text-muted)]">Agrupar por</label>
+              <div
+                className="inline-flex gap-1 p-1 rounded-lg bg-[var(--glass-bg)]"
+                title={resumenesOrdenados.length === 0 ? 'Importá un resumen primero' : ''}
+              >
+                <button
+                  onClick={() => cambiarModoFiltro('mes')}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all
+                             ${modoFiltro === 'mes'
+                               ? 'bg-gradient-to-r from-[var(--accent-1)] to-[var(--accent-2)] text-white'
+                               : 'text-[var(--text-secondary)] hover:bg-opacity-80'}`}
+                >
+                  Por mes
+                </button>
+                <button
+                  onClick={() => cambiarModoFiltro('resumen')}
+                  disabled={resumenesOrdenados.length === 0}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed
+                             ${modoFiltro === 'resumen'
+                               ? 'bg-gradient-to-r from-[var(--accent-1)] to-[var(--accent-2)] text-white'
+                               : 'text-[var(--text-secondary)] hover:bg-opacity-80'}`}
+                >
+                  Por resumen
+                </button>
+              </div>
+
+              {modoFiltro === 'resumen' && resumenesOrdenados.length > 0 && (
+                <select
+                  value={resumenSeleccionado}
+                  onChange={(e) => setResumenSeleccionado(e.target.value)}
+                  className="px-3 py-2 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)]
+                             text-[var(--text-primary)] text-sm focus:outline-none focus:border-[var(--accent-1)]"
+                >
+                  {resumenesOrdenados.map(r => (
+                    <option key={r.id} value={r.id}>{labelResumen(r)}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
             {/* Filtro por Tarjeta */}
             <div>
               <label className="block text-xs text-[var(--text-muted)] mb-1">Tarjeta</label>
@@ -2956,6 +2958,7 @@ const MovimientosView = ({ movimientos, tarjetas = [], resumenes = [], searchQue
                 <option value="fijo">Fijos</option>
                 <option value="variable">Variables</option>
               </select>
+            </div>
             </div>
           </div>
         )}
