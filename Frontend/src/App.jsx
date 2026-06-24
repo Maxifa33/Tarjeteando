@@ -2627,8 +2627,36 @@ const MovimientosView = ({ movimientos, tarjetas = [], resumenes = [], searchQue
     return `${banco} ${r.tarjeta} — ${periodoResumen(r)}`;
   };
 
+  // Label compacto para los botones de paginación por resumen
+  const labelResumenCorto = (r) => {
+    const periodo = r.fecha_cierre
+      ? new Date(r.fecha_cierre + 'T12:00:00').toLocaleDateString('es-AR', { month: 'short', year: '2-digit' }).replace('.', '')
+      : (r.anio && r.mes ? new Date(r.anio, r.mes - 1).toLocaleDateString('es-AR', { month: 'short', year: '2-digit' }).replace('.', '') : '—');
+    return { tarjeta: r.tarjeta, periodo };
+  };
+
   const resumenActivo = resumenesOrdenados.find(r => r.id === resumenSeleccionado);
   const periodoResumenActivo = resumenActivo ? periodoResumen(resumenActivo) : '';
+  const resumenActualIdx = resumenesOrdenados.findIndex(r => r.id === resumenSeleccionado);
+
+  // Navegar a un resumen por su índice dentro de resumenesOrdenados
+  const irAResumen = (idx) => {
+    const r = resumenesOrdenados[idx];
+    if (r) setResumenSeleccionado(r.id);
+  };
+
+  // Ventana deslizante de 6 resúmenes, manteniendo visible el seleccionado
+  const RESUMENES_POR_PAGINA = 6;
+  const resumenesVentanaStart = Math.max(
+    0,
+    Math.min(
+      resumenActualIdx - Math.floor(RESUMENES_POR_PAGINA / 2),
+      resumenesOrdenados.length - RESUMENES_POR_PAGINA
+    )
+  );
+  const resumenesVentana = resumenesOrdenados
+    .map((r, idx) => ({ r, idx }))
+    .slice(resumenesVentanaStart, resumenesVentanaStart + RESUMENES_POR_PAGINA);
 
   // Estado para edición inline
   const [editandoId, setEditandoId] = useState(null);
@@ -3124,6 +3152,54 @@ const MovimientosView = ({ movimientos, tarjetas = [], resumenes = [], searchQue
                          disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Mes Siguiente
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
+        {/* Paginación por resumen - reemplaza la de mes cuando el modo es "por resumen" */}
+        {modoFiltro === 'resumen' && resumenesOrdenados.length > 1 && (
+          <div className="p-4 border-t border-[var(--glass-border)] flex items-center justify-between gap-2">
+            <button
+              onClick={() => irAResumen(Math.min(resumenActualIdx + 1, resumenesOrdenados.length - 1))}
+              disabled={resumenActualIdx >= resumenesOrdenados.length - 1}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--glass-bg)]
+                         text-[var(--text-secondary)] hover:bg-opacity-80 transition-all
+                         disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+            >
+              <ChevronRight className="w-4 h-4 rotate-180" />
+              Resumen Anterior
+            </button>
+
+            <div className="flex items-center gap-2 overflow-x-auto">
+              {resumenesVentana.map(({ r, idx }) => {
+                const { tarjeta, periodo } = labelResumenCorto(r);
+                const isSelected = idx === resumenActualIdx;
+                return (
+                  <button
+                    key={r.id}
+                    onClick={() => irAResumen(idx)}
+                    title={labelResumen(r)}
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all whitespace-nowrap
+                               ${isSelected
+                                 ? 'bg-gradient-to-r from-[var(--accent-1)] to-[var(--accent-2)] text-white'
+                                 : 'bg-[var(--glass-bg)] text-[var(--text-secondary)] hover:bg-opacity-80'}`}
+                  >
+                    <span className="max-w-[80px] truncate inline-block align-middle">{tarjeta}</span>
+                    <span className="opacity-70"> · {periodo}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <button
+              onClick={() => irAResumen(Math.max(resumenActualIdx - 1, 0))}
+              disabled={resumenActualIdx <= 0}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--glass-bg)]
+                         text-[var(--text-secondary)] hover:bg-opacity-80 transition-all
+                         disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+            >
+              Resumen Siguiente
               <ChevronRight className="w-4 h-4" />
             </button>
           </div>
