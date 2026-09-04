@@ -235,7 +235,19 @@ class PDFParserService {
     let sumaTotalConsumosDolares = 0;
     let cantidadTarjetasAdicionales = 0;
 
+    // BBVA imprime la MISMA linea "TOTAL CONSUMOS DE <titular>" dos veces (consolidado
+    // de la pagina 1 y cierre del detalle) y acumularlas duplicaba el total x2.
+    // Macro si tiene varias lineas legitimas, pero cada una lleva prefijo "TARJETA NNNN".
+    const totalesVistos = new Set();
+
     while ((totalConsumosMatch = regexTotalConsumos.exec(textoCompleto)) !== null) {
+      const claveTotal = totalConsumosMatch[0].replace(/\s+/g, ' ').trim().toUpperCase();
+      const esMultiTarjeta = /^TARJETA\s+\d+/i.test(claveTotal);
+      if (!esMultiTarjeta && totalesVistos.has(claveTotal)) {
+        console.log('[Metadatos] Total de consumos repetido, se ignora: ' + claveTotal);
+        continue;
+      }
+      totalesVistos.add(claveTotal);
       const montoPesos = this.parsearMonto(totalConsumosMatch[1]);
       sumaTotalConsumosPesos += montoPesos;
       if (totalConsumosMatch[2]) {
@@ -635,7 +647,12 @@ class PDFParserService {
       }
       
       // Detectar linea con fecha: DD-MM-YY o DD-MMM-YY (con mes en letras)
-      const fechaMatch = linea.match(/^(\d{2}-(?:\d{2}|[A-Za-z]{3})-\d{2})([*KVEU]?)(.*)$/);
+      // Solo `*` y `K` se tratan como marcador de fila. `V`, `E` y `U` tambien son
+      // marcadores validos de Galicia, pero son indistinguibles de la primera letra
+      // del comercio (VENTI TICKETS, VITAL SUPERMAYORISTA, EXPRESS SAN MARTIN...),
+      // y comerse esa letra corrompe el nombre. Si quedan como prefijo, las reglas
+      // de limpieza los absorben por substring (VTemu.com -> Temu).
+      const fechaMatch = linea.match(/^(\d{2}-(?:\d{2}|[A-Za-z]{3})-\d{2})([*K]?)(.*)$/);
       
       if (fechaMatch) {
         const fecha = fechaMatch[1];
@@ -1209,11 +1226,16 @@ class PDFParserService {
     }
 
     // Si no se aplicó ninguna regla y es MERPAGO, extraer el nombre del comercio
+    let nombreCanonico = aplicoRegla;
     if (!aplicoRegla && /^merpago|^mercpago/i.test(texto)) {
       limpio = this.extraerNombreMerpago(texto);
+      nombreCanonico = true;
     }
 
-    limpio = this.capitalizar(limpio);
+    // Si una regla (o extraerNombreMerpago) ya devolvio el nombre canonico
+    // ("OSDE", "Claude AI (Anthropic)", "Coto (Mercado Pago)"), capitalizar lo rompe.
+    // Solo se capitaliza el texto crudo del banco.
+    if (!nombreCanonico) limpio = this.capitalizar(limpio);
     const esDudoso = this.esNombreDudoso(limpio);
 
     return {
@@ -1237,10 +1259,26 @@ class PDFParserService {
       // Eliminar códigos/números al final (ej: "AUSOL 12345")
       nombre = nombre.replace(/\s+\d{4,}$/g, '').trim();
 
+      // "MERPAGO*MERCADOPAGO" no aporta comercio: es Mercado Pago a secas.
+      if (/^mercado\s*pago$/i.test(nombre.replace(/[^a-z]/gi, '').replace(/mercadopago/i, 'mercado pago'))) {
+        return 'Mercado Pago';
+      }
+
+      // El comercio extraido puede tener regla propia con patron anclado (^spotify),
+      // que no matchea contra "MERPAGO*SPOTIFY" pero si contra "SPOTIFY".
+      for (const regla of this.cargarReglasLimpieza()) {
+        if (/merpago|mercpago/i.test(regla.patron)) continue; // apuntan al prefijo, ya se probaron
+        try {
+          if (new RegExp(regla.patron, 'i').test(nombre)) {
+            return regla.reemplazo + ' (Mercado Pago)';
+          }
+        } catch (e) { /* patron invalido: ignorar */ }
+      }
+
       // Si queda algo con al menos 2 caracteres alfabéticos, usarlo
       const letras = nombre.replace(/[^a-zA-Z]/g, '');
       if (letras.length >= 2) {
-        return nombre + ' (Mercado Pago)';
+        return this.capitalizar(nombre) + ' (Mercado Pago)';
       }
     }
 
@@ -1249,6 +1287,7 @@ class PDFParserService {
   }
 
   esNombreDudoso(texto) {
+    if (!texto || !texto.trim()) return true;
     const noAlfabeticos = texto.replace(/[a-zA-Z\s]/g, '').length;
     const porcentaje = noAlfabeticos / texto.length;
     
@@ -1412,7 +1451,7 @@ class PDFParserService {
       { patron: 'garbarino', reemplazo: 'Garbarino' },
       { patron: 'musimundo', reemplazo: 'Musimundo' },
       { patron: 'sodimac', reemplazo: 'Sodimac' },
-      { patron: 'easy\\s*home', reemplazo: 'Easy' },
+      { patron: 'easy\\.com|(^|\\s)easy(\\s|$)|easy\\s*home', reemplazo: 'Easy' },
       { patron: 'grimoldi', reemplazo: 'Grimoldi' },
       { patron: 'samsung', reemplazo: 'Samsung' },
       { patron: 'sonystyle|sony\\s*store', reemplazo: 'Sony Store' },

@@ -17,6 +17,24 @@ import {
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 const API_BASE = `${API_URL}/api/v1`;
 
+// Las fechas que devuelve el parser son 'YYYY-MM-DD': una fecha de calendario del
+// resumen, sin hora ni zona. `new Date('2026-08-10')` la interpreta como medianoche
+// UTC y en Argentina (UTC-3) retrocede al 09/08. Ademas un consumo del dia 1 caia en
+// el mes anterior al agrupar. Siempre construir la fecha en horario local.
+const parseFechaLocal = (valor) => {
+  if (!valor) return null;
+  if (valor instanceof Date) return valor;
+  const m = String(valor).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(valor);
+};
+
+// Clave 'YYYY-MM' del mes calendario de una fecha del parser.
+const mesKeyDeFecha = (valor) => {
+  const f = parseFechaLocal(valor);
+  if (!f || isNaN(f)) return null;
+  return `${f.getFullYear()}-${String(f.getMonth() + 1).padStart(2, '0')}`;
+};
+
 // Componente de Onboarding para nuevos usuarios
 const OnboardingWizard = ({ onComplete }) => {
   const [step, setStep] = useState(1);
@@ -251,72 +269,172 @@ const formatMontoDolares = (value) => {
 // ==================== GASTOS FIJOS/VARIABLES ====================
 // Analiza movimientos para detectar gastos fijos (recurrentes mensuales con monto similar)
 // Criterio: mismo comercio aparece 3+ meses con variación de monto <= 5%
-const analizarGastosFijosVariables = (movimientos) => {
-  if (!movimientos || movimientos.length === 0) {
-    return { gastosFijos: new Set(), analisis: {} };
-  }
+// Mediana de una lista de numeros.
+const mediana = (valores) => {
+  if (!valores.length) return 0;
+  const orden = [...valores].sort((a, b) => a - b);
+  const mitad = Math.floor(orden.length / 2);
+  return orden.length % 2 ? orden[mitad] : (orden[mitad - 1] + orden[mitad]) / 2;
+};
 
-  // Agrupar por comercio (referencia_limpia o referencia_original)
-  const porComercio = {};
+const mesAIndice = (mesKey) => {
+  const [a, m] = String(mesKey).split('-').map(Number);
+  return a * 12 + (m - 1);
+};
 
+/**
+ * Detecta gastos fijos / recurrentes.
+ *
+ * Criterio anterior (roto): exigia variacion <= 5% respecto del promedio y solo
+ * miraba `monto_pesos`. Con inflacion argentina un solo ajuste de precio tiraba la
+ * variacion por encima del 5%, y todas las suscripciones en dolares (Netflix, Apple,
+ * Anthropic, PlayStation) quedaban afuera porque su monto en pesos es 0.
+ *
+ * Criterio nuevo:
+ *  - Se analiza una serie por comercio Y moneda (ARS y USD por separado).
+ *  - El mes de cada cargo es el PERIODO DEL RESUMEN, no la fecha de compra: un
+ *    resumen = un bucket, sin corrimientos por el dia del mes.
+ *  - Se excluyen las compras en cuotas: son deuda, no gasto recurrente, y ya viven
+ *    en la vista Cuotas.
+ *  - Estabilidad = MEDIANA de la variacion mes a mes (no la desviacion contra el
+ *    promedio): tolera los ajustes por inflacion sin tolerar montos erraticos.
+ *  - Presencia = meses con cargo / meses con resumen desde el primer cargo. Filtra
+ *    los comercios que aparecen salteado.
+ */
+const analizarGastosFijosVariables = (movimientos, resumenes = []) => {
+  const vacio = { gastosFijos: new Set(), analisis: {}, resumenMensual: { ars: 0, usd: 0, items: [] } };
+  if (!movimientos || movimientos.length === 0) return vacio;
+
+  const mesDeResumen = (r) => (r && r.anio && r.mes)
+    ? `${r.anio}-${String(r.mes).padStart(2, '0')}`
+    : null;
+
+  // Periodo de cada resumen y meses con resumen por tarjeta
+  const periodoPorResumen = {};
+  const mesesPorTarjeta = {};
+  (resumenes || []).forEach(r => {
+    const mk = mesDeResumen(r);
+    if (!mk) return;
+    if (r.id) periodoPorResumen[r.id] = mk;
+    (mesesPorTarjeta[r.tarjeta] = mesesPorTarjeta[r.tarjeta] || new Set()).add(mk);
+  });
+
+  // series[nombre|moneda] = { nombre, moneda, meses: {mesKey: montoMaxDelMes}, tarjetas:Set }
+  const series = {};
   movimientos.forEach(mov => {
+    // Las cuotas no son gasto recurrente: son una compra financiada.
+    if (mov.cuota_texto || mov.es_cuota) return;
+
     const nombre = (mov.referencia_limpia || mov.referencia_original || '').toLowerCase().trim();
     if (!nombre || nombre.length < 3) return;
 
-    // Extraer mes/año del movimiento
-    const fecha = new Date(mov.fecha_compra);
-    const mesKey = `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, '0')}`;
-    const monto = mov.monto_pesos || 0;
+    // Preferir el periodo del resumen; si falta, caer a la fecha de compra.
+    const mesKey = periodoPorResumen[mov.resumen_id]
+      || (mov.anio_resumen && mov.mes_resumen
+            ? `${mov.anio_resumen}-${String(mov.mes_resumen).padStart(2, '0')}`
+            : mesKeyDeFecha(mov.fecha_compra));
+    if (!mesKey) return;
 
-    if (monto <= 0) return; // Ignorar devoluciones
-
-    if (!porComercio[nombre]) {
-      porComercio[nombre] = { meses: {}, montos: [] };
-    }
-
-    // Guardar el monto más alto de cada mes (por si hay múltiples cargos)
-    if (!porComercio[nombre].meses[mesKey] || porComercio[nombre].meses[mesKey] < monto) {
-      porComercio[nombre].meses[mesKey] = monto;
-    }
+    [['ARS', mov.monto_pesos || 0], ['USD', mov.monto_dolares || 0]].forEach(([moneda, monto]) => {
+      if (monto <= 0) return; // devoluciones y la moneda que no aplica
+      // Una serie por comercio + moneda + TARJETA. Mezclar tarjetas contaminaba la
+      // serie: el mismo comercio en otra tarjeta (con otros importes y otro calendario
+      // de resumenes) rompia tanto la variacion como el calculo de presencia.
+      const clave = `${nombre}|${moneda}|${mov.tarjeta}`;
+      const serie = series[clave] || (series[clave] = { nombre, moneda, tarjeta: mov.tarjeta, meses: {} });
+      // Cargo MAS CHICO del mes: es el piso recurrente (la suscripcion), aislado de
+      // las compras sueltas que se hagan en el mismo comercio. Medido sobre las
+      // fixtures reales, separa mucho mejor lo fijo de lo variable que tomar el maximo.
+      if (serie.meses[mesKey] === undefined || serie.meses[mesKey] > monto) serie.meses[mesKey] = monto;
+    });
   });
 
-  // Analizar cada comercio
+  const MIN_MESES = 3;
+  const MIN_PRESENCIA = 0.6;
+  const UMBRAL_FIJO = 10;        // % de variacion tipica mes a mes
+  const UMBRAL_RECURRENTE = 25;  // % — tolera ajustes por inflacion
+
   const gastosFijos = new Set();
   const analisis = {};
+  const items = [];
 
-  Object.entries(porComercio).forEach(([nombre, data]) => {
-    const mesesUnicos = Object.keys(data.meses).sort();
-    const montos = mesesUnicos.map(m => data.meses[m]);
+  Object.entries(series).forEach(([clave, serie]) => {
+    const meses = Object.keys(serie.meses).sort();
+    const valores = meses.map(m => serie.meses[m]);
+    const base = { moneda: serie.moneda, meses: meses.length, tarjeta: serie.tarjeta };
 
-    // Necesita aparecer en al menos 3 meses (más estricto)
-    if (mesesUnicos.length < 3) {
-      analisis[nombre] = { tipo: 'variable', razon: 'menos de 3 meses', meses: mesesUnicos.length };
+    if (meses.length < MIN_MESES) {
+      analisis[clave] = { ...base, tipo: 'variable', razon: `solo ${meses.length} mes(es) con cargo` };
       return;
     }
 
-    // Calcular variación entre montos
-    const montoPromedio = montos.reduce((a, b) => a + b, 0) / montos.length;
-    const variacionMaxima = Math.max(...montos.map(m => Math.abs(m - montoPromedio) / montoPromedio));
+    // Tarjeta principal del comercio = donde mas veces se cobro. La ventana de
+    // presencia es SU calendario de resumenes: unir el de todas las tarjetas inflaba
+    // el denominador (una suscripcion que solo se cobra en la VISA quedaba castigada
+    // por los resumenes de la Mastercard).
+    // Ventana = resumenes de esa tarjeta desde el primer cargo del comercio.
+    // Asi los meses sin resumen cargado no cuentan como ausencia.
+    const mesesDisponibles = mesesPorTarjeta[serie.tarjeta] || new Set();
+    const desde = mesAIndice(meses[0]);
+    const ventana = [...mesesDisponibles].filter(m => mesAIndice(m) >= desde);
+    const presencia = ventana.length ? Math.min(1, meses.length / ventana.length) : 1;
 
-    // Si la variación es <= 5%, es gasto fijo (más estricto)
-    if (variacionMaxima <= 0.05) {
-      gastosFijos.add(nombre);
-      analisis[nombre] = {
-        tipo: 'fijo',
-        meses: mesesUnicos.length,
-        montoPromedio,
-        variacion: (variacionMaxima * 100).toFixed(1) + '%'
-      };
-    } else {
-      analisis[nombre] = {
-        tipo: 'variable',
-        razon: `variación ${(variacionMaxima * 100).toFixed(1)}% > 10%`,
-        meses: mesesUnicos.length
-      };
+    if (presencia < MIN_PRESENCIA) {
+      analisis[clave] = { ...base, tipo: 'variable', presencia,
+        razon: `aparece en ${meses.length} de ${ventana.length} resúmenes de ${serie.tarjeta}` };
+      return;
+    }
+
+    // Ultimo resumen disponible: si el gasto dejo de aparecer hace 2+ meses, se dio de baja.
+    const ultimoMesConCargo = meses[meses.length - 1];
+    const ultimoDisponible = ventana.length ? Math.max(...ventana.map(mesAIndice)) : mesAIndice(ultimoMesConCargo);
+    if (ultimoDisponible - mesAIndice(ultimoMesConCargo) >= 2) {
+      analisis[clave] = { ...base, tipo: 'finalizado', presencia, ultimoMes: ultimoMesConCargo,
+        razon: `sin cargos desde ${ultimoMesConCargo}` };
+      return;
+    }
+
+    const cambios = [];
+    for (let i = 1; i < valores.length; i++) {
+      if (valores[i - 1] > 0) cambios.push(Math.abs(valores[i] - valores[i - 1]) / valores[i - 1]);
+    }
+    const variacionTipica = mediana(cambios) * 100;
+    const montoTipico = mediana(valores);
+    const montoActual = valores[valores.length - 1];
+
+    // Segunda senal, independiente de la variacion: un importe que se repite identico
+    // mes a mes es la huella mas clara de una suscripcion, aunque el comercio tenga
+    // ademas otros cargos (Apple: 4,99 todos los meses + compras sueltas).
+    const conteos = {};
+    valores.forEach(v => { const k = v.toFixed(2); conteos[k] = (conteos[k] || 0) + 1; });
+    const repeticion = Math.max(...Object.values(conteos)) / valores.length;
+
+    let tipo = 'variable';
+    if (variacionTipica <= UMBRAL_FIJO || repeticion >= 0.6) tipo = 'fijo';
+    else if (variacionTipica <= UMBRAL_RECURRENTE) tipo = 'recurrente';
+
+    analisis[clave] = { ...base, tipo, presencia, montoTipico, montoActual,
+      variacion: variacionTipica.toFixed(1) + '%',
+      repeticion: (repeticion * 100).toFixed(0) + '%',
+      razon: tipo === 'variable'
+        ? `variación típica ${variacionTipica.toFixed(1)}% > ${UMBRAL_RECURRENTE}% y sin importe repetido`
+        : null };
+
+    if (tipo === 'fijo' || tipo === 'recurrente') {
+      gastosFijos.add(serie.nombre);
+      items.push({ nombre: serie.nombre, moneda: serie.moneda, tipo, montoActual, montoTipico,
+        meses: meses.length, variacion: variacionTipica, tarjeta: serie.tarjeta });
     }
   });
 
-  return { gastosFijos, analisis };
+  // Cuanto compromete por mes el conjunto de gastos fijos, separado por moneda.
+  const resumenMensual = {
+    ars: items.filter(i => i.moneda === 'ARS').reduce((s, i) => s + i.montoTipico, 0),
+    usd: items.filter(i => i.moneda === 'USD').reduce((s, i) => s + i.montoTipico, 0),
+    items: items.sort((a, b) => b.montoTipico - a.montoTipico)
+  };
+
+  return { gastosFijos, analisis, resumenMensual };
 };
 
 // Función para determinar si un movimiento es gasto fijo
@@ -327,14 +445,16 @@ const esGastoFijo = (mov, gastosFijos) => {
 };
 
 // Calcular totales de gastos fijos y variables
-const calcularTotalesGastos = (movimientos, gastosFijos) => {
+const calcularTotalesGastos = (movimientos, gastosFijos, cotizacionVenta = 0) => {
   let totalFijos = 0;
   let totalVariables = 0;
   let countFijos = 0;
   let countVariables = 0;
 
   movimientos.forEach(mov => {
-    const monto = mov.monto_pesos || 0;
+    // Los consumos en dolares no tienen monto en pesos en el resumen: se pesifican
+    // al dolar tarjeta vigente. Sin esto quedaban fuera del total por completo.
+    const monto = (mov.monto_pesos || 0) || (mov.monto_dolares || 0) * cotizacionVenta;
     if (monto <= 0) return; // Ignorar devoluciones
 
     if (esGastoFijo(mov, gastosFijos)) {
@@ -1221,6 +1341,7 @@ const App = () => {
 
   // Estado para gastos fijos/variables (calculado de los movimientos)
   const [gastosFijos, setGastosFijos] = useState(new Set());
+  const [gastosFijosDetalle, setGastosFijosDetalle] = useState({ ars: 0, usd: 0, items: [], analisis: {} });
 
   // Nombres personalizados de tarjetas (guardados en localStorage)
   const [nombresTarjetas, setNombresTarjetas] = useState(() => {
@@ -1313,6 +1434,10 @@ const App = () => {
   }, [activeView]);
   
   // Fetch all data from localStorage
+  // Cotizacion usada para pesificar cuotas en dolares. Es una dependencia real de
+  // fetchData: cuando llega la cotizacion, la proyeccion se recalcula una vez.
+  const cotizacionVenta = cotizacion?.venta || 0;
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
@@ -1415,31 +1540,64 @@ const App = () => {
         }
       });
 
-      // Filtrar solo movimientos del último resumen de cada tarjeta
-      const movimientosUltimoResumen = movimientosData.filter(m => {
-        const ultimoResumen = ultimoResumenPorTarjeta[m.tarjeta];
-        if (!ultimoResumen) return false;
-        return m.resumen_id === ultimoResumen.id;
+      // ── Planes de cuotas ────────────────────────────────────────────────────
+      // Antes las cuotas se leian SOLO del ultimo resumen de cada tarjeta: cualquier
+      // plan que el banco no volviera a facturar en el resumen mas nuevo desaparecia
+      // por completo de la vista Cuotas, de la StatCard y de la proyeccion.
+      // Ahora un plan se arma con TODOS los resumenes y queda anclado al periodo del
+      // resumen donde se lo vio por ultima vez.
+      const resumenPorId = Object.fromEntries(resumenesData.map(r => [r.id, r]));
+      const periodoDeResumen = (r) => (r ? r.anio * 12 + (r.mes - 1) : null);
+
+      const numerosDeCuota = (m) => {
+        if (m.es_cuota && m.cuota_actual && m.total_cuotas) {
+          return { actual: m.cuota_actual, total: m.total_cuotas };
+        }
+        const match = (m.cuota_texto || '').match(/(\d+)\/(\d+)/);
+        if (match) return { actual: parseInt(match[1]), total: parseInt(match[2]) };
+        return null;
+      };
+
+      const planesCuotas = new Map();
+      movimientosData.forEach(m => {
+        const nums = numerosDeCuota(m);
+        if (!nums || !nums.total) return;
+        const resumen = resumenPorId[m.resumen_id];
+        if (!resumen) return;
+        const periodo = periodoDeResumen(resumen);
+        const montoPesos = m.monto_pesos || 0;
+        const montoDolares = m.monto_dolares || 0;
+        // Misma clave logica que usa el backend: tarjeta + nombre normalizado +
+        // cantidad de cuotas + monto de cuota redondeado (tolera centavos entre meses).
+        const nombre = (m.referencia_limpia || m.referencia_original || '')
+          .toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 15);
+        const montoClave = montoPesos ? Math.round(montoPesos / 1000) : Math.round(montoDolares);
+        const clave = `${m.tarjeta}|${nombre}|${nums.total}|${montoClave}`;
+        const previo = planesCuotas.get(clave);
+        if (!previo || periodo > previo.periodo) {
+          planesCuotas.set(clave, {
+            ...m,
+            es_cuota: true,
+            cuota_actual: nums.actual,
+            total_cuotas: nums.total,
+            monto_pesos: montoPesos,
+            monto_dolares: montoDolares,
+            periodo,
+            periodo_anio: resumen.anio,
+            periodo_mes: resumen.mes
+          });
+        }
       });
 
-      // Calcular cuotas activas: solo del último resumen y detectar por es_cuota o cuota_texto
-      const cuotasActivasData = movimientosUltimoResumen.filter(m => {
-        // Si tiene es_cuota explícito
-        if (m.es_cuota && m.cuota_actual && m.total_cuotas) {
-          return true;
-        }
-        // Si tiene cuota_texto (formato "2/6", "3/12", etc.) - usado por pdf-parser
-        if (m.cuota_texto) {
-          const match = m.cuota_texto.match(/(\d+)\/(\d+)/);
-          if (match) {
-            m.cuota_actual = parseInt(match[1]);
-            m.total_cuotas = parseInt(match[2]);
-            m.es_cuota = true;
-            return true;
-          }
-        }
-        return false;
-      });
+      // Un plan queda "interrumpido" si existe un resumen POSTERIOR de la misma tarjeta
+      // en el que el banco no lo facturo (plan dado de baja, refacturado o cancelado).
+      // Se sigue mostrando en la vista Cuotas con aviso, pero no se proyecta.
+      const cuotasActivasData = [...planesCuotas.values()].map(m => ({
+        ...m,
+        // Un plan ya terminado (N/N) no esta interrumpido, simplemente se acabo.
+        interrumpida: m.cuota_actual < m.total_cuotas &&
+          (periodoDeResumen(ultimoResumenPorTarjeta[m.tarjeta]) ?? m.periodo) > m.periodo
+      }));
 
       // Enriquecer tarjetas con último resumen y estadísticas
       const tarjetasEnriquecidas = tarjetasData.map((t, idx) => {
@@ -1457,9 +1615,12 @@ const App = () => {
 
         // Calcular estadísticas de cuotas para esta tarjeta
         const cuotasTarjeta = cuotasActivasData.filter(c => c.tarjeta === t.nombre);
+        // Los planes interrumpidos ya no los factura el banco: no suman deuda futura.
         const montoCuotasPendientes = cuotasTarjeta.reduce((sum, c) => {
+          if (c.interrumpida) return sum;
           const restantes = c.total_cuotas - c.cuota_actual;
-          return sum + (c.monto_pesos || 0) * restantes;
+          const cuotaARS = (c.monto_pesos || 0) || (c.monto_dolares || 0) * cotizacionVenta;
+          return sum + cuotaARS * restantes;
         }, 0);
 
         // Cantidad de cuotas activas de esta tarjeta (sin agrupar por referencia)
@@ -1501,7 +1662,11 @@ const App = () => {
         monto_cuota_dolares: m.monto_dolares || 0,
         monto_total: (m.monto_pesos || m.monto_dolares || 0) * m.total_cuotas,
         es_ultima_cuota: m.cuota_actual === m.total_cuotas,
-        fecha_compra: m.fecha_compra
+        fecha_compra: m.fecha_compra,
+        // El banco dejo de facturar este plan en un resumen posterior
+        interrumpida: !!m.interrumpida,
+        periodo_anio: m.periodo_anio,
+        periodo_mes: m.periodo_mes
       }));
 
       setTarjetas(tarjetasEnriquecidas);
@@ -1510,11 +1675,15 @@ const App = () => {
       setCuotasActivas(cuotasFormateadas);
 
       // Analizar gastos fijos vs variables
-      const { gastosFijos: fijosSet } = analizarGastosFijosVariables(movimientosData);
+      const { gastosFijos: fijosSet, resumenMensual: fijosResumen, analisis: fijosAnalisis } =
+        analizarGastosFijosVariables(movimientosData, resumenesData);
       setGastosFijos(fijosSet);
+      setGastosFijosDetalle({ ...fijosResumen, analisis: fijosAnalisis });
       // Calcular totales de cuotas pendientes
       const totalPendienteCuotas = cuotasFormateadas.reduce((sum, c) => {
-        return sum + (c.monto_cuota * c.cuotas_restantes);
+        if (c.interrumpida) return sum;
+        const cuotaARS = c.monto_cuota_pesos || c.monto_cuota_dolares * cotizacionVenta;
+        return sum + (cuotaARS * c.cuotas_restantes);
       }, 0);
 
       setDashboard({
@@ -1524,8 +1693,11 @@ const App = () => {
         total_a_pagar_dolares: estadisticas.total_a_pagar_dolares,
         total_tarjetas: estadisticas.total_tarjetas || tarjetasData.length,
         total_movimientos: estadisticas.total_movimientos || movimientosData.length,
-        cuotas_activas: cuotasActivasData.length,
-        pagos_pendientes: cuotasActivasData.reduce((sum, m) => sum + (m.total_cuotas - m.cuota_actual), 0),
+        cuotas_activas: cuotasActivasData.filter(m => !m.interrumpida).length,
+        cuotas_interrumpidas: cuotasActivasData.filter(m => m.interrumpida).length,
+        pagos_pendientes: cuotasActivasData
+          .filter(m => !m.interrumpida)
+          .reduce((sum, m) => sum + (m.total_cuotas - m.cuota_actual), 0),
         total_pendiente_cuotas: totalPendienteCuotas,
         ultimo_resumen: estadisticas.ultimo_resumen,
         // También mantener estadisticas para compatibilidad
@@ -1544,10 +1716,10 @@ const App = () => {
       // (no a la fecha de hoy ni al orden de subida). Cada cuota se ubica en su mes
       // calendario real: si la cuota N cae en el período P, la cuota N+k cae en P+k.
       // El "próximo mes" (índice 0) es el mes siguiente al último resumen disponible.
-      const periodoDeTarjeta = (tarjeta) => {
-        const r = ultimoResumenPorTarjeta[tarjeta];
-        return r ? new Date(r.anio, r.mes - 1, 1) : null;
-      };
+      // Cada plan se ancla al periodo del resumen donde se lo vio por ultima vez
+      // (no al ultimo resumen de la tarjeta): asi un plan facturado en un resumen
+      // viejo se proyecta igual desde SU mes.
+      const periodoDelPlan = (m) => new Date(m.periodo_anio, m.periodo_mes - 1, 1);
       // Ancla global: período del resumen más reciente entre todas las tarjetas
       let anclaProyeccion = null;
       Object.values(ultimoResumenPorTarjeta).forEach(r => {
@@ -1573,22 +1745,28 @@ const App = () => {
         const detalles = [];
 
         cuotasOrdenadas.forEach(m => {
-          const periodoCuota = periodoDeTarjeta(m.tarjeta);
-          if (!periodoCuota) return;
+          // Plan que el banco dejo de facturar: no se proyecta (se sigue viendo en Cuotas).
+          if (m.interrumpida) return;
+          const periodoCuota = periodoDelPlan(m);
+          if (!periodoCuota || isNaN(periodoCuota)) return;
           // Meses entre el período de la cuota y el mes objetivo
           const diff = (fecha.getFullYear() - periodoCuota.getFullYear()) * 12
             + (fecha.getMonth() - periodoCuota.getMonth());
           const numeroCuota = m.cuota_actual + diff;
           // Solo cuotas futuras respecto del período (diff >= 1) que aún no terminaron
           if (diff >= 1 && numeroCuota <= m.total_cuotas) {
-            totalMes += m.monto_pesos || 0;
+            // Las cuotas en dolares se pesifican al dolar tarjeta del momento (estimado).
+            const montoARS = (m.monto_pesos || 0) || (m.monto_dolares || 0) * cotizacionVenta;
+            totalMes += montoARS;
             detalles.push({
               id: m.id,
               descripcion: m.referencia_limpia || m.referencia_original || 'Sin descripción',
               tarjeta: m.tarjeta,
               cuota_numero: numeroCuota,
               total_cuotas: m.total_cuotas,
-              monto_cuota: m.monto_pesos || 0
+              monto_cuota: montoARS,
+              monto_cuota_dolares: m.monto_dolares || 0,
+              es_estimado_usd: !m.monto_pesos && !!m.monto_dolares
             });
           }
         });
@@ -1606,7 +1784,7 @@ const App = () => {
       console.error('[App] Error loading data:', error);
     }
     setLoading(false);
-  }, []);
+  }, [cotizacionVenta]);
   
   useEffect(() => {
     fetchData();
@@ -1791,6 +1969,7 @@ const App = () => {
               nombresTarjetas={nombresTarjetas}
               onGuardarNombre={guardarNombreTarjeta}
               gastosFijos={gastosFijos}
+              gastosFijosDetalle={gastosFijosDetalle}
               cotizacion={cotizacion}
               consumosLive={consumosLive}
               onFiltrarMovimientos={(tipo) => {
@@ -1860,7 +2039,7 @@ const App = () => {
 // Dashboard View
 const DEFAULT_CARD_ORDER = ['live', 'fijos', 'cuotasActivas', 'cuotasProx', 'totalPagar'];
 
-const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [], chartColors, formatCurrency, theme, resumenes = [], onDeleteResumen, setActiveView, searchQuery = '', movimientos = [], cuotasActivas = [], nombresTarjetas = {}, onGuardarNombre, gastosFijos = new Set(), cotizacion = null, onFiltrarMovimientos, consumosLive = [] }) => {
+const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [], chartColors, formatCurrency, theme, resumenes = [], onDeleteResumen, setActiveView, searchQuery = '', movimientos = [], cuotasActivas = [], nombresTarjetas = {}, onGuardarNombre, gastosFijos = new Set(), gastosFijosDetalle = null, cotizacion = null, onFiltrarMovimientos, consumosLive = [] }) => {
   const [showResumenes, setShowResumenes] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
   const [mesDetalleIdx, setMesDetalleIdx] = useState(null);
@@ -2102,7 +2281,7 @@ const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [
           return periodo === ultimosPeriodosPorTarjeta[m.tarjeta];
         });
 
-        const { totalFijos } = calcularTotalesGastos(movsUltimosPeriodos, gastosFijos);
+        const { totalFijos } = calcularTotalesGastos(movsUltimosPeriodos, gastosFijos, cotizacion?.venta || 0);
 
         // Total a pagar del MES DE VENCIMIENTO más reciente (lo que hay que reservar del
         // sueldo este mes). Se agrupa por mes de fecha_vencimiento, NO por el último resumen
@@ -2133,10 +2312,11 @@ const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [
         const liveTotalUSD = consumosGasto.reduce((s, c) => s + (c.monto_dolares > 0 ? c.monto_dolares : 0), 0);
 
         // Card compacta simple (icono + label + valor)
-        const simpleCard = (Icon, label, value, onClick) => (
+        const simpleCard = (Icon, label, value, onClick, sub = null, tooltip = null) => (
           <div
             className={`stat-card stat-card-sm h-full ${onClick ? 'cursor-pointer' : ''}`}
             onClick={onClick}
+            title={tooltip || undefined}
           >
             <div className="flex items-center gap-2 mb-2">
               <div className="p-2 rounded-lg bg-gradient-to-br from-[var(--accent-1)] to-[var(--accent-2)] bg-opacity-20">
@@ -2145,6 +2325,7 @@ const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [
               <p className="text-[var(--text-muted)] text-xs leading-tight">{label}</p>
             </div>
             <p className="text-xl font-bold text-[var(--text-primary)] leading-tight whitespace-nowrap">{value}</p>
+            {sub && <p className="text-[11px] text-[var(--text-muted)] mt-1 leading-tight">{sub}</p>}
           </div>
         );
 
@@ -2169,7 +2350,24 @@ const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [
           },
           fijos: {
             weight: 1.1,
-            node: simpleCard(Repeat, 'Gastos Fijos', formatCurrency(totalFijos), () => onFiltrarMovimientos?.('fijo')),
+            node: simpleCard(
+              Repeat,
+              'Gastos Fijos',
+              formatCurrency(totalFijos),
+              () => onFiltrarMovimientos?.('fijo'),
+              gastosFijosDetalle?.items?.length
+                ? `${gastosFijosDetalle.items.length} recurrentes detectados${
+                    gastosFijosDetalle.usd > 0
+                      ? ` · USD ${gastosFijosDetalle.usd.toLocaleString('es-AR', { maximumFractionDigits: 2 })}/mes`
+                      : ''}`
+                : 'sin recurrentes detectados',
+              gastosFijosDetalle?.items?.length
+                ? gastosFijosDetalle.items
+                    .map(i => `${i.nombre} — ${i.moneda === 'USD' ? 'USD ' : '$'}${
+                      i.montoTipico.toLocaleString('es-AR', { maximumFractionDigits: 2 })} (${i.meses} meses, ${i.tarjeta})`)
+                    .join('\n')
+                : null
+            ),
           },
           cuotasActivas: {
             weight: 0.7,
@@ -2699,10 +2897,8 @@ const MovimientosView = ({ movimientos, tarjetas = [], resumenes = [], searchQue
     .filter(Boolean).length;
 
   // Obtener meses únicos ordenados (más reciente primero)
-  const mesesUnicos = [...new Set(movimientos.map(m => {
-    const fecha = new Date(m.fecha_compra);
-    return `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, '0')}`;
-  }))].sort().reverse();
+  const mesesUnicos = [...new Set(movimientos.map(m => mesKeyDeFecha(m.fecha_compra)).filter(Boolean))]
+    .sort().reverse();
 
   const mesSeleccionado = mesesUnicos[mesActual] || mesesUnicos[0];
 
@@ -2713,9 +2909,7 @@ const MovimientosView = ({ movimientos, tarjetas = [], resumenes = [], searchQue
       if (resumenSeleccionado && m.resumen_id !== resumenSeleccionado) return false;
     } else if (mesSeleccionado && !filtroFechaDesde && !filtroFechaHasta) {
       // Filtro por mes (paginación)
-      const fechaMov = new Date(m.fecha_compra);
-      const mesMov = `${fechaMov.getFullYear()}-${String(fechaMov.getMonth() + 1).padStart(2, '0')}`;
-      if (mesMov !== mesSeleccionado) return false;
+      if (mesKeyDeFecha(m.fecha_compra) !== mesSeleccionado) return false;
     }
 
     // Filtro por búsqueda global
@@ -2736,17 +2930,17 @@ const MovimientosView = ({ movimientos, tarjetas = [], resumenes = [], searchQue
 
     // Filtro por fecha desde
     if (filtroFechaDesde) {
-      const fechaMov = new Date(m.fecha_compra);
-      const fechaDesde = new Date(filtroFechaDesde);
-      if (fechaMov < fechaDesde) return false;
+      const fechaMov = parseFechaLocal(m.fecha_compra);
+      const fechaDesde = parseFechaLocal(filtroFechaDesde);
+      if (!fechaMov || fechaMov < fechaDesde) return false;
     }
 
     // Filtro por fecha hasta
     if (filtroFechaHasta) {
-      const fechaMov = new Date(m.fecha_compra);
-      const fechaHasta = new Date(filtroFechaHasta);
-      fechaHasta.setHours(23, 59, 59);
-      if (fechaMov > fechaHasta) return false;
+      const fechaMov = parseFechaLocal(m.fecha_compra);
+      const fechaHasta = parseFechaLocal(filtroFechaHasta);
+      if (fechaHasta) fechaHasta.setHours(23, 59, 59, 999);
+      if (!fechaMov || fechaMov > fechaHasta) return false;
     }
 
     // Filtro por moneda
@@ -3005,7 +3199,7 @@ const MovimientosView = ({ movimientos, tarjetas = [], resumenes = [], searchQue
                   style={{ animationDelay: `${Math.min(idx, 20) * 30}ms`, animationFillMode: 'forwards' }}
                 >
                   <td className="p-4 text-sm text-[var(--text-secondary)]">
-                    {new Date(mov.fecha_compra).toLocaleDateString('es-AR')}
+                    {parseFechaLocal(mov.fecha_compra)?.toLocaleDateString('es-AR') || '—'}
                   </td>
                   <td className="p-4">
                     <span className="px-2 py-1 rounded-lg text-xs font-medium bg-[var(--glass-bg)]
@@ -3230,6 +3424,13 @@ const CuotasView = ({ cuotas = [], formatCurrency, searchQuery = '' }) => {
         const esUltimaCuota = cuota.es_ultima_cuota ||
                              cuota.cuotas_restantes === 0 ||
                              (cuota.cuotas_pagadas === cuota.total_cuotas);
+        // El banco dejo de facturar este plan en un resumen posterior: se muestra,
+        // pero no cuenta como deuda futura ni entra en la proyeccion.
+        const interrumpida = !!cuota.interrumpida && !esUltimaCuota;
+        const periodoTexto = cuota.periodo_anio && cuota.periodo_mes
+          ? new Date(cuota.periodo_anio, cuota.periodo_mes - 1)
+              .toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })
+          : null;
 
         return (
           <div
@@ -3237,7 +3438,9 @@ const CuotasView = ({ cuotas = [], formatCurrency, searchQuery = '' }) => {
             className={`glass-card p-5 opacity-0 animate-fade-in-up transition-all
                        ${esUltimaCuota
                          ? 'ring-2 ring-emerald-400 shadow-[0_0_25px_rgba(52,211,153,0.3)] bg-gradient-to-r from-emerald-500/10 to-teal-500/10'
-                         : ''}`}
+                         : interrumpida
+                           ? 'ring-1 ring-amber-400/60 bg-amber-500/5'
+                           : ''}`}
             style={{ animationDelay: `${idx * 50}ms`, animationFillMode: 'forwards' }}
           >
             <div className="flex items-center justify-between">
@@ -3255,8 +3458,26 @@ const CuotasView = ({ cuotas = [], formatCurrency, searchQuery = '' }) => {
                         ¡Última cuota!
                       </span>
                     )}
+                    {interrumpida && (
+                      <span className="text-xs bg-amber-500/20 text-amber-400 border border-amber-400/40 px-2 py-0.5 rounded-full">
+                        Sin facturar en el último resumen
+                      </span>
+                    )}
+                    {cuota.monto_cuota_dolares > 0 && (
+                      <span className="text-xs bg-[var(--glass-bg)] text-[var(--text-secondary)] px-2 py-0.5 rounded-full">
+                        USD
+                      </span>
+                    )}
                   </h4>
-                  <p className="text-sm text-[var(--text-muted)]">{cuota.tarjeta}</p>
+                  <p className="text-sm text-[var(--text-muted)]">
+                    {cuota.tarjeta}
+                    {periodoTexto && <span className="opacity-70"> · última cuota vista en {periodoTexto}</span>}
+                  </p>
+                  {interrumpida && (
+                    <p className="text-xs text-amber-400/90 mt-1">
+                      El banco no facturó esta cuota en el resumen más reciente. No se proyecta hasta que vuelva a aparecer.
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -3281,7 +3502,9 @@ const CuotasView = ({ cuotas = [], formatCurrency, searchQuery = '' }) => {
                 <div className="text-right">
                   <p className="text-xs text-[var(--text-muted)]">Por cuota</p>
                   <p className={`font-bold ${esUltimaCuota ? 'text-emerald-400' : 'text-[var(--text-primary)]'}`}>
-                    {formatCurrency(cuota.monto_cuota)}
+                    {cuota.monto_cuota_dolares > 0 && !cuota.monto_cuota_pesos
+                      ? `USD ${cuota.monto_cuota_dolares.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`
+                      : formatCurrency(cuota.monto_cuota)}
                   </p>
                 </div>
               </div>
@@ -3405,7 +3628,7 @@ const ReintegrosView = ({ reintegros = [], formatCurrency, searchQuery = '' }) =
                   style={{ animationDelay: `${Math.min(idx, 20) * 30}ms`, animationFillMode: 'forwards' }}
                 >
                   <td className="p-4 text-sm text-[var(--text-secondary)]">
-                    {new Date(mov.fecha_compra).toLocaleDateString('es-AR')}
+                    {parseFechaLocal(mov.fecha_compra)?.toLocaleDateString('es-AR') || '—'}
                   </td>
                   <td className="p-4">
                     <span className="px-2 py-1 rounded-lg text-xs font-medium bg-[var(--glass-bg)]

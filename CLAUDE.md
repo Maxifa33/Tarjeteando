@@ -101,6 +101,20 @@ Para otros bancos, el backend usa Claude Vision API como fallback automático (r
 
 ---
 
+## Cambios recientes (04/09/2026) — auditoría parser + cuotas + gastos fijos
+
+Rama `fix/auditoria-parser-cuotas-2026-09`. Detalle completo en `references/contexto-tarjeteando.md`.
+
+- **Fechas:** nunca más `new Date('YYYY-MM-DD')` (lo lee como UTC y en AR resta un día). Usar `parseFechaLocal()` / `mesKeyDeFecha()` en `App.jsx`.
+- **Cuotas:** los planes se arman con TODOS los resúmenes, no solo el último. Cada plan se ancla al período donde se lo vio por última vez. Si un resumen posterior no lo factura, se marca `interrumpida`: se muestra con badge pero no se proyecta.
+- **Parser Galicia:** el marcador de fila pasó de `[*KVEU]` a `[*K]` (V/E/U se comían la primera letra del comercio).
+- **BBVA:** se dedupica `TOTAL CONSUMOS DE <titular>` (aparecía 2 veces y duplicaba el total).
+- **Limpieza de nombres:** `capitalizar()` ya no pisa los nombres canónicos de las reglas; `extraerNombreMerpago` aplica la regla del comercio extraído.
+- **Gastos fijos:** criterio nuevo (mediana de variación mes a mes + presencia + importe repetido) y **soporte de consumos en USD**. Pasa de 1 a 8 detectados sobre las fixtures.
+- **Test nuevo:** `Backend/tests/fixtures-regresion.test.js` (re-parsea las 40 fixtures, exige totales exactos).
+
+---
+
 ## Cambios recientes (23/06/2026)
 
 ### Feature "Últimos consumos" (consumos pre-resumen, XLSX)

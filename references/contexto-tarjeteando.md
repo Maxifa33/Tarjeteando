@@ -157,7 +157,11 @@ formatMonto(n)           // → "$1.234.567,89"
 formatMontoDolares(n)    // → "USD 1.234,56"
 getTarjetaColor(nombre)  // usa TARJETA_COLORS o hash del nombre
 getCardTheme(banco)      // usa BANK_THEMES por banco
-analizarGastosFijosVariables(movimientos) // detecta gastos recurrentes
+parseFechaLocal(str)     // 'YYYY-MM-DD' → Date LOCAL (nunca new Date(str): eso es UTC)
+mesKeyDeFecha(str)       // → 'YYYY-MM' del mes calendario local
+mediana(valores)         // usada por el detector de gastos fijos
+analizarGastosFijosVariables(movimientos, resumenes) // detecta gastos recurrentes ARS y USD
+calcularTotalesGastos(movs, gastosFijos, cotizacionVenta) // pesifica los USD
 ```
 
 ### DashboardView — props
@@ -498,8 +502,15 @@ async procesarArchivo(buffer, filename, mimetype)  // → mismo formato que pdfP
 
 ## Gotchas críticos
 
-### 1. Proyección de cuotas — anclada al período (RESUELTO el orden de subida)
-La proyección se ancla al **período del resumen** de cada tarjeta, no a la fecha de hoy ni al orden de subida. El criterio ya **no está duplicado**: `fetchData` construye `proyeccionCuotas[i].detalles` y el panel del gráfico lee de ahí (fuente única). El backend usa `proyeccion.service.js` con la misma fórmula.
+### 0. NUNCA usar `new Date('YYYY-MM-DD')` para fechas del parser
+`fecha_compra` / `fecha_cierre` son **fechas de calendario sin hora**. `new Date('2026-08-10')` las lee como medianoche **UTC** y en Argentina (UTC-3) muestra el 09/08; además un consumo del día 1 caía en el mes anterior al agrupar. Usar siempre `parseFechaLocal()` / `mesKeyDeFecha()`. El patrón viejo `+ 'T12:00:00'` también funciona y sigue vivo en algunos renders.
+
+### 1. Proyección de cuotas — anclada al período del PLAN (no de la tarjeta)
+Cada plan de cuotas se ancla al período del resumen **donde se lo vio por última vez**, no al último resumen de la tarjeta. Antes las cuotas se leían solo del último resumen de cada tarjeta, así que un plan que el banco dejaba de facturar desaparecía por completo (caso Easy Warnes, VISA GAL Jul→Ago 2026).
+
+**Regla `interrumpida`:** si existe un resumen posterior de la misma tarjeta donde el plan NO fue facturado y el plan no está terminado (N/N), se marca `interrumpida: true`. Se sigue mostrando en `CuotasView` con badge ámbar, pero **no se proyecta** ni suma deuda futura. Validado contra el bloque "Cuotas a vencer" que imprime el propio banco: Set/26 $244.580,43 y Oct/26 $214.783,00 en VISA GAL Agosto 2026 coinciden al centavo.
+
+La proyección se ancla al **período del resumen**, no a la fecha de hoy ni al orden de subida. El criterio ya **no está duplicado**: `fetchData` construye `proyeccionCuotas[i].detalles` y el panel del gráfico lee de ahí (fuente única). El backend usa `proyeccion.service.js` con la misma fórmula.
 **Si tocás la fórmula, hay 2 copias inevitables (front no importa del back):** `App.jsx/fetchData` y `Backend/src/services/proyeccion.service.js` — mantenelas en sync.
 
 ### 2. Backend pierde datos al reiniciar
@@ -520,8 +531,54 @@ Todo el `db` está en RAM. Railway reinicia el servidor → hay que volver a sub
 ### 6. Cotización `null` no rompe nada
 Si `cotizacion === null`, el badge no se muestra y el equivalente ARS en `CreditCardVisual` tampoco. No hay error.
 
+### 6b. Gastos fijos: criterio nuevo (no es varianza < 5%)
+El criterio viejo exigía variación ≤5% contra el promedio y solo miraba `monto_pesos`: con inflación argentina un único ajuste de precio lo tiraba afuera, y **todas las suscripciones en USD quedaban excluidas** porque su monto en pesos es 0. Resultado real: detectaba 1 solo gasto (Zurich).
+
+Criterio actual (`analizarGastosFijosVariables`):
+- una serie por **comercio + moneda + tarjeta** (mezclar tarjetas contaminaba variación y presencia);
+- el mes de cada cargo es el **período del resumen**, no `fecha_compra`;
+- se **excluyen las compras en cuotas** (son deuda, ya viven en CuotasView);
+- valor del mes = **cargo más chico** (el piso recurrente, aislado de compras sueltas);
+- estabilidad = **mediana de la variación mes a mes** (tolera inflación), umbral 10% fijo / 25% recurrente;
+- señal alternativa: un importe repetido en ≥60% de los meses ⇒ fijo (caso Apple 4,99);
+- **presencia** ≥ 0.6 = meses con cargo / resúmenes de esa tarjeta desde el primer cargo;
+- si dejó de aparecer hace ≥2 resúmenes ⇒ `finalizado` (fuera del Set).
+
+Medido sobre las 40 fixtures reales: pasa de 1 a **8 detectados** (Zurich, Federación Patronal, Club Independiente, Personal, Swiss Medical, Claude AI USD, Netflix USD, Apple USD).
+
+### 6c. Marcadores de fila Galicia: solo `*` y `K`
+El regex era `([*KVEU]?)` y se comía la primera letra de comercios que empiezan con V/E/U: `VENTI TICKETS`→`ENTI TICKETS`, `VITAL SUPERMAYORISTA`→`ITAL...`, `EXPRESS SAN MARTIN`→`XPRESS...`. Las reglas `ital\s*super` y `carpuride` de `cargarReglasLimpieza` eran parches de ese bug. Ahora es `([*K]?)`: si V/E/U eran marcador real quedan como prefijo y las reglas los absorben por substring (`VTemu.com`→`Temu`).
+
+### 6d. `capitalizar()` no se aplica a nombres canónicos
+Si una regla (o `extraerNombreMerpago`) ya devolvió el nombre final, capitalizar lo rompía: `Claude AI (Anthropic)`→`Claude Ai (anthropic)`, `OSDE`→`Osde`. Ahora solo se capitaliza el texto crudo del banco.
+
+### 6e. BBVA imprime "TOTAL CONSUMOS DE <titular>" dos veces
+Una en el consolidado de la página 1 y otra al cierre del detalle. El `while` acumulador las sumaba ⇒ `total_consumos_pesos` al doble. Se deduplica por texto del match, salvo cuando lleva prefijo `TARJETA NNNN` (multi-tarjeta legítimo de Macro).
+
 ### 7. Resumen ID format
 `id = "${tarjeta}-${anio}-${mes}"` — si se importa el mismo resumen dos veces, se sobreescribe (upsert). Los movimientos también se reemplazan.
+
+---
+
+## Cambios recientes (04/09/2026) — auditoría de parsing y cuotas
+
+Rama `fix/auditoria-parser-cuotas-2026-09`. 9 bugs detectados corriendo el parser contra las 40 fixtures reales:
+
+| # | Sev | Bug | Fix |
+|---|---|---|---|
+| 1 | P0 | Todas las fechas se mostraban 1 día antes; los consumos del día 1 caían en el mes anterior | `parseFechaLocal` / `mesKeyDeFecha` en App.jsx (9 usos) |
+| 2 | P0 | Las cuotas se leían solo del último resumen: un plan no refacturado desaparecía | Planes desde TODOS los resúmenes + ancla por plan + flag `interrumpida` |
+| 3 | P1 | `([*KVEU]?)` se comía la primera letra del comercio | `([*K]?)` |
+| 4 | P1 | BBVA duplicaba `total_consumos_pesos` (×2) | dedupe de matches repetidos |
+| 5 | P2 | La regla `easy` exigía la palabra "home" | `easy\.com|\beasy\b` |
+| 6 | P2 | `capitalizar()` rompía los nombres canónicos de las reglas | solo capitaliza texto crudo |
+| 7 | P2 | Cuotas en USD proyectaban $0 | se pesifican con `cotizacion.venta` |
+| 8 | P2 | Filtros desde/hasta mezclaban UTC y hora local | `parseFechaLocal` |
+| 9 | P2 | Gastos fijos: solo detectaba 1 (ver 6b) | criterio nuevo, 8 detectados |
+
+**Pendiente (decisión de producto):** el motor de cuotas del backend (`db.comprasCuotas`, `generarHashCompra`, `/api/v1/cuotas/activas`, `proyeccion.service.js`) **no lo consume el frontend** — hay dos fuentes de verdad y solo se testea la que no se usa. Definir si el front consume el backend o si se borra el motor del backend y se mueve `proyeccion.service.js` al front.
+
+**Test nuevo:** `Backend/tests/fixtures-regresion.test.js` re-parsea las 40 fixtures y exige que la suma de movimientos coincida al centavo con el total del resumen. Es la red que hubiera atajado los bugs 3 y 4.
 
 ---
 

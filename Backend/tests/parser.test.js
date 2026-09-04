@@ -27,23 +27,50 @@ describe('PDFParserService', () => {
     test('detecta Mastercard Galicia correctamente', () => {
       const texto = 'MASTERCARD BANCO GALICIA Resumen mensual';
       const resultado = parser.detectarTarjeta(texto);
-      expect(resultado.nombre).toBe('Mastercard Galicia');
+      expect(resultado.nombre).toBe('MASTERCARD Galicia');
       expect(resultado.tipo).toBe('MASTERCARD');
       expect(resultado.banco).toBe('Galicia');
     });
 
-    test('lanza error para banco desconocido', () => {
-      const texto = 'BANCO HSBC VISA Premium';
-      expect(() => parser.detectarTarjeta(texto)).toThrow('No se pudo detectar');
+    test('HSBC es un banco reconocido', () => {
+      const resultado = parser.detectarTarjeta('BANCO HSBC VISA Premium');
+      expect(resultado.banco).toBe('HSBC');
+      expect(resultado.tipo).toBe('VISA');
+    });
+
+    test('deriva a Vision si hay tipo de tarjeta pero no se reconoce el banco', () => {
+      expect(() => parser.detectarTarjeta('VISA Premium Banco Rulo del Plata'))
+        .toThrow('USAR_VISION');
+    });
+
+    test('lanza error para banco y tarjeta desconocidos', () => {
+      expect(() => parser.detectarTarjeta('Comprobante generico sin datos'))
+        .toThrow('No se pudo detectar');
     });
   });
 
   describe('limpiarReferencia', () => {
-    test('limpia MercadoPago correctamente', () => {
+    test('limpia MercadoPago conservando el comercio', () => {
       const resultado = parser.limpiarReferencia('MERPAGO*SPOTIFY');
-      // El parser limpia a "Mercado Pago" por la regla general de MERPAGO
-      expect(resultado.limpio).toBe('Mercado Pago');
+      // extraerNombreMerpago rescata el comercio y le aplica su propia regla.
+      expect(resultado.limpio).toBe('Spotify (Mercado Pago)');
       expect(resultado.dudoso).toBe(false);
+    });
+
+    test('MERPAGO*MERCADOPAGO no duplica el nombre', () => {
+      expect(parser.limpiarReferencia('MERPAGO*MERCADOPAGO').limpio).toBe('Mercado Pago');
+    });
+
+    test('respeta los nombres canónicos de las reglas (no los capitaliza)', () => {
+      expect(parser.limpiarReferencia('OSDE 210').limpio).toBe('OSDE');
+      expect(parser.limpiarReferencia('ANTHROPIC* CLAUD').limpio).toBe('Claude AI (Anthropic)');
+    });
+
+    test('reconoce Easy con o sin la palabra "home"', () => {
+      expect(parser.limpiarReferencia('EASY WARNES').limpio).toBe('Easy');
+      expect(parser.limpiarReferencia('WWW.EASY.COM.AR/ WARN').limpio).toBe('Easy');
+      // no debe matchear dentro de otra palabra
+      expect(parser.limpiarReferencia('GREASY SPOON').limpio).toBe('Greasy Spoon');
     });
 
     test('limpia Apple correctamente', () => {
