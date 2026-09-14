@@ -24,7 +24,9 @@ import {
   proyectarCuotas,
   formatearParaVista,
   totalPendiente,
-  numerosDeCuota
+  numerosDeCuota,
+  estaVigente,
+  estaEnCurso
 } from './cuotas.js';
 
 const aquí = path.dirname(fileURLToPath(import.meta.url));
@@ -185,6 +187,63 @@ describe('construirPlanes y proyectarCuotas', () => {
     const proy = proyectarCuotas([], { meses: 2, resumenes: [], hoy: new Date(2026, 4, 10) });
     assert.equal(proy[0].mes_key, '2026-06');
     assert.deepEqual(proy.map(p => p.total), [0, 0]);
+  });
+});
+
+describe('estado de cada plan (qué se muestra en la vista Cuotas)', () => {
+  const ene = resumen('VISA', 2026, 1);
+  const abr = resumen('VISA', 2026, 4);
+  const may = resumen('VISA', 2026, 5);
+  const resumenes = [ene, abr, may];
+
+  const planes = construirPlanes([
+    // sigue debiendo: se facturó en el último resumen
+    mov(may, 'Heladera', '02/06', 50000),
+    // terminó justo en el último resumen → plata que se libera este mes
+    mov(may, 'Moto', '06/06', 30000),
+    // terminó hace meses → historial puro
+    mov(ene, 'Zapatillas', '03/03', 20000),
+    // quedan cuotas pero el banco dejó de facturarlas
+    mov(abr, 'Easy', '01/03', 40000)
+  ], resumenes);
+
+  const porNombre = Object.fromEntries(planes.map(p => [p.referencia_limpia, p]));
+
+  test('clasifica los cuatro casos', () => {
+    assert.equal(porNombre['Heladera'].estado, 'vigente');
+    assert.equal(porNombre['Moto'].estado, 'ultima_cuota');
+    assert.equal(porNombre['Zapatillas'].estado, 'terminada');
+    assert.equal(porNombre['Easy'].estado, 'interrumpida');
+  });
+
+  test('solo "vigente" cuenta como deuda por delante', () => {
+    assert.deepEqual(planes.filter(estaVigente).map(p => p.referencia_limpia), ['Heladera']);
+  });
+
+  test('la vista muestra todo menos las terminadas viejas', () => {
+    const enCurso = planes.filter(estaEnCurso).map(p => p.referencia_limpia).sort();
+    assert.deepEqual(enCurso, ['Easy', 'Heladera', 'Moto']);
+  });
+
+  test('un plan terminado no suma al pendiente ni a la proyección', () => {
+    assert.equal(totalPendiente(planes), 50000 * 4); // solo Heladera: cuotas 3 a 6
+    const proy = proyectarCuotas(planes, { meses: 4, resumenes });
+    assert.deepEqual(proy.map(p => p.total), [50000, 50000, 50000, 50000]);
+  });
+
+  test('la vista viene ordenada: última cuota, vigentes, a revisar, terminadas', () => {
+    const orden = formatearParaVista(planes).map(v => v.estado);
+    assert.deepEqual(orden, ['ultima_cuota', 'vigente', 'interrumpida', 'terminada']);
+  });
+
+  test('entre vigentes, primero las que están por terminar', () => {
+    const r = resumen('VISA', 2026, 6);
+    const vista = formatearParaVista(construirPlanes([
+      mov(r, 'Larga', '01/12', 1000),
+      mov(r, 'Corta', '05/06', 1000),
+      mov(r, 'Media', '03/09', 1000)
+    ], [r]));
+    assert.deepEqual(vista.map(v => v.descripcion), ['Corta', 'Media', 'Larga']);
   });
 });
 

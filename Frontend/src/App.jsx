@@ -5,7 +5,8 @@ import {
   construirPlanes,
   proyectarCuotas,
   formatearParaVista,
-  totalPendiente
+  totalPendiente,
+  estaVigente
 } from './services/cuotas';
 import {
   LayoutDashboard, Receipt, CreditCard, Tag, Upload,
@@ -1568,7 +1569,8 @@ const App = () => {
         const movimientosTarjeta = movimientosData.filter(m => m.tarjeta === t.nombre);
 
         // Calcular estadísticas de cuotas para esta tarjeta
-        const cuotasTarjeta = cuotasActivasData.filter(c => c.tarjeta === t.nombre);
+        // Solo los planes con deuda por delante: los terminados son historial.
+        const cuotasTarjeta = cuotasActivasData.filter(c => c.tarjeta === t.nombre && estaVigente(c));
         // Los planes interrumpidos ya no los factura el banco: no suman deuda futura.
         const montoCuotasPendientes = cuotasTarjeta.reduce((sum, c) => {
           if (c.interrumpida) return sum;
@@ -1626,10 +1628,12 @@ const App = () => {
         total_a_pagar_dolares: estadisticas.total_a_pagar_dolares,
         total_tarjetas: estadisticas.total_tarjetas || tarjetasData.length,
         total_movimientos: estadisticas.total_movimientos || movimientosData.length,
-        cuotas_activas: cuotasActivasData.filter(m => !m.interrumpida).length,
+        // "Activas" = con deuda por delante. Antes contaba también los planes ya
+        // terminados, así que mostraba 50 donde había 18.
+        cuotas_activas: cuotasActivasData.filter(estaVigente).length,
         cuotas_interrumpidas: cuotasActivasData.filter(m => m.interrumpida).length,
         pagos_pendientes: cuotasActivasData
-          .filter(m => !m.interrumpida)
+          .filter(estaVigente)
           .reduce((sum, m) => sum + (m.total_cuotas - m.cuota_actual), 0),
         total_pendiente_cuotas: totalPendienteCuotas,
         ultimo_resumen: estadisticas.ultimo_resumen,
@@ -3282,21 +3286,48 @@ const MovimientosView = ({ movimientos, tarjetas = [], resumenes = [], searchQue
 // Cuotas View con última cuota destacada
 const CuotasView = ({ cuotas = [], formatCurrency, searchQuery = '' }) => {
   const cuotasArray = Array.isArray(cuotas) ? cuotas : [];
+  // Por defecto solo lo que sigue en curso. Los planes terminados en resúmenes
+  // anteriores son historial y tapaban la vista (eran ~60% de las tarjetas).
+  const [verTerminadas, setVerTerminadas] = useState(false);
+
+  const terminadas = cuotasArray.filter(c => c.estado === 'terminada');
+  const visibles = verTerminadas ? cuotasArray : cuotasArray.filter(c => c.estado !== 'terminada');
 
   // Filtrar por búsqueda global
-  const filtered = cuotasArray.filter(c => {
+  const filtered = visibles.filter(c => {
     if (!searchQuery) return true;
     const query = searchQuery.toLowerCase();
     return c.descripcion?.toLowerCase().includes(query) ||
            c.tarjeta?.toLowerCase().includes(query);
   });
 
+  const enCurso = cuotasArray.filter(c => c.estado === 'vigente').length;
+  const porRevisar = cuotasArray.filter(c => c.estado === 'interrumpida').length;
+
   return (
     <div className="grid gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-1">
+        <p className="text-sm text-[var(--text-muted)]">
+          <span className="text-[var(--text-primary)] font-semibold">{enCurso}</span> en curso
+          {porRevisar > 0 && <span> · {porRevisar} a revisar</span>}
+        </p>
+        {terminadas.length > 0 && (
+          <button
+            onClick={() => setVerTerminadas(v => !v)}
+            className="text-xs px-3 py-1.5 rounded-lg border border-[var(--glass-border)]
+                       text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+          >
+            {verTerminadas
+              ? `Ocultar ${terminadas.length} terminadas`
+              : `Ver ${terminadas.length} terminadas`}
+          </button>
+        )}
+      </div>
         {filtered.map((cuota, idx) => {
-        const esUltimaCuota = cuota.es_ultima_cuota ||
-                             cuota.cuotas_restantes === 0 ||
-                             (cuota.cuotas_pagadas === cuota.total_cuotas);
+        // El trofeo es solo para la que se terminó en el último resumen: ahí es
+        // plata que se libera. Las viejas van atenuadas, como historial.
+        const esUltimaCuota = cuota.estado === 'ultima_cuota';
+        const yaTerminada = cuota.estado === 'terminada';
         // El banco dejo de facturar este plan en un resumen posterior: se muestra,
         // pero no cuenta como deuda futura ni entra en la proyeccion.
         const interrumpida = !!cuota.interrumpida && !esUltimaCuota;
@@ -3313,7 +3344,9 @@ const CuotasView = ({ cuotas = [], formatCurrency, searchQuery = '' }) => {
                          ? 'ring-2 ring-emerald-400 shadow-[0_0_25px_rgba(52,211,153,0.3)] bg-gradient-to-r from-emerald-500/10 to-teal-500/10'
                          : interrumpida
                            ? 'ring-1 ring-amber-400/60 bg-amber-500/5'
-                           : ''}`}
+                           : yaTerminada
+                             ? 'opacity-60'
+                             : ''}`}
             style={{ animationDelay: `${idx * 50}ms`, animationFillMode: 'forwards' }}
           >
             <div className="flex items-center justify-between">
@@ -3334,6 +3367,11 @@ const CuotasView = ({ cuotas = [], formatCurrency, searchQuery = '' }) => {
                     {interrumpida && (
                       <span className="text-xs bg-amber-500/20 text-amber-400 border border-amber-400/40 px-2 py-0.5 rounded-full">
                         Sin facturar en el último resumen
+                      </span>
+                    )}
+                    {yaTerminada && (
+                      <span className="text-xs bg-[var(--glass-bg)] text-[var(--text-muted)] px-2 py-0.5 rounded-full">
+                        Terminada
                       </span>
                     )}
                     {cuota.monto_cuota_dolares > 0 && (
@@ -3389,7 +3427,10 @@ const CuotasView = ({ cuotas = [], formatCurrency, searchQuery = '' }) => {
         {filtered.length === 0 && (
         <div className="text-center py-12 text-[var(--text-muted)]">
           <Calendar className="w-12 h-12 mx-auto mb-4 opacity-50" />
-          <p>{searchQuery ? 'No se encontraron cuotas' : 'No hay cuotas activas'}</p>
+          <p>{searchQuery ? 'No se encontraron cuotas' : 'No tenés compras en cuotas en curso'}</p>
+          {!searchQuery && terminadas.length > 0 && !verTerminadas && (
+            <p className="text-sm mt-2">Hay {terminadas.length} ya terminadas.</p>
+          )}
         </div>
       )}
     </div>

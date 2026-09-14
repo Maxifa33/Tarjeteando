@@ -102,13 +102,38 @@ export function construirPlanes(movimientos = [], resumenes = []) {
     });
   });
 
-  return [...planes.values()].map(plan => ({
-    ...plan,
+  return [...planes.values()].map(plan => {
+    const ultimoPeriodo = ultimoPeriodoPorTarjeta[plan.tarjeta] ?? plan.periodo;
+    const quedanCuotas = plan.cuota_actual < plan.total_cuotas;
     // Un plan ya terminado (N/N) no está interrumpido, simplemente se acabó.
-    interrumpida: plan.cuota_actual < plan.total_cuotas
-      && (ultimoPeriodoPorTarjeta[plan.tarjeta] ?? plan.periodo) > plan.periodo
-  }));
+    const interrumpida = quedanCuotas && ultimoPeriodo > plan.periodo;
+    return { ...plan, interrumpida, estado: estadoDePlan({ quedanCuotas, interrumpida, esUltimoPeriodo: plan.periodo === ultimoPeriodo }) };
+  });
 }
+
+/**
+ * Estado de un plan, que es lo que decide si se muestra en la vista Cuotas:
+ *  - 'vigente'      → quedan cuotas por pagar y el banco las sigue facturando.
+ *  - 'ultima_cuota' → la última cuota se cobró en el resumen MÁS RECIENTE de la
+ *                     tarjeta. Ya no se debe nada, pero es plata que se libera: se
+ *                     muestra un mes y después desaparece sola.
+ *  - 'terminada'    → se terminó en un resumen anterior. Es historial, no deuda.
+ *  - 'interrumpida' → quedan cuotas en el papel pero el banco dejó de facturarlas.
+ */
+function estadoDePlan({ quedanCuotas, interrumpida, esUltimoPeriodo }) {
+  if (interrumpida) return 'interrumpida';
+  if (quedanCuotas) return 'vigente';
+  return esUltimoPeriodo ? 'ultima_cuota' : 'terminada';
+}
+
+/** Planes que importan hoy: se deben, se acaban de terminar, o hay que revisarlos. */
+export const ESTADOS_EN_CURSO = ['vigente', 'ultima_cuota', 'interrumpida'];
+
+/** true si el plan todavía tiene algo que decirte este mes. */
+export const estaEnCurso = (plan) => ESTADOS_EN_CURSO.includes(plan?.estado);
+
+/** Planes con deuda real por delante (los que cuenta la StatCard "Cuotas activas"). */
+export const estaVigente = (plan) => plan?.estado === 'vigente';
 
 /** Orden determinístico: el orden de subida no debe mover totales ni el detalle. */
 export function ordenarPlanes(planes) {
@@ -200,9 +225,18 @@ export function proyectarCuotas(planes = [], opciones = {}) {
   return proyeccion;
 }
 
-/** Formato que consume CuotasView. */
+/** Formato que consume CuotasView, ordenado por lo que importa primero. */
 export function formatearParaVista(planes = []) {
-  return planes.map(plan => ({
+  // Primero lo que se acaba de terminar (plata que se libera), después lo vigente
+  // ordenado por cuánto falta, y al final lo que hay que revisar.
+  const prioridad = { ultima_cuota: 0, vigente: 1, interrumpida: 2, terminada: 3 };
+  const ordenados = [...planes].sort((a, b) =>
+    (prioridad[a.estado] ?? 9) - (prioridad[b.estado] ?? 9)
+    || (a.total_cuotas - a.cuota_actual) - (b.total_cuotas - b.cuota_actual)
+    || (b.monto_pesos || 0) - (a.monto_pesos || 0)
+    || (a.referencia_limpia || '').localeCompare(b.referencia_limpia || '')
+  );
+  return ordenados.map(plan => ({
     id: plan.id,
     descripcion: plan.referencia_limpia || plan.referencia_original || 'Sin descripción',
     tarjeta: plan.tarjeta,
@@ -215,6 +249,7 @@ export function formatearParaVista(planes = []) {
     monto_total: (plan.monto_pesos || plan.monto_dolares || 0) * plan.total_cuotas,
     es_ultima_cuota: plan.cuota_actual === plan.total_cuotas,
     fecha_compra: plan.fecha_compra,
+    estado: plan.estado,
     interrumpida: !!plan.interrumpida,
     periodo_anio: plan.periodo_anio,
     periodo_mes: plan.periodo_mes

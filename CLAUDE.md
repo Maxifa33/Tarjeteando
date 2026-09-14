@@ -101,6 +101,15 @@ Para otros bancos, el backend usa Claude Vision API como fallback automático (r
 
 ---
 
+## Cambios recientes (14/09/2026) — vista Cuotas: solo lo que está en curso
+
+Cada plan tiene ahora un `estado` (`vigente` / `ultima_cuota` / `terminada` / `interrumpida`)
+en `Frontend/src/services/cuotas.js`. La vista Cuotas oculta por defecto las `terminada`
+(planes que se acabaron en resúmenes anteriores) detrás de un botón "Ver N terminadas".
+La StatCard "Cuotas Activas" cuenta solo `vigente` — antes incluía las terminadas.
+
+---
+
 ## Cambios recientes (14/09/2026) — una sola calculadora de cuotas
 
 La lógica de cuotas se movió del backend al frontend y quedó en **`Frontend/src/services/cuotas.js`**

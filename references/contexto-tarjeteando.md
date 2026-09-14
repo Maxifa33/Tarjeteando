@@ -517,6 +517,22 @@ Tests: `cd Frontend && npm test` (node:test, sin dependencias nuevas). Cubren un
 sintéticos, independencia del orden de subida con los PDFs reales de fixtures, y el caso
 Easy Warnes contra el "Cuotas a vencer" que imprime el banco.
 
+### 1a. Estado de un plan: qué se muestra en la vista Cuotas
+`construirPlanes` le pone un `estado` a cada plan y eso decide la vista:
+
+| estado | significado | se muestra |
+|---|---|---|
+| `vigente` | quedan cuotas y el banco las factura | sí — es lo único que cuenta como deuda |
+| `ultima_cuota` | la última cuota cayó en el resumen MÁS RECIENTE de la tarjeta | sí, con trofeo (plata que se libera); el mes que viene pasa a `terminada` |
+| `terminada` | terminó en un resumen anterior | no por defecto — detrás del botón "Ver N terminadas" |
+| `interrumpida` | quedan cuotas pero el banco dejó de facturarlas | sí, con badge ámbar |
+
+Helpers: `estaVigente(plan)` y `estaEnCurso(plan)` (`ESTADOS_EN_CURSO`). La StatCard
+"Cuotas Activas" y `estadisticas.compras_en_cuotas` cuentan **solo `vigente`**: antes
+contaban también los planes terminados y mostraban 50 donde había 18.
+`formatearParaVista` ordena: última cuota → vigentes (las que están por terminar primero)
+→ a revisar → terminadas.
+
 ### 1b. Anclaje al período del PLAN (no de la tarjeta)
 Cada plan de cuotas se ancla al período del resumen **donde se lo vio por última vez**, no al último resumen de la tarjeta. Antes las cuotas se leían solo del último resumen de cada tarjeta, así que un plan que el banco dejaba de facturar desaparecía por completo (caso Easy Warnes, VISA GAL Jul→Ago 2026).
 
