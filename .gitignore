@@ -59,3 +59,4 @@ node_modules_old*/
 
 # Playwright MCP (snapshots/logs de testing manual)
 .playwright-mcp/
+_to_delete/
