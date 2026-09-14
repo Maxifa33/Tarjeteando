@@ -533,6 +533,18 @@ contaban también los planes terminados y mostraban 50 donde había 18.
 `formatearParaVista` ordena: última cuota → vigentes (las que están por terminar primero)
 → a revisar → terminadas.
 
+### 1a-bis. Badges del menú y Reintegros: solo lo vivo
+Los badges del menú lateral cuentan lo que está vivo hoy, no el histórico:
+- **Cuotas** → `cuotasActivas.filter(c => c.estado === 'vigente').length` (antes era
+  `cuotasActivas.length`, que incluía planes terminados: 53 donde había 18).
+- **Reintegros** → solo los del último resumen de cada tarjeta (`es_reciente`).
+
+`reintegros` se calcula en `App` con `useMemo` y cada uno lleva `es_reciente`
+(su período == el último resumen de su tarjeta). `ReintegrosView` muestra esos por
+defecto y deja el histórico detrás de "Ver histórico (N anteriores)". La StatCard
+"Total Reintegros" del dashboard también suma solo los recientes.
+Un reintegro sin período identificable se trata como reciente, para no esconderlo.
+
 ### 1b. Anclaje al período del PLAN (no de la tarjeta)
 Cada plan de cuotas se ancla al período del resumen **donde se lo vio por última vez**, no al último resumen de la tarjeta. Antes las cuotas se leían solo del último resumen de cada tarjeta, así que un plan que el banco dejaba de facturar desaparecía por completo (caso Easy Warnes, VISA GAL Jul→Ago 2026).
 

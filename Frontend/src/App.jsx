@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import storage from './services/storage';
 import { parseConsumosFile, categorizarConsumo } from './services/consumos-parser';
 import {
@@ -1709,20 +1709,57 @@ const App = () => {
       });
   }, []);
 
-  // Calcular reintegros
-  const reintegros = movimientos.filter(m =>
-    m.monto_pesos < 0 ||
-    m.monto_dolares < 0 ||
-    /reintegro|devoluci[oó]n|cr[eé]dito|bonificaci[oó]n/i.test(m.referencia_original || m.referencia_limpia || '')
-  );
+  // Calcular reintegros. Se marca cuáles caen en el último resumen de su tarjeta:
+  // la vista muestra esos por defecto, el histórico queda detrás de un botón.
+  const ultimoPeriodoPorTarjeta = useMemo(() => {
+    const acc = {};
+    resumenes.forEach(r => {
+      if (!r?.tarjeta || !r.anio || !r.mes) return;
+      const periodo = r.anio * 12 + (r.mes - 1);
+      if (acc[r.tarjeta] === undefined || periodo > acc[r.tarjeta]) acc[r.tarjeta] = periodo;
+    });
+    return acc;
+  }, [resumenes]);
+
+  const periodoPorResumenId = useMemo(() => Object.fromEntries(
+    resumenes.filter(r => r?.id && r.anio && r.mes).map(r => [r.id, r.anio * 12 + (r.mes - 1)])
+  ), [resumenes]);
+
+  const reintegros = useMemo(() => movimientos
+    .filter(m =>
+      m.monto_pesos < 0 ||
+      m.monto_dolares < 0 ||
+      /reintegro|devoluci[oó]n|cr[eé]dito|bonificaci[oó]n/i.test(m.referencia_original || m.referencia_limpia || '')
+    )
+    .map(m => {
+      // El período sale del resumen; si el movimiento es viejo y no trae resumen_id,
+      // se cae a anio_resumen/mes_resumen.
+      const periodo = periodoPorResumenId[m.resumen_id]
+        ?? (m.anio_resumen && m.mes_resumen ? m.anio_resumen * 12 + (m.mes_resumen - 1) : null);
+      const ultimo = ultimoPeriodoPorTarjeta[m.tarjeta];
+      // Sin período no se puede ubicar: se trata como reciente para no esconderlo.
+      return { ...m, es_reciente: periodo === null || ultimo === undefined || periodo === ultimo };
+    }), [movimientos, periodoPorResumenId, ultimoPeriodoPorTarjeta]);
+
+  const reintegrosRecientes = reintegros.filter(r => r.es_reciente);
+
+  // Período más reciente cargado, para rotular la vista de Reintegros.
+  const periodoRecienteLabel = useMemo(() => {
+    const max = Math.max(...Object.values(ultimoPeriodoPorTarjeta), -Infinity);
+    if (!isFinite(max)) return null;
+    return new Date(Math.floor(max / 12), max % 12, 1)
+      .toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
+  }, [ultimoPeriodoPorTarjeta]);
 
   // Menu items
   const menuItems = [
     { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     { id: 'movimientos', icon: Receipt, label: 'Movimientos' },
     { id: 'consumos-live', icon: Zap, label: 'Últimos consumos', badge: consumosLive.length > 0 ? consumosLive.length : null },
-    { id: 'cuotas', icon: Calendar, label: 'Cuotas', badge: cuotasActivas.length },
-    { id: 'reintegros', icon: RefreshCcw, label: 'Reintegros', badge: reintegros.length > 0 ? reintegros.length : null },
+    // Los badges cuentan lo que está vivo HOY, no todo el histórico: cuotas con
+    // deuda por delante y reintegros del último resumen de cada tarjeta.
+    { id: 'cuotas', icon: Calendar, label: 'Cuotas', badge: cuotasActivas.filter(c => c.estado === 'vigente').length },
+    { id: 'reintegros', icon: RefreshCcw, label: 'Reintegros', badge: reintegrosRecientes.length > 0 ? reintegrosRecientes.length : null },
     { id: 'importar', icon: Upload, label: 'Importar' },
   ];
   
@@ -1830,7 +1867,7 @@ const App = () => {
             </div>
           ) : activeView === 'dashboard' ? (
             <DashboardView
-              dashboard={{...dashboard, total_reintegros: reintegros.reduce((sum, r) => sum + Math.abs(r.monto_pesos || 0), 0)}}
+              dashboard={{...dashboard, total_reintegros: reintegrosRecientes.reduce((sum, r) => sum + Math.abs(r.monto_pesos || 0), 0)}}
               tarjetas={tarjetas}
               proyecciones={proyecciones}
               proyeccionCuotas={proyeccionCuotas}
@@ -1883,6 +1920,7 @@ const App = () => {
           ) : activeView === 'reintegros' ? (
             <ReintegrosView
               reintegros={reintegros}
+              periodoRecienteLabel={periodoRecienteLabel}
               formatCurrency={formatCurrency}
               searchQuery={searchQuery}
             />
@@ -3438,9 +3476,16 @@ const CuotasView = ({ cuotas = [], formatCurrency, searchQuery = '' }) => {
 };
 
 // Reintegros View - Devoluciones y créditos
-const ReintegrosView = ({ reintegros = [], formatCurrency, searchQuery = '' }) => {
+const ReintegrosView = ({ reintegros = [], periodoRecienteLabel = null, formatCurrency, searchQuery = '' }) => {
+  // Por defecto solo los del último resumen de cada tarjeta: el histórico completo
+  // mezclaba reintegros de hace un año con los que hay que revisar ahora.
+  const [verHistorico, setVerHistorico] = useState(false);
+
+  const historicos = reintegros.filter(r => !r.es_reciente);
+  const visibles = verHistorico ? reintegros : reintegros.filter(r => r.es_reciente);
+
   // Filtrar por búsqueda
-  const filtered = reintegros.filter(r => {
+  const filtered = visibles.filter(r => {
     if (!searchQuery) return true;
     const query = searchQuery.toLowerCase();
     return r.referencia_limpia?.toLowerCase().includes(query) ||
@@ -3464,6 +3509,23 @@ const ReintegrosView = ({ reintegros = [], formatCurrency, searchQuery = '' }) =
 
   return (
     <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-1">
+        <p className="text-sm text-[var(--text-muted)]">
+          {verHistorico
+            ? <>Histórico completo · <span className="text-[var(--text-primary)] font-semibold">{reintegros.length}</span> reintegros</>
+            : <><span className="text-[var(--text-primary)] font-semibold">{visibles.length}</span> en el último resumen{periodoRecienteLabel ? ` · ${periodoRecienteLabel}` : ''}</>}
+        </p>
+        {historicos.length > 0 && (
+          <button
+            onClick={() => setVerHistorico(v => !v)}
+            className="text-xs px-3 py-1.5 rounded-lg border border-[var(--glass-border)]
+                       text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+          >
+            {verHistorico ? 'Ver solo el último resumen' : `Ver histórico (${historicos.length} anteriores)`}
+          </button>
+        )}
+      </div>
+
       {/* Resumen de reintegros */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="glass-card p-5">
@@ -3574,7 +3636,10 @@ const ReintegrosView = ({ reintegros = [], formatCurrency, searchQuery = '' }) =
         {filtered.length === 0 && (
           <div className="text-center py-12 text-[var(--text-muted)]">
             <RefreshCcw className="w-12 h-12 mx-auto mb-4 opacity-50" />
-            <p>No hay reintegros registrados</p>
+            <p>{searchQuery ? 'No se encontraron reintegros' : 'No hay reintegros en el último resumen'}</p>
+            {!searchQuery && historicos.length > 0 && !verHistorico && (
+              <p className="text-sm mt-2">Hay {historicos.length} en resúmenes anteriores.</p>
+            )}
           </div>
         )}
       </div>
