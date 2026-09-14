@@ -101,6 +101,22 @@ Para otros bancos, el backend usa Claude Vision API como fallback automático (r
 
 ---
 
+## Cambios recientes (14/09/2026) — una sola calculadora de cuotas
+
+La lógica de cuotas se movió del backend al frontend y quedó en **`Frontend/src/services/cuotas.js`**
+(`construirPlanes`, `proyectarCuotas`, `formatearParaVista`, `totalPendiente`). `App.jsx` solo la llama.
+
+- Se eliminó el motor del backend: `db.comprasCuotas`, `proyeccion.service.js`, `GET /api/v1/cuotas/activas`,
+  `GET /api/v1/cuotas/proyeccion` y `GET /api/v1/proyecciones/proximo-mes`. El frontend nunca los consumía
+  (solo usa `/resumenes/upload`, `/reglas`, `PATCH /tarjetas/:id` y `/pendientes-nombre/*`).
+- **Tests del frontend:** `cd Frontend && npm test` — usa `node --test`, sin dependencias nuevas.
+  19 tests: unitarios, independencia del orden de subida con PDFs reales, y el caso Easy Warnes
+  contra el "Cuotas a vencer" del propio resumen.
+- Los archivos viejos quedaron en `_to_delete/` con extensión `.obsoleto` (no los levanta ni jest ni
+  `require`). Borrá esa carpeta cuando quieras.
+
+---
+
 ## Cambios recientes (04/09/2026) — auditoría parser + cuotas + gastos fijos
 
 Rama `fix/auditoria-parser-cuotas-2026-09`. Detalle completo en `references/contexto-tarjeteando.md`.

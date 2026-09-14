@@ -2,6 +2,12 @@ import React, { useState, useEffect, useCallback } from 'react';
 import storage from './services/storage';
 import { parseConsumosFile, categorizarConsumo } from './services/consumos-parser';
 import {
+  construirPlanes,
+  proyectarCuotas,
+  formatearParaVista,
+  totalPendiente
+} from './services/cuotas';
+import {
   LayoutDashboard, Receipt, CreditCard, Tag, Upload,
   TrendingUp, TrendingDown, Calendar, AlertCircle, ChevronRight,
   Sun, Moon, Bell, Settings, Search, X, DollarSign,
@@ -1541,63 +1547,11 @@ const App = () => {
       });
 
       // ── Planes de cuotas ────────────────────────────────────────────────────
-      // Antes las cuotas se leian SOLO del ultimo resumen de cada tarjeta: cualquier
-      // plan que el banco no volviera a facturar en el resumen mas nuevo desaparecia
-      // por completo de la vista Cuotas, de la StatCard y de la proyeccion.
-      // Ahora un plan se arma con TODOS los resumenes y queda anclado al periodo del
-      // resumen donde se lo vio por ultima vez.
-      const resumenPorId = Object.fromEntries(resumenesData.map(r => [r.id, r]));
-      const periodoDeResumen = (r) => (r ? r.anio * 12 + (r.mes - 1) : null);
-
-      const numerosDeCuota = (m) => {
-        if (m.es_cuota && m.cuota_actual && m.total_cuotas) {
-          return { actual: m.cuota_actual, total: m.total_cuotas };
-        }
-        const match = (m.cuota_texto || '').match(/(\d+)\/(\d+)/);
-        if (match) return { actual: parseInt(match[1]), total: parseInt(match[2]) };
-        return null;
-      };
-
-      const planesCuotas = new Map();
-      movimientosData.forEach(m => {
-        const nums = numerosDeCuota(m);
-        if (!nums || !nums.total) return;
-        const resumen = resumenPorId[m.resumen_id];
-        if (!resumen) return;
-        const periodo = periodoDeResumen(resumen);
-        const montoPesos = m.monto_pesos || 0;
-        const montoDolares = m.monto_dolares || 0;
-        // Misma clave logica que usa el backend: tarjeta + nombre normalizado +
-        // cantidad de cuotas + monto de cuota redondeado (tolera centavos entre meses).
-        const nombre = (m.referencia_limpia || m.referencia_original || '')
-          .toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 15);
-        const montoClave = montoPesos ? Math.round(montoPesos / 1000) : Math.round(montoDolares);
-        const clave = `${m.tarjeta}|${nombre}|${nums.total}|${montoClave}`;
-        const previo = planesCuotas.get(clave);
-        if (!previo || periodo > previo.periodo) {
-          planesCuotas.set(clave, {
-            ...m,
-            es_cuota: true,
-            cuota_actual: nums.actual,
-            total_cuotas: nums.total,
-            monto_pesos: montoPesos,
-            monto_dolares: montoDolares,
-            periodo,
-            periodo_anio: resumen.anio,
-            periodo_mes: resumen.mes
-          });
-        }
-      });
-
-      // Un plan queda "interrumpido" si existe un resumen POSTERIOR de la misma tarjeta
-      // en el que el banco no lo facturo (plan dado de baja, refacturado o cancelado).
-      // Se sigue mostrando en la vista Cuotas con aviso, pero no se proyecta.
-      const cuotasActivasData = [...planesCuotas.values()].map(m => ({
-        ...m,
-        // Un plan ya terminado (N/N) no esta interrumpido, simplemente se acabo.
-        interrumpida: m.cuota_actual < m.total_cuotas &&
-          (periodoDeResumen(ultimoResumenPorTarjeta[m.tarjeta]) ?? m.periodo) > m.periodo
-      }));
+      // Toda la lógica vive en services/cuotas.js (única fuente de verdad, testeada
+      // con `npm test` en Frontend). Un plan se arma con TODOS los resúmenes y queda
+      // anclado al período donde se lo vio por última vez; si un resumen posterior de
+      // esa tarjeta no lo factura, viene marcado como `interrumpida`.
+      const cuotasActivasData = construirPlanes(movimientosData, resumenesData);
 
       // Enriquecer tarjetas con último resumen y estadísticas
       const tarjetasEnriquecidas = tarjetasData.map((t, idx) => {
@@ -1650,24 +1604,7 @@ const App = () => {
       });
 
       // Transformar cuotas al formato esperado por CuotasView
-      const cuotasFormateadas = cuotasActivasData.map(m => ({
-        id: m.id,
-        descripcion: m.referencia_limpia || m.referencia_original || 'Sin descripción',
-        tarjeta: m.tarjeta,
-        total_cuotas: m.total_cuotas,
-        cuotas_pagadas: m.cuota_actual,
-        cuotas_restantes: m.total_cuotas - m.cuota_actual,
-        monto_cuota: m.monto_pesos || m.monto_dolares || 0,
-        monto_cuota_pesos: m.monto_pesos || 0,
-        monto_cuota_dolares: m.monto_dolares || 0,
-        monto_total: (m.monto_pesos || m.monto_dolares || 0) * m.total_cuotas,
-        es_ultima_cuota: m.cuota_actual === m.total_cuotas,
-        fecha_compra: m.fecha_compra,
-        // El banco dejo de facturar este plan en un resumen posterior
-        interrumpida: !!m.interrumpida,
-        periodo_anio: m.periodo_anio,
-        periodo_mes: m.periodo_mes
-      }));
+      const cuotasFormateadas = formatearParaVista(cuotasActivasData);
 
       setTarjetas(tarjetasEnriquecidas);
       setMovimientos(movimientosData);
@@ -1680,11 +1617,7 @@ const App = () => {
       setGastosFijos(fijosSet);
       setGastosFijosDetalle({ ...fijosResumen, analisis: fijosAnalisis });
       // Calcular totales de cuotas pendientes
-      const totalPendienteCuotas = cuotasFormateadas.reduce((sum, c) => {
-        if (c.interrumpida) return sum;
-        const cuotaARS = c.monto_cuota_pesos || c.monto_cuota_dolares * cotizacionVenta;
-        return sum + (cuotaARS * c.cuotas_restantes);
-      }, 0);
+      const totalPendienteCuotas = totalPendiente(cuotasActivasData, cotizacionVenta);
 
       setDashboard({
         // Propiedades en el nivel raíz para las cards
@@ -1712,73 +1645,13 @@ const App = () => {
       setProyecciones({ evolucion_mensual: evolucion });
       setReglas(reglasLocales);
 
-      // Calcular proyección de cuotas anclada al PERÍODO del resumen de cada tarjeta
-      // (no a la fecha de hoy ni al orden de subida). Cada cuota se ubica en su mes
-      // calendario real: si la cuota N cae en el período P, la cuota N+k cae en P+k.
-      // El "próximo mes" (índice 0) es el mes siguiente al último resumen disponible.
-      // Cada plan se ancla al periodo del resumen donde se lo vio por ultima vez
-      // (no al ultimo resumen de la tarjeta): asi un plan facturado en un resumen
-      // viejo se proyecta igual desde SU mes.
-      const periodoDelPlan = (m) => new Date(m.periodo_anio, m.periodo_mes - 1, 1);
-      // Ancla global: período del resumen más reciente entre todas las tarjetas
-      let anclaProyeccion = null;
-      Object.values(ultimoResumenPorTarjeta).forEach(r => {
-        const d = new Date(r.anio, r.mes - 1, 1);
-        if (!anclaProyeccion || d > anclaProyeccion) anclaProyeccion = d;
+      // Proyección de cuotas: ancla = período del resumen más reciente entre todas
+      // las tarjetas; el bucket 0 es el mes siguiente. Ver services/cuotas.js.
+      const proyeccionCalculada = proyectarCuotas(cuotasActivasData, {
+        meses: 6,
+        resumenes: resumenesData,
+        cotizacionVenta
       });
-      if (!anclaProyeccion) anclaProyeccion = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-
-      // Orden determinístico: el orden de subida no debe influir en el detalle ni en
-      // los totales (ruido de punto flotante).
-      const cuotasOrdenadas = [...cuotasActivasData].sort((a, b) =>
-        (a.tarjeta || '').localeCompare(b.tarjeta || '')
-        || (a.referencia_limpia || '').localeCompare(b.referencia_limpia || '')
-        || (a.total_cuotas - b.total_cuotas)
-        || ((a.monto_pesos || 0) - (b.monto_pesos || 0))
-      );
-
-      const proyeccionCalculada = [];
-      for (let i = 0; i < 6; i++) {
-        // Mes objetivo = ancla + (i + 1): el primer bucket es el mes siguiente al último resumen
-        const fecha = new Date(anclaProyeccion.getFullYear(), anclaProyeccion.getMonth() + i + 1, 1);
-        let totalMes = 0;
-        const detalles = [];
-
-        cuotasOrdenadas.forEach(m => {
-          // Plan que el banco dejo de facturar: no se proyecta (se sigue viendo en Cuotas).
-          if (m.interrumpida) return;
-          const periodoCuota = periodoDelPlan(m);
-          if (!periodoCuota || isNaN(periodoCuota)) return;
-          // Meses entre el período de la cuota y el mes objetivo
-          const diff = (fecha.getFullYear() - periodoCuota.getFullYear()) * 12
-            + (fecha.getMonth() - periodoCuota.getMonth());
-          const numeroCuota = m.cuota_actual + diff;
-          // Solo cuotas futuras respecto del período (diff >= 1) que aún no terminaron
-          if (diff >= 1 && numeroCuota <= m.total_cuotas) {
-            // Las cuotas en dolares se pesifican al dolar tarjeta del momento (estimado).
-            const montoARS = (m.monto_pesos || 0) || (m.monto_dolares || 0) * cotizacionVenta;
-            totalMes += montoARS;
-            detalles.push({
-              id: m.id,
-              descripcion: m.referencia_limpia || m.referencia_original || 'Sin descripción',
-              tarjeta: m.tarjeta,
-              cuota_numero: numeroCuota,
-              total_cuotas: m.total_cuotas,
-              monto_cuota: montoARS,
-              monto_cuota_dolares: m.monto_dolares || 0,
-              es_estimado_usd: !m.monto_pesos && !!m.monto_dolares
-            });
-          }
-        });
-
-        proyeccionCalculada.push({
-          mes: fecha.toLocaleDateString('es-AR', { month: 'short', year: '2-digit' }),
-          mes_nombre: fecha.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }),
-          total: Math.round(totalMes * 100) / 100, // redondeo a 2 decimales (estable)
-          cantidad_cuotas: detalles.length,
-          detalles
-        });
-      }
       setProyeccionCuotas(proyeccionCalculada);
     } catch (error) {
       console.error('[App] Error loading data:', error);

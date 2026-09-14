@@ -505,7 +505,19 @@ async procesarArchivo(buffer, filename, mimetype)  // → mismo formato que pdfP
 ### 0. NUNCA usar `new Date('YYYY-MM-DD')` para fechas del parser
 `fecha_compra` / `fecha_cierre` son **fechas de calendario sin hora**. `new Date('2026-08-10')` las lee como medianoche **UTC** y en Argentina (UTC-3) muestra el 09/08; además un consumo del día 1 caía en el mes anterior al agrupar. Usar siempre `parseFechaLocal()` / `mesKeyDeFecha()`. El patrón viejo `+ 'T12:00:00'` también funciona y sigue vivo en algunos renders.
 
-### 1. Proyección de cuotas — anclada al período del PLAN (no de la tarjeta)
+### 1. Proyección de cuotas — UNA sola implementación, en el frontend
+Toda la lógica de cuotas vive en **`Frontend/src/services/cuotas.js`**: `construirPlanes`,
+`proyectarCuotas`, `formatearParaVista`, `totalPendiente`. `App.jsx` solo la llama.
+El motor que había en el backend (`db.comprasCuotas`, `proyeccion.service.js`,
+`/api/v1/cuotas/*`, `/api/v1/proyecciones/proximo-mes`) **se eliminó**: el backend no
+tiene DB, así que nunca pudo ser la fuente de verdad, y sus tests probaban código que el
+frontend no consumía. Si tocás la fórmula, hay un solo lugar.
+
+Tests: `cd Frontend && npm test` (node:test, sin dependencias nuevas). Cubren unitarios
+sintéticos, independencia del orden de subida con los PDFs reales de fixtures, y el caso
+Easy Warnes contra el "Cuotas a vencer" que imprime el banco.
+
+### 1b. Anclaje al período del PLAN (no de la tarjeta)
 Cada plan de cuotas se ancla al período del resumen **donde se lo vio por última vez**, no al último resumen de la tarjeta. Antes las cuotas se leían solo del último resumen de cada tarjeta, así que un plan que el banco dejaba de facturar desaparecía por completo (caso Easy Warnes, VISA GAL Jul→Ago 2026).
 
 **Regla `interrumpida`:** si existe un resumen posterior de la misma tarjeta donde el plan NO fue facturado y el plan no está terminado (N/N), se marca `interrumpida: true`. Se sigue mostrando en `CuotasView` con badge ámbar, pero **no se proyecta** ni suma deuda futura. Validado contra el bloque "Cuotas a vencer" que imprime el propio banco: Set/26 $244.580,43 y Oct/26 $214.783,00 en VISA GAL Agosto 2026 coinciden al centavo.
@@ -576,7 +588,14 @@ Rama `fix/auditoria-parser-cuotas-2026-09`. 9 bugs detectados corriendo el parse
 | 8 | P2 | Filtros desde/hasta mezclaban UTC y hora local | `parseFechaLocal` |
 | 9 | P2 | Gastos fijos: solo detectaba 1 (ver 6b) | criterio nuevo, 8 detectados |
 
-**Pendiente (decisión de producto):** el motor de cuotas del backend (`db.comprasCuotas`, `generarHashCompra`, `/api/v1/cuotas/activas`, `proyeccion.service.js`) **no lo consume el frontend** — hay dos fuentes de verdad y solo se testea la que no se usa. Definir si el front consume el backend o si se borra el motor del backend y se mueve `proyeccion.service.js` al front.
+**Resuelto (bug 9):** el motor de cuotas del backend se eliminó y la calculadora quedó
+en `Frontend/src/services/cuotas.js`, con tests propios. Endpoints dados de baja:
+`GET /api/v1/cuotas/activas`, `GET /api/v1/cuotas/proyeccion`,
+`GET /api/v1/proyecciones/proximo-mes`. `GET /api/v1/tarjetas` ya no devuelve
+`estadisticas.compras_en_cuotas` ni `monto_cuotas_pendientes`, y
+`GET /api/v1/dashboard/resumen` ya no devuelve campos de cuotas. Ninguno de esos
+endpoints lo consumía el frontend (solo usa `/resumenes/upload`, `/reglas`,
+`PATCH /tarjetas/:id` y `/pendientes-nombre/*`).
 
 **Test nuevo:** `Backend/tests/fixtures-regresion.test.js` re-parsea las 40 fixtures y exige que la suma de movimientos coincida al centavo con el total del resumen. Es la red que hubiera atajado los bugs 3 y 4.
 
@@ -631,6 +650,19 @@ Rama `fix/auditoria-parser-cuotas-2026-09`. 9 bugs detectados corriendo el parse
 - Barras no seleccionadas: opacity 0.4
 - Texto: "X consumos en cuotas pendientes"
 - Panel: desglose por cuota con badge de color por tarjeta
+
+---
+
+## Tests
+
+```bash
+cd Frontend && npm test    # calculadora de cuotas (node:test, 19 tests, sin deps)
+cd Backend  && npm test    # parser + regresión sobre los 40 PDFs reales (jest)
+```
+
+En el Backend, `api.test.js` y `src/services/pdf-parser.test.js` requieren `sharp`
+(binario nativo): corren en macOS pero fallan en un entorno Linux con `node_modules`
+instalado en Mac. `parser.test.js` y `fixtures-regresion.test.js` corren en cualquier lado.
 
 ---
 

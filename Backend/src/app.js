@@ -15,7 +15,6 @@ const fs = require('fs');
 const multer = require('multer');
 const PDFParserService = require('./services/pdf-parser.service');
 const VisionParserService = require('./services/vision-parser.service');
-const { proyectarCuotas } = require('./services/proyeccion.service');
 
 // Configurar multer para aceptar PDFs e imágenes
 const upload = multer({
@@ -90,8 +89,6 @@ let db = {
   resumenes: [],
   // Movimientos de todos los resúmenes
   movimientos: [],
-  // Compras en cuotas (deduplicadas por hash_logico)
-  comprasCuotas: {},
   alertas: [],
   // Reglas de limpieza definidas por el usuario
   // { id, patron, nombre_limpio, fecha_creacion, veces_usado }
@@ -148,12 +145,6 @@ app.get('/api/v1/tarjetas', (req, res) => {
     // Contar movimientos de esta tarjeta
     const movimientosTarjeta = db.movimientos.filter(m => m.tarjeta === t.nombre);
     
-    // Contar cuotas activas de esta tarjeta
-    const cuotasTarjeta = Object.values(db.comprasCuotas)
-      .filter(c => c.tarjeta === t.nombre && c.cuotas_restantes > 0);
-    
-    const montoCuotasPendientes = cuotasTarjeta.reduce((sum, c) => sum + (c.monto_cuota * c.cuotas_restantes), 0);
-    
     return {
       ...t,
       proximo_cierre: proximoCierre.toISOString().split('T')[0],
@@ -171,10 +162,9 @@ app.get('/api/v1/tarjetas', (req, res) => {
         total_consumos_dolares: ultimoResumen.total_consumos_dolares || 0,
         cantidad_movimientos: ultimoResumen.cantidad_movimientos
       } : null,
+      // Las cuotas las calcula el frontend con services/cuotas.js sobre localStorage.
       estadisticas: {
-        total_movimientos: movimientosTarjeta.length,
-        compras_en_cuotas: cuotasTarjeta.length,
-        monto_cuotas_pendientes: montoCuotasPendientes
+        total_movimientos: movimientosTarjeta.length
       }
     };
   });
@@ -235,13 +225,6 @@ app.patch('/api/v1/tarjetas/:id', (req, res) => {
     }
   });
 
-  // Actualizar referencias en compras en cuotas
-  Object.values(db.comprasCuotas).forEach(c => {
-    if (c.tarjeta === nombreAnterior) {
-      c.tarjeta = nuevoNombre;
-    }
-  });
-
   console.log(`[Tarjetas] Renombrada: "${nombreAnterior}" → "${nuevoNombre}"`);
 
   res.json({
@@ -274,18 +257,10 @@ app.delete('/api/v1/tarjetas/:id', (req, res) => {
   const movimientosEliminados = db.movimientos.filter(m => m.tarjeta === nombreTarjeta).length;
   db.movimientos = db.movimientos.filter(m => m.tarjeta !== nombreTarjeta);
 
-  // Eliminar compras en cuotas de esta tarjeta
-  const cuotasEliminadas = Object.values(db.comprasCuotas).filter(c => c.tarjeta === nombreTarjeta).length;
-  Object.keys(db.comprasCuotas).forEach(key => {
-    if (db.comprasCuotas[key].tarjeta === nombreTarjeta) {
-      delete db.comprasCuotas[key];
-    }
-  });
-
   // Eliminar la tarjeta
   db.tarjetas.splice(tarjetaIndex, 1);
 
-  console.log(`[Tarjetas] Eliminada: "${nombreTarjeta}" (${resumenesEliminados} resúmenes, ${movimientosEliminados} movimientos, ${cuotasEliminadas} cuotas)`);
+  console.log(`[Tarjetas] Eliminada: "${nombreTarjeta}" (${resumenesEliminados} resúmenes, ${movimientosEliminados} movimientos)`);
 
   res.json({
     success: true,
@@ -351,13 +326,6 @@ app.delete('/api/v1/resumenes/:id', (req, res) => {
   // Eliminar movimientos asociados a este resumen
   db.movimientos = db.movimientos.filter(m => m.resumen_id !== id);
 
-  // Eliminar cuotas que pertenecían a este resumen
-  Object.keys(db.comprasCuotas).forEach(key => {
-    if (db.comprasCuotas[key].resumen_id === id) {
-      delete db.comprasCuotas[key];
-    }
-  });
-
   // Eliminar el resumen
   db.resumenes.splice(idx, 1);
 
@@ -370,71 +338,11 @@ app.delete('/api/v1/resumenes/:id', (req, res) => {
 });
 
 // ==================== CUOTAS ====================
-app.get('/api/v1/cuotas/activas', (req, res) => {
-  const cuotas = Object.values(db.comprasCuotas);
-  const hoy = new Date();
-
-  // Calcular fecha límite: incluir últimas cuotas de los últimos 60 días
-  const fechaLimite = new Date(hoy);
-  fechaLimite.setDate(fechaLimite.getDate() - 60);
-
-  const activas = cuotas
-    .filter(c => {
-      // Incluir si tiene cuotas restantes (cuotas activas normales)
-      if (c.cuotas_restantes > 0) return true;
-
-      // Incluir última cuota (cuota_actual === total_cuotas) si es reciente
-      // Esto asegura que cuotas como 03/03 se muestren
-      if (c.cuotas_restantes === 0 && c.cuota_actual === c.total_cuotas) {
-        if (c.fecha_ultima_cuota) {
-          const fechaUltima = new Date(c.fecha_ultima_cuota);
-          return fechaUltima >= fechaLimite;
-        }
-        // Si no tiene fecha pero es última cuota, incluirla
-        return true;
-      }
-      return false;
-    })
-    .sort((a, b) => {
-      // Primero las últimas cuotas (para que se vean arriba)
-      if (a.cuotas_restantes === 0 && b.cuotas_restantes > 0) return -1;
-      if (b.cuotas_restantes === 0 && a.cuotas_restantes > 0) return 1;
-      // Luego por cuotas restantes
-      return a.cuotas_restantes - b.cuotas_restantes;
-    })
-    .map(c => ({
-      id: c.hash_logico,
-      descripcion: c.referencia_limpia,
-      tarjeta: c.tarjeta,
-      total_cuotas: c.total_cuotas,
-      cuotas_pagadas: c.cuota_actual,
-      cuotas_restantes: c.cuotas_restantes,
-      monto_cuota: c.monto_cuota,
-      monto_total: c.monto_total,
-      fecha_inicio: c.fecha_primera_compra,
-      fecha_ultima_cuota: c.fecha_ultima_cuota,
-      es_ultima_cuota: c.cuotas_restantes === 0 && c.cuota_actual === c.total_cuotas
-    }));
-
-  res.json({
-    success: true,
-    data: activas
-  });
-});
-
-// Proyección de cuotas a futuro (próximos N meses)
-app.get('/api/v1/cuotas/proyeccion', (req, res) => {
-  const meses = parseInt(req.query.meses) || 6;
-  const cuotasActivas = Object.values(db.comprasCuotas).filter(c => c.cuotas_restantes > 0);
-
-  // Proyección anclada al período del resumen de cada cuota (ver proyeccion.service.js)
-  const proyeccion = proyectarCuotas(cuotasActivas, meses);
-
-  res.json({
-    success: true,
-    data: proyeccion
-  });
-});
+// Los endpoints de cuotas se eliminaron a propósito. El backend no tiene base de
+// datos (db vive en RAM y se pierde al reiniciar), así que nunca pudo ser la fuente
+// de verdad de las cuotas. La calculadora única vive en
+// Frontend/src/services/cuotas.js y trabaja sobre localStorage, que es donde los
+// datos realmente persisten. Ver Frontend/src/services/cuotas.test.js.
 
 // ==================== ALERTAS ====================
 app.get('/api/v1/alertas', (req, res) => {
@@ -829,56 +737,10 @@ app.post('/api/v1/resumenes/upload', upload.array('pdfs'), async (req, res) => {
           console.log(`[Pendientes] ${dudosos.length} movimientos dudosos, ${db.pendientesNombre.length} pendientes totales`);
         }
         
-        // Procesar compras en cuotas (deduplicar por hash_logico)
-        (resultado.compras || []).forEach(compra => {
-          const hashKey = compra.hash_logico;
-          
-          if (db.comprasCuotas[hashKey]) {
-            // Ya existe, actualizar información de la cuota actual
-            const existente = db.comprasCuotas[hashKey];
-            const cuotaActual = compra.cuotas && compra.cuotas.length > 0 
-              ? Math.max(...compra.cuotas.map(c => c.numero_cuota))
-              : existente.cuota_actual;
-            
-            // Solo actualizar si esta cuota es más reciente
-            if (cuotaActual > existente.cuota_actual) {
-              existente.cuota_actual = cuotaActual;
-              existente.cuotas_restantes = existente.total_cuotas - cuotaActual;
-              existente.fecha_ultima_cuota = resultado.resumen.fecha_cierre;
-              existente.historial_cuotas.push({
-                numero: cuotaActual,
-                fecha: resultado.resumen.fecha_cierre,
-                monto: compra.monto_cuota,
-                resumen_id: resumenId
-              });
-            }
-          } else {
-            // Nueva compra en cuotas
-            const cuotaActual = compra.cuotas && compra.cuotas.length > 0 
-              ? Math.max(...compra.cuotas.map(c => c.numero_cuota))
-              : 1;
-            
-            db.comprasCuotas[hashKey] = {
-              hash_logico: hashKey,
-              tarjeta: tarjetaNombre,
-              referencia_limpia: compra.referencia_limpia,
-              total_cuotas: compra.total_cuotas,
-              monto_cuota: compra.monto_cuota,
-              monto_total: compra.monto_total,
-              fecha_primera_compra: compra.fecha_primera_compra,
-              cuota_actual: cuotaActual,
-              cuotas_restantes: compra.total_cuotas - cuotaActual,
-              fecha_ultima_cuota: resultado.resumen.fecha_cierre,
-              historial_cuotas: [{
-                numero: cuotaActual,
-                fecha: resultado.resumen.fecha_cierre,
-                monto: compra.monto_cuota,
-                resumen_id: resumenId
-              }]
-            };
-          }
-        });
-        
+        // Las compras en cuotas viajan al frontend dentro de los movimientos
+        // (campo cuota_texto) y las consolida services/cuotas.js. El backend ya no
+        // mantiene su propio índice de cuotas.
+
         resultados.push({
           archivo: file.originalname,
           exito: true,
@@ -952,19 +814,13 @@ app.post('/api/v1/resumenes/upload', upload.array('pdfs'), async (req, res) => {
 
 // ==================== DASHBOARD ====================
 app.get('/api/v1/dashboard/resumen', (req, res) => {
-  // Totales globales
-  const cuotasActivas = Object.values(db.comprasCuotas).filter(c => c.cuotas_restantes > 0);
-  const totalCuotasPendientes = cuotasActivas.reduce((sum, c) => sum + c.cuotas_restantes, 0);
-  const montoPendienteCuotas = cuotasActivas.reduce((sum, c) => sum + (c.monto_cuota * c.cuotas_restantes), 0);
-
+  // Los totales de cuotas los calcula el frontend (services/cuotas.js) sobre
+  // localStorage; el backend solo informa lo que tiene en memoria.
   res.json({
     success: true,
     data: {
       total_resumenes: db.resumenes.length,
-      total_movimientos: db.movimientos.length,
-      cuotas_activas: cuotasActivas.length,
-      pagos_pendientes: totalCuotasPendientes,
-      total_pendiente_cuotas: montoPendienteCuotas
+      total_movimientos: db.movimientos.length
     }
   });
 });
@@ -1005,34 +861,6 @@ app.get('/api/v1/proyecciones/graficos', (req, res) => {
     data: {
       evolucion,
       tarjetas: Array.from(tarjetasSet)
-    }
-  });
-});
-
-app.get('/api/v1/proyecciones/proximo-mes', (req, res) => {
-  const cuotasActivas = Object.values(db.comprasCuotas).filter(c => c.cuotas_restantes > 0);
-  
-  // Agrupar por tarjeta
-  const porTarjeta = {};
-  cuotasActivas.forEach(cuota => {
-    if (!porTarjeta[cuota.tarjeta]) {
-      porTarjeta[cuota.tarjeta] = {
-        tarjeta: cuota.tarjeta,
-        cantidad_cuotas: 0,
-        monto_cuotas: 0
-      };
-    }
-    porTarjeta[cuota.tarjeta].cantidad_cuotas++;
-    porTarjeta[cuota.tarjeta].monto_cuotas += cuota.monto_cuota;
-  });
-
-  const totalProyectado = Object.values(porTarjeta).reduce((sum, t) => sum + t.monto_cuotas, 0);
-
-  res.json({
-    success: true,
-    data: {
-      total_proyectado: totalProyectado,
-      por_tarjeta: Object.values(porTarjeta)
     }
   });
 });
@@ -1088,13 +916,10 @@ app.listen(PORT, () => {
   console.log('  GET  /api/v1/tarjetas');
   console.log('  GET  /api/v1/movimientos');
   console.log('  GET  /api/v1/resumenes');
-  console.log('  GET  /api/v1/cuotas/activas');
-  console.log('  GET  /api/v1/cuotas/proyeccion');
   console.log('  GET  /api/v1/alertas');
   console.log('  POST /api/v1/resumenes/upload');
   console.log('  GET  /api/v1/dashboard/resumen');
   console.log('  GET  /api/v1/proyecciones/graficos');
-  console.log('  GET  /api/v1/proyecciones/proximo-mes');
   console.log('  --- Reglas y Nombres ---');
   console.log('  GET  /api/v1/reglas');
   console.log('  POST /api/v1/reglas');
