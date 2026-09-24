@@ -3,6 +3,8 @@
  * Maneja la persistencia de datos en localStorage
  */
 
+import { asignarIds } from './series.js';
+
 const STORAGE_KEYS = {
   RESUMENES: 'tarjetas_resumenes',
   MOVIMIENTOS: 'tarjetas_movimientos',
@@ -10,10 +12,17 @@ const STORAGE_KEYS = {
   TARJETAS: 'tarjetas_lista',
   CONFIG: 'tarjetas_config',
   CONSUMOS_LIVE: 'tarjetas_consumos_live',
+  // Cambios manuales del tipo de gasto: [{mov_id, tipo, desde, creado, tipo_previo}]
+  TIPO_OVERRIDES: 'tarjetas_tipo_overrides',
+  // Respuestas a las preguntas de gastos fijos: [{tipo, mov_id, prev_id?, periodo, creado}]
+  DECISIONES_FIJOS: 'tarjetas_decisiones_fijos',
+  // Cuántas veces el usuario corrigió al detector (tasa de error real)
+  METRICAS_DETECTOR: 'tarjetas_metricas_detector',
   VERSION: 'tarjetas_version'
 };
 
-const CURRENT_VERSION = '1.1.0'; // Incrementado para migración de tarjetas en movimientos
+// 1.1.0: tarjeta en cada movimiento. 1.2.0: ID hash (SHA-256) por movimiento.
+const CURRENT_VERSION = '1.2.0';
 
 class StorageService {
   constructor() {
@@ -55,9 +64,13 @@ class StorageService {
     });
 
     if (migrados > 0) {
-      this.setItem(STORAGE_KEYS.MOVIMIENTOS, movimientosActualizados);
       console.log(`[Storage] Migrados ${migrados} movimientos con tarjeta faltante`);
     }
+
+    // Migración 1.2.0: el ID posicional ('<resumen>-<idx>') pasa a ser la huella
+    // SHA-256 del contenido. Así re-subir un resumen conserva los IDs y los cambios
+    // manuales de tipo que apuntan a ellos.
+    this.setItem(STORAGE_KEYS.MOVIMIENTOS, conIdsHash(movimientosActualizados));
   }
 
   /**
@@ -151,13 +164,13 @@ class StorageService {
     // Eliminar movimientos anteriores de este resumen
     const filtrados = todosMovimientos.filter(m => m.resumen_id !== resumenId);
 
-    // Agregar nuevos movimientos con el resumen_id y tarjeta
-    const nuevos = movimientos.map((m, idx) => ({
+    // Agregar nuevos movimientos con el resumen_id, tarjeta e ID hash (SHA-256 del
+    // contenido: el mismo resumen subido dos veces genera los mismos IDs).
+    const nuevos = asignarIds(movimientos.map(m => ({
       ...m,
-      id: `${resumenId}-${idx}`,
       resumen_id: resumenId,
       tarjeta: m.tarjeta || tarjeta // Usar la tarjeta del movimiento o la inferida
-    }));
+    })), resumenId);
 
     return this.setItem(STORAGE_KEYS.MOVIMIENTOS, [...filtrados, ...nuevos]);
   }
@@ -222,6 +235,45 @@ class StorageService {
   deleteRegla(id) {
     const reglas = this.getReglas().filter(r => r.id !== id);
     return this.setItem(STORAGE_KEYS.REGLAS, reglas);
+  }
+
+  // ==================== TIPO DE GASTO (fijo / variable) ====================
+
+  getTipoOverrides() {
+    return this.getItem(STORAGE_KEYS.TIPO_OVERRIDES, []);
+  }
+
+  /**
+   * Guarda un cambio manual de tipo. Reemplaza uno previo sobre el mismo
+   * movimiento; los hechos sobre otros meses de la serie se conservan (cada uno
+   * vale desde su propio resumen hacia adelante).
+   */
+  saveTipoOverride(override) {
+    const lista = this.getTipoOverrides().filter(o => o.mov_id !== override.mov_id);
+    lista.push({ ...override, creado: new Date().toISOString() });
+    return this.setItem(STORAGE_KEYS.TIPO_OVERRIDES, lista);
+  }
+
+  getDecisionesFijos() {
+    return this.getItem(STORAGE_KEYS.DECISIONES_FIJOS, []);
+  }
+
+  saveDecisionFijo(decision) {
+    const lista = this.getDecisionesFijos();
+    lista.push({ ...decision, creado: new Date().toISOString() });
+    return this.setItem(STORAGE_KEYS.DECISIONES_FIJOS, lista);
+  }
+
+  getMetricasDetector() {
+    return this.getItem(STORAGE_KEYS.METRICAS_DETECTOR,
+      { correcciones: 0, a_fijo: 0, a_variable: 0, preguntas_respondidas: 0 });
+  }
+
+  /** Suma 1 a un contador de la métrica del detector. */
+  registrarMetrica(campo) {
+    const m = this.getMetricasDetector();
+    m[campo] = (m[campo] || 0) + 1;
+    return this.setItem(STORAGE_KEYS.METRICAS_DETECTOR, m);
   }
 
   // ==================== CONFIGURACIÓN ====================
@@ -290,6 +342,9 @@ class StorageService {
         tarjetas: this.getTarjetas(),
         reglas: this.getReglas(),
         consumosLive: this.getConsumosLive(),
+        tipoOverrides: this.getTipoOverrides(),
+        decisionesFijos: this.getDecisionesFijos(),
+        metricasDetector: this.getMetricasDetector(),
         config: this.getConfig()
       }
     };
@@ -304,7 +359,10 @@ class StorageService {
         throw new Error('Formato de datos inválido');
       }
 
-      const { resumenes, movimientos, tarjetas, reglas, consumosLive, config } = data.data;
+      const { resumenes, tarjetas, reglas, consumosLive, config,
+              tipoOverrides, decisionesFijos, metricasDetector } = data.data;
+      // Backups viejos traen IDs posicionales: se normalizan al ID hash.
+      const movimientos = data.data.movimientos ? conIdsHash(data.data.movimientos) : data.data.movimientos;
 
       if (merge) {
         // Merge: combinar con datos existentes
@@ -341,6 +399,19 @@ class StorageService {
           this.setItem(STORAGE_KEYS.CONSUMOS_LIVE, [...existingConsumos, ...newConsumos]);
         }
 
+        // Merge cambios de tipo y respuestas (dedup por movimiento / por respuesta)
+        if (tipoOverrides) {
+          const existentes = this.getTipoOverrides();
+          const ids = new Set(existentes.map(o => o.mov_id));
+          this.setItem(STORAGE_KEYS.TIPO_OVERRIDES, [...existentes, ...tipoOverrides.filter(o => !ids.has(o.mov_id))]);
+        }
+        if (decisionesFijos) {
+          const existentes = this.getDecisionesFijos();
+          const clave = d => `${d.tipo}|${d.mov_id}|${d.periodo || ''}`;
+          const claves = new Set(existentes.map(clave));
+          this.setItem(STORAGE_KEYS.DECISIONES_FIJOS, [...existentes, ...decisionesFijos.filter(d => !claves.has(clave(d)))]);
+        }
+
       } else {
         // Replace: reemplazar todo
         if (resumenes) this.setItem(STORAGE_KEYS.RESUMENES, resumenes);
@@ -348,6 +419,9 @@ class StorageService {
         if (tarjetas) this.setItem(STORAGE_KEYS.TARJETAS, tarjetas);
         if (reglas) this.setItem(STORAGE_KEYS.REGLAS, reglas);
         if (consumosLive) this.setItem(STORAGE_KEYS.CONSUMOS_LIVE, consumosLive);
+        if (tipoOverrides) this.setItem(STORAGE_KEYS.TIPO_OVERRIDES, tipoOverrides);
+        if (decisionesFijos) this.setItem(STORAGE_KEYS.DECISIONES_FIJOS, decisionesFijos);
+        if (metricasDetector) this.setItem(STORAGE_KEYS.METRICAS_DETECTOR, metricasDetector);
         if (config) this.setItem(STORAGE_KEYS.CONFIG, config);
       }
 
@@ -455,6 +529,16 @@ class StorageService {
 
     return resultado;
   }
+}
+
+/** Re-asigna IDs hash agrupando por resumen (idempotente: el ID es la huella del contenido). */
+function conIdsHash(movimientos = []) {
+  const porResumen = {};
+  movimientos.forEach(m => {
+    const k = m.resumen_id || '';
+    (porResumen[k] = porResumen[k] || []).push(m);
+  });
+  return Object.entries(porResumen).flatMap(([rid, ms]) => asignarIds(ms, rid));
 }
 
 // Singleton

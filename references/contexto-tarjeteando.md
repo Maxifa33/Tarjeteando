@@ -29,7 +29,12 @@ tarjetas-proyecto/
 │   │   ├── App.jsx               ← monolítico, ~3553 líneas, TODOS los componentes
 │   │   ├── index.css             ← CSS variables, temas claro/oscuro
 │   │   └── services/
-│   │       └── storage.js        ← ~422 líneas, helpers localStorage
+│   │       ├── storage.js        ← helpers localStorage (+ migración a ID hash)
+│   │       ├── series.js         ← IDs SHA-256, cadenas de gastos, fijos, overrides, preguntas
+│   │       ├── series.test.js    ← tests de series (incluye regresión sobre las fixtures)
+│   │       ├── cuotas.js         ← calculadora de cuotas
+│   │       └── consumos-parser.js
+│   │   └── novedades.js          ← APP_VERSION, NOVEDADES por versión y GUIA (mini manual)
 │   ├── package.json
 │   └── .env.local                ← VITE_API_URL
 ├── Backend/
@@ -159,9 +164,12 @@ getTarjetaColor(nombre)  // usa TARJETA_COLORS o hash del nombre
 getCardTheme(banco)      // usa BANK_THEMES por banco
 parseFechaLocal(str)     // 'YYYY-MM-DD' → Date LOCAL (nunca new Date(str): eso es UTC)
 mesKeyDeFecha(str)       // → 'YYYY-MM' del mes calendario local
-mediana(valores)         // usada por el detector de gastos fijos
-analizarGastosFijosVariables(movimientos, resumenes) // detecta gastos recurrentes ARS y USD
+esGastoFijo(mov, gastosFijos) // gastosFijos = Set de IDs de movimiento (no de nombres)
 calcularTotalesGastos(movs, gastosFijos, cotizacionVenta) // pesifica los USD
+// Gastos fijos: ver services/series.js (sección 6b). Handlers en App:
+// guardarEdicionDescripcion(mov, nombre)  → regla por clave de comercio + fetchData()
+// cambiarTipoGasto(mov, 'fijo'|'variable') → override desde el período del mov
+// responderPreguntaFijo(pregunta, 'mismo'|'otro'|'baja'|'sigue'|'omitir')
 ```
 
 ### DashboardView — props
@@ -207,7 +215,10 @@ const STORAGE_KEYS = {
   TARJETAS:   'tarjetas_lista',       // array de tarjetas
   CONFIG:     'tarjetas_config',      // { theme, apiKey }
   CONSUMOS_LIVE: 'tarjetas_consumos_live', // ConsumoLive[] — consumos pre-resumen (XLSX)
-  VERSION:    'tarjetas_version'      // '1.1.0'
+  TIPO_OVERRIDES: 'tarjetas_tipo_overrides',   // [{mov_id, tipo, desde:'YYYY-MM', tipo_previo, origen_previo, creado}]
+  DECISIONES_FIJOS: 'tarjetas_decisiones_fijos', // [{tipo:'enlace'|'no_enlace'|'baja'|'sigue'|'omitida'|'respondida', mov_id, prev_id?, periodo?, creado}]
+  METRICAS_DETECTOR: 'tarjetas_metricas_detector', // {correcciones, a_fijo, a_variable, preguntas_respondidas}
+  VERSION:    'tarjetas_version'      // '1.2.0' (1.2.0 = migración a ID hash)
 };
 // Keys externas (manejadas fuera de storage.js):
 // 'cotizacion_cache'     → {venta, compra, nombre, fechaActualizacion, cachedAt}
@@ -215,6 +226,7 @@ const STORAGE_KEYS = {
 // 'theme'               → 'dark'|'light'
 // 'nombresTarjetas'     → {[nombre]: alias}
 // 'dashboard_card_order' → string[] — orden manual de las stat cards del Dashboard
+// 'novedades_version_vista' → APP_VERSION cuyo modal de Novedades ya se mostró
 ```
 
 ### Métodos principales
@@ -239,7 +251,13 @@ storage.getEvolucionMensual(meses=6)            // evolución mensual pesos, ven
 storage.getConsumosLive()                       // → ConsumoLive[]
 storage.saveConsumosLive(nuevos)                // merge por id (dedup hash), no duplica
 storage.deleteConsumosLive(tarjeta?)            // borra de una tarjeta o todos
+storage.getTipoOverrides() / saveTipoOverride(o) // cambios manuales Fijo/Variable (uno por mov_id)
+storage.getDecisionesFijos() / saveDecisionFijo(d) // respuestas a las preguntas de fijos
+storage.getMetricasDetector() / registrarMetrica(campo) // tasa de corrección del detector
 ```
+
+`saveMovimientos` asigna el ID con `asignarIds()` de series.js. Overrides, decisiones y
+métricas van en `exportAll()`/`importAll()`; `importAll` normaliza backups viejos al ID hash.
 
 **Consumos live (`tarjetas_consumos_live`)** están incluidos en `exportAll()` (key `consumosLive`), `importAll()` (merge por id) y `clearAll()`.
 
@@ -403,7 +421,7 @@ async procesarArchivo(buffer, filename, mimetype)  // → mismo formato que pdfP
 ### Movimiento (localStorage key: `tarjetas_movimientos`)
 ```typescript
 {
-  id: string;                  // `${resumen_id}-${idx}`
+  id: string;                  // 'mv_' + 24 hex de SHA-256(resumen_id|fecha|ref_original|cuota|pesos|usd#n)
   resumen_id: string;          // `${tarjeta}-${anio}-${mes}`
   tarjeta: string;
   mes_resumen: number;
@@ -473,6 +491,7 @@ async procesarArchivo(buffer, filename, mimetype)  // → mismo formato que pdfP
   fecha_creacion: string;
   veces_usado: number;
   es_exacta?: boolean;
+  es_clave?: boolean;          // patron = claveComercio(referencia_original); la crea el usuario al renombrar
 }
 ```
 
@@ -571,20 +590,22 @@ Todo el `db` está en RAM. Railway reinicia el servidor → hay que volver a sub
 ### 6. Cotización `null` no rompe nada
 Si `cotizacion === null`, el badge no se muestra y el equivalente ARS en `CreditCardVisual` tampoco. No hay error.
 
-### 6b. Gastos fijos: criterio nuevo (no es varianza < 5%)
-El criterio viejo exigía variación ≤5% contra el promedio y solo miraba `monto_pesos`: con inflación argentina un único ajuste de precio lo tiraba afuera, y **todas las suscripciones en USD quedaban excluidas** porque su monto en pesos es 0. Resultado real: detectaba 1 solo gasto (Zurich).
+### 6b. Gastos fijos: series encadenadas por ID (services/series.js)
+**Bug que lo motivó (24/09/2026):** renombrar un fijo lo pasaba a variable. El detector
+agrupaba por `referencia_limpia` (el nombre visible), la edición solo renombraba los
+movimientos con `referencia_original` idéntica (Apple/Netflix/Claude traen un código de
+factura distinto cada mes) y el Set de fijos (nombres) no se recalculaba.
 
-Criterio actual (`analizarGastosFijosVariables`):
-- una serie por **comercio + moneda + tarjeta** (mezclar tarjetas contaminaba variación y presencia);
-- el mes de cada cargo es el **período del resumen**, no `fecha_compra`;
-- se **excluyen las compras en cuotas** (son deuda, ya viven en CuotasView);
-- valor del mes = **cargo más chico** (el piso recurrente, aislado de compras sueltas);
-- estabilidad = **mediana de la variación mes a mes** (tolera inflación), umbral 10% fijo / 25% recurrente;
-- señal alternativa: un importe repetido en ≥60% de los meses ⇒ fijo (caso Apple 4,99);
-- **presencia** ≥ 0.6 = meses con cargo / resúmenes de esa tarjeta desde el primer cargo;
-- si dejó de aparecer hace ≥2 resúmenes ⇒ `finalizado` (fuera del Set).
+Modelo actual (tomado de Bitcoin, solo hash + encadenamiento):
+- **ID de movimiento** = `mv_` + SHA-256 del contenido (`asignarIds`). Re-subir un resumen da los mismos IDs.
+- **claveComercio(referencia_original)**: descripción sin códigos variables (tokens con dígitos 5+, numéricos 3+, mayúsc/minúsc mezcladas 6+, 7+ letras con ≤1 vocal). `'APPLE.COM/BILL MVGLV3QHY'` → `'apple com bill'`.
+- **Cadena (serie)**: por comercio+moneda+tarjeta, cada cargo se engancha al de la cadena abierta más parecido si está a **±25% del eslabón ANTERIOR** (la inflación no la corta); puede saltear hasta 2 resúmenes. Cada movimiento sabe su `serie_id` y `prev_id`. Así Apple 4,99 (suscripción) y las compras sueltas en Apple son cadenas distintas.
+- **Clasificación por cadena**: ≥3 meses, presencia ≥0.6, importe repetido ≥60% o variación mediana ≤10% (fijo) / ≤25% (recurrente). Si el comercio tiene >1,5 compras/mes o es un rubro de consumo (combustible, apps de viaje, súper, delivery, peajes: `RUBROS_DE_CONSUMO`), solo cuenta el importe repetido. Sin cargo 2 resúmenes seguidos ⇒ `finalizado`.
+- **Override manual** (desplegable de la columna Tipo): vale desde el período de ese movimiento hacia adelante para toda su serie; gana el `desde` más reciente ≤ período. El detector ya no toca esos meses.
+- **Preguntas** (`preguntasPendientes`): fijo ausente en el último resumen de su tarjeta. Con cargo del mismo comercio fuera de rango ⇒ "¿es el mismo?" (1 o 2 resúmenes de ausencia); sin cargo ⇒ "¿lo diste de baja?" (solo en la 1ª ausencia). Respuestas en `tarjetas_decisiones_fijos`; si no responde, la regla automática decide.
+- **Renombrar** crea una regla `es_clave` y aplica a todos los movimientos de esa clave; no afecta el tipo.
 
-Medido sobre las 40 fixtures reales: pasa de 1 a **8 detectados** (Zurich, Federación Patronal, Club Independiente, Personal, Swiss Medical, Claude AI USD, Netflix USD, Apple USD).
+Sobre las fixtures: Zurich, Federación Patronal, Personal, Swiss Medical, Claude AI, Netflix, Apple 4,99 y Apple 9,99 (USD). Club Independiente genera la pregunta de aumento ($32.000 → $68.000). Sin falsos fijos de YPF/DiDi/Rappi.
 
 ### 6c. Marcadores de fila Galicia: solo `*` y `K`
 El regex era `([*KVEU]?)` y se comía la primera letra de comercios que empiezan con V/E/U: `VENTI TICKETS`→`ENTI TICKETS`, `VITAL SUPERMAYORISTA`→`ITAL...`, `EXPRESS SAN MARTIN`→`XPRESS...`. Las reglas `ital\s*super` y `carpuride` de `cargarReglasLimpieza` eran parches de ese bug. Ahora es `([*K]?)`: si V/E/U eran marcador real quedan como prefijo y las reglas los absorben por substring (`VTemu.com`→`Temu`).
@@ -599,6 +620,16 @@ Una en el consolidado de la página 1 y otra al cierre del detalle. El `while` a
 `id = "${tarjeta}-${anio}-${mes}"` — si se importa el mismo resumen dos veces, se sobreescribe (upsert). Los movimientos también se reemplazan.
 
 ---
+
+## Cambios recientes (24/09/2026) — series de gastos fijos, Tipo editable, Novedades y Guía
+Rama `feat/series-gastos-fijos`.
+- Fix: renombrar un fijo lo pasaba a variable (ver 6b).
+- ID SHA-256 por movimiento + cadenas de suscripción (`services/series.js`). Migración de localStorage a 1.2.0.
+- Columna Tipo en Movimientos: desplegable Fijo/Variable (`TipoGastoSelector`, menú en portal).
+- `PreguntasFijosCard` en Dashboard y en Importar tras subir resúmenes.
+- `NovedadesModal` (una vez por versión) y vista `Guía` en el menú. Contenido en `Frontend/src/novedades.js`.
+- **Regla de trabajo:** cada feature que cambie el uso de la app sube `APP_VERSION`, agrega su entrada en `NOVEDADES` y actualiza `GUIA`.
+- No hace falta volver a subir resúmenes: la migración re-identifica los movimientos guardados.
 
 ## Cambios recientes (04/09/2026) — auditoría de parsing y cuotas
 
@@ -684,7 +715,7 @@ endpoints lo consumía el frontend (solo usa `/resumenes/upload`, `/reglas`,
 ## Tests
 
 ```bash
-cd Frontend && npm test    # calculadora de cuotas (node:test, 19 tests, sin deps)
+cd Frontend && npm test    # cuotas + series de gastos fijos (node:test, 50 tests, sin deps; usa las fixtures si están)
 cd Backend  && npm test    # parser + regresión sobre los 40 PDFs reales (jest)
 ```
 

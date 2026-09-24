@@ -101,6 +101,19 @@ Para otros bancos, el backend usa Claude Vision API como fallback automático (r
 
 ---
 
+## Cambios recientes (24/09/2026) — series de gastos fijos, Tipo editable, Novedades y Guía
+
+Detalle en `references/contexto-tarjeteando.md` (sección 6b).
+
+- **Bug:** renombrar un gasto fijo lo pasaba a variable. Ahora el tipo se calcula por **ID de movimiento** (SHA-256 del contenido) y **cadenas de suscripción** (cada cargo apunta al anterior, ±25% contra el mes previo). Todo en `Frontend/src/services/series.js`.
+- Renombrar crea una regla por **clave de comercio** (`es_clave`): el nombre se aplica a todos los meses; no toca el tipo.
+- **Columna Tipo** en Movimientos: desplegable Fijo/Variable. Vale desde ese resumen en adelante y el detector no lo vuelve a tocar.
+- **Preguntas** tras importar si un fijo falta o cambió mucho de precio (una tarjeta, un toque). Sin respuesta, decide la regla automática.
+- **Novedades** (modal una vez por versión) y **Guía** (menú). **Regla:** toda feature que cambie el uso de la app sube `APP_VERSION` y actualiza `NOVEDADES` y `GUIA` en `Frontend/src/novedades.js`.
+- localStorage 1.2.0: migra los IDs posicionales a ID hash automáticamente. Keys nuevas: `tarjetas_tipo_overrides`, `tarjetas_decisiones_fijos`, `tarjetas_metricas_detector`, `novedades_version_vista`.
+
+---
+
 ## Cambios recientes (14/09/2026) — vista Cuotas: solo lo que está en curso
 
 Cada plan tiene ahora un `estado` (`vigente` / `ultima_cuota` / `terminada` / `interrumpida`)

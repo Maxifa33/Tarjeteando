@@ -1,6 +1,17 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import storage from './services/storage';
 import { parseConsumosFile, categorizarConsumo } from './services/consumos-parser';
+import { APP_VERSION, NOVEDADES, GUIA } from './novedades';
+import {
+  construirCadenas,
+  aplicarOverrides,
+  resumenFijos,
+  preguntasPendientes,
+  claveComercio,
+  regexDeClave,
+  periodoDeMovimiento
+} from './services/series';
 import {
   construirPlanes,
   proyectarCuotas,
@@ -14,7 +25,8 @@ import {
   Sun, Moon, Bell, Settings, Search, X, DollarSign,
   PieChart, BarChart3, Wallet, ArrowUpRight, ArrowDownRight,
   FileText, Clock, CheckCircle, XCircle, Sparkles, Trophy, Filter,
-  RefreshCcw, Trash2, Download, Edit3, Plus, Repeat, Shuffle, Zap, Eye, EyeOff, GripVertical
+  RefreshCcw, Trash2, Download, Edit3, Plus, Repeat, Shuffle, Zap, Eye, EyeOff, GripVertical,
+  ChevronDown, BookOpen, HelpCircle
 } from 'lucide-react';
 import {
   LineChart, Line, AreaChart, Area, BarChart, Bar, PieChart as RechartsPie, Pie, Cell,
@@ -274,181 +286,13 @@ const formatMontoDolares = (value) => {
 };
 
 // ==================== GASTOS FIJOS/VARIABLES ====================
-// Analiza movimientos para detectar gastos fijos (recurrentes mensuales con monto similar)
-// Criterio: mismo comercio aparece 3+ meses con variación de monto <= 5%
-// Mediana de una lista de numeros.
-const mediana = (valores) => {
-  if (!valores.length) return 0;
-  const orden = [...valores].sort((a, b) => a - b);
-  const mitad = Math.floor(orden.length / 2);
-  return orden.length % 2 ? orden[mitad] : (orden[mitad - 1] + orden[mitad]) / 2;
-};
-
-const mesAIndice = (mesKey) => {
-  const [a, m] = String(mesKey).split('-').map(Number);
-  return a * 12 + (m - 1);
-};
-
-/**
- * Detecta gastos fijos / recurrentes.
- *
- * Criterio anterior (roto): exigia variacion <= 5% respecto del promedio y solo
- * miraba `monto_pesos`. Con inflacion argentina un solo ajuste de precio tiraba la
- * variacion por encima del 5%, y todas las suscripciones en dolares (Netflix, Apple,
- * Anthropic, PlayStation) quedaban afuera porque su monto en pesos es 0.
- *
- * Criterio nuevo:
- *  - Se analiza una serie por comercio Y moneda (ARS y USD por separado).
- *  - El mes de cada cargo es el PERIODO DEL RESUMEN, no la fecha de compra: un
- *    resumen = un bucket, sin corrimientos por el dia del mes.
- *  - Se excluyen las compras en cuotas: son deuda, no gasto recurrente, y ya viven
- *    en la vista Cuotas.
- *  - Estabilidad = MEDIANA de la variacion mes a mes (no la desviacion contra el
- *    promedio): tolera los ajustes por inflacion sin tolerar montos erraticos.
- *  - Presencia = meses con cargo / meses con resumen desde el primer cargo. Filtra
- *    los comercios que aparecen salteado.
- */
-const analizarGastosFijosVariables = (movimientos, resumenes = []) => {
-  const vacio = { gastosFijos: new Set(), analisis: {}, resumenMensual: { ars: 0, usd: 0, items: [] } };
-  if (!movimientos || movimientos.length === 0) return vacio;
-
-  const mesDeResumen = (r) => (r && r.anio && r.mes)
-    ? `${r.anio}-${String(r.mes).padStart(2, '0')}`
-    : null;
-
-  // Periodo de cada resumen y meses con resumen por tarjeta
-  const periodoPorResumen = {};
-  const mesesPorTarjeta = {};
-  (resumenes || []).forEach(r => {
-    const mk = mesDeResumen(r);
-    if (!mk) return;
-    if (r.id) periodoPorResumen[r.id] = mk;
-    (mesesPorTarjeta[r.tarjeta] = mesesPorTarjeta[r.tarjeta] || new Set()).add(mk);
-  });
-
-  // series[nombre|moneda] = { nombre, moneda, meses: {mesKey: montoMaxDelMes}, tarjetas:Set }
-  const series = {};
-  movimientos.forEach(mov => {
-    // Las cuotas no son gasto recurrente: son una compra financiada.
-    if (mov.cuota_texto || mov.es_cuota) return;
-
-    const nombre = (mov.referencia_limpia || mov.referencia_original || '').toLowerCase().trim();
-    if (!nombre || nombre.length < 3) return;
-
-    // Preferir el periodo del resumen; si falta, caer a la fecha de compra.
-    const mesKey = periodoPorResumen[mov.resumen_id]
-      || (mov.anio_resumen && mov.mes_resumen
-            ? `${mov.anio_resumen}-${String(mov.mes_resumen).padStart(2, '0')}`
-            : mesKeyDeFecha(mov.fecha_compra));
-    if (!mesKey) return;
-
-    [['ARS', mov.monto_pesos || 0], ['USD', mov.monto_dolares || 0]].forEach(([moneda, monto]) => {
-      if (monto <= 0) return; // devoluciones y la moneda que no aplica
-      // Una serie por comercio + moneda + TARJETA. Mezclar tarjetas contaminaba la
-      // serie: el mismo comercio en otra tarjeta (con otros importes y otro calendario
-      // de resumenes) rompia tanto la variacion como el calculo de presencia.
-      const clave = `${nombre}|${moneda}|${mov.tarjeta}`;
-      const serie = series[clave] || (series[clave] = { nombre, moneda, tarjeta: mov.tarjeta, meses: {} });
-      // Cargo MAS CHICO del mes: es el piso recurrente (la suscripcion), aislado de
-      // las compras sueltas que se hagan en el mismo comercio. Medido sobre las
-      // fixtures reales, separa mucho mejor lo fijo de lo variable que tomar el maximo.
-      if (serie.meses[mesKey] === undefined || serie.meses[mesKey] > monto) serie.meses[mesKey] = monto;
-    });
-  });
-
-  const MIN_MESES = 3;
-  const MIN_PRESENCIA = 0.6;
-  const UMBRAL_FIJO = 10;        // % de variacion tipica mes a mes
-  const UMBRAL_RECURRENTE = 25;  // % — tolera ajustes por inflacion
-
-  const gastosFijos = new Set();
-  const analisis = {};
-  const items = [];
-
-  Object.entries(series).forEach(([clave, serie]) => {
-    const meses = Object.keys(serie.meses).sort();
-    const valores = meses.map(m => serie.meses[m]);
-    const base = { moneda: serie.moneda, meses: meses.length, tarjeta: serie.tarjeta };
-
-    if (meses.length < MIN_MESES) {
-      analisis[clave] = { ...base, tipo: 'variable', razon: `solo ${meses.length} mes(es) con cargo` };
-      return;
-    }
-
-    // Tarjeta principal del comercio = donde mas veces se cobro. La ventana de
-    // presencia es SU calendario de resumenes: unir el de todas las tarjetas inflaba
-    // el denominador (una suscripcion que solo se cobra en la VISA quedaba castigada
-    // por los resumenes de la Mastercard).
-    // Ventana = resumenes de esa tarjeta desde el primer cargo del comercio.
-    // Asi los meses sin resumen cargado no cuentan como ausencia.
-    const mesesDisponibles = mesesPorTarjeta[serie.tarjeta] || new Set();
-    const desde = mesAIndice(meses[0]);
-    const ventana = [...mesesDisponibles].filter(m => mesAIndice(m) >= desde);
-    const presencia = ventana.length ? Math.min(1, meses.length / ventana.length) : 1;
-
-    if (presencia < MIN_PRESENCIA) {
-      analisis[clave] = { ...base, tipo: 'variable', presencia,
-        razon: `aparece en ${meses.length} de ${ventana.length} resúmenes de ${serie.tarjeta}` };
-      return;
-    }
-
-    // Ultimo resumen disponible: si el gasto dejo de aparecer hace 2+ meses, se dio de baja.
-    const ultimoMesConCargo = meses[meses.length - 1];
-    const ultimoDisponible = ventana.length ? Math.max(...ventana.map(mesAIndice)) : mesAIndice(ultimoMesConCargo);
-    if (ultimoDisponible - mesAIndice(ultimoMesConCargo) >= 2) {
-      analisis[clave] = { ...base, tipo: 'finalizado', presencia, ultimoMes: ultimoMesConCargo,
-        razon: `sin cargos desde ${ultimoMesConCargo}` };
-      return;
-    }
-
-    const cambios = [];
-    for (let i = 1; i < valores.length; i++) {
-      if (valores[i - 1] > 0) cambios.push(Math.abs(valores[i] - valores[i - 1]) / valores[i - 1]);
-    }
-    const variacionTipica = mediana(cambios) * 100;
-    const montoTipico = mediana(valores);
-    const montoActual = valores[valores.length - 1];
-
-    // Segunda senal, independiente de la variacion: un importe que se repite identico
-    // mes a mes es la huella mas clara de una suscripcion, aunque el comercio tenga
-    // ademas otros cargos (Apple: 4,99 todos los meses + compras sueltas).
-    const conteos = {};
-    valores.forEach(v => { const k = v.toFixed(2); conteos[k] = (conteos[k] || 0) + 1; });
-    const repeticion = Math.max(...Object.values(conteos)) / valores.length;
-
-    let tipo = 'variable';
-    if (variacionTipica <= UMBRAL_FIJO || repeticion >= 0.6) tipo = 'fijo';
-    else if (variacionTipica <= UMBRAL_RECURRENTE) tipo = 'recurrente';
-
-    analisis[clave] = { ...base, tipo, presencia, montoTipico, montoActual,
-      variacion: variacionTipica.toFixed(1) + '%',
-      repeticion: (repeticion * 100).toFixed(0) + '%',
-      razon: tipo === 'variable'
-        ? `variación típica ${variacionTipica.toFixed(1)}% > ${UMBRAL_RECURRENTE}% y sin importe repetido`
-        : null };
-
-    if (tipo === 'fijo' || tipo === 'recurrente') {
-      gastosFijos.add(serie.nombre);
-      items.push({ nombre: serie.nombre, moneda: serie.moneda, tipo, montoActual, montoTipico,
-        meses: meses.length, variacion: variacionTipica, tarjeta: serie.tarjeta });
-    }
-  });
-
-  // Cuanto compromete por mes el conjunto de gastos fijos, separado por moneda.
-  const resumenMensual = {
-    ars: items.filter(i => i.moneda === 'ARS').reduce((s, i) => s + i.montoTipico, 0),
-    usd: items.filter(i => i.moneda === 'USD').reduce((s, i) => s + i.montoTipico, 0),
-    items: items.sort((a, b) => b.montoTipico - a.montoTipico)
-  };
-
-  return { gastosFijos, analisis, resumenMensual };
-};
-
-// Función para determinar si un movimiento es gasto fijo
+// La detección vive en services/series.js (testeada con `npm test`): cada movimiento
+// tiene un ID hash y cada gasto recurrente es una CADENA de cargos (serie). El tipo
+// de cada movimiento se calcula por ID, así que renombrar un comercio no lo cambia.
+// `gastosFijos` es un Set con los IDs de los movimientos fijos (automáticos o manuales).
 const esGastoFijo = (mov, gastosFijos) => {
-  if (!gastosFijos || gastosFijos.size === 0) return false;
-  const nombre = (mov.referencia_limpia || mov.referencia_original || '').toLowerCase().trim();
-  return gastosFijos.has(nombre);
+  if (!gastosFijos || gastosFijos.size === 0 || !mov?.id) return false;
+  return gastosFijos.has(mov.id);
 };
 
 // Calcular totales de gastos fijos y variables
@@ -1318,7 +1162,22 @@ const App = () => {
     return !localStorage.getItem('onboarding_completed');
   });
 
+  // Novedades: una vez por versión. Quien recién instala ya ve el onboarding, así
+  // que no se le muestran novedades de algo que nunca usó.
+  const [mostrarNovedades, setMostrarNovedades] = useState(() => {
+    try {
+      if (!localStorage.getItem('onboarding_completed')) return false;
+      return localStorage.getItem('novedades_version_vista') !== APP_VERSION;
+    } catch { return false; }
+  });
+  const cerrarNovedades = (irAGuia = false) => {
+    try { localStorage.setItem('novedades_version_vista', APP_VERSION); } catch {}
+    setMostrarNovedades(false);
+    if (irAGuia) setActiveView('guia');
+  };
+
   const handleOnboardingComplete = () => {
+    try { localStorage.setItem('novedades_version_vista', APP_VERSION); } catch {}
     localStorage.setItem('onboarding_completed', 'true');
     setShowOnboarding(false);
     // Ir directamente a la vista de importar
@@ -1348,7 +1207,11 @@ const App = () => {
 
   // Estado para gastos fijos/variables (calculado de los movimientos)
   const [gastosFijos, setGastosFijos] = useState(new Set());
-  const [gastosFijosDetalle, setGastosFijosDetalle] = useState({ ars: 0, usd: 0, items: [], analisis: {} });
+  const [gastosFijosDetalle, setGastosFijosDetalle] = useState({ ars: 0, usd: 0, items: [] });
+  // Tipo de cada movimiento: { [mov.id]: { tipo: 'fijo'|'variable', origen: 'auto'|'manual' } }
+  const [tiposGasto, setTiposGasto] = useState({});
+  // Preguntas pendientes sobre gastos fijos que faltan en el último resumen
+  const [preguntasFijos, setPreguntasFijos] = useState([]);
 
   // Nombres personalizados de tarjetas (guardados en localStorage)
   const [nombresTarjetas, setNombresTarjetas] = useState(() => {
@@ -1386,45 +1249,97 @@ const App = () => {
     setConsumosLive(storage.getConsumosLive());
   };
 
-  // Función para guardar edición de descripción de movimiento
-  // Guarda como regla local y aplica a todos los movimientos con la misma referencia_original
-  const guardarEdicionDescripcion = async (referenciaOriginal, nombreLimpio) => {
+  // Renombrar un comercio. La regla se guarda por CLAVE DE COMERCIO (la descripción
+  // del banco sin los códigos que cambian cada mes), así el nombre nuevo se aplica a
+  // todos los meses —pasados y futuros— de ese comercio. El nombre es solo lo que se
+  // ve: el tipo fijo/variable se calcula por ID de movimiento y no cambia.
+  const guardarEdicionDescripcion = async (mov, nombreLimpio) => {
+    const clave = claveComercio(mov.referencia_original);
+    if (!clave) return;
 
-    // 1. Guardar como regla local en storage
-    const regla = {
-      patron: referenciaOriginal,
+    // 1. Reemplazar una regla previa de la misma clave (si la hay)
+    storage.getReglas()
+      .filter(r => r.es_clave && r.patron === clave)
+      .forEach(r => storage.deleteRegla(r.id));
+    storage.saveRegla({
+      patron: clave,
       nombre_limpio: nombreLimpio,
-      es_exacta: true, // Marca que es coincidencia exacta, no regex
+      es_clave: true,
+      referencia_original: mov.referencia_original,
       fecha_creacion: new Date().toISOString()
-    };
-    storage.saveRegla(regla);
-
-    // 2. Aplicar a todos los movimientos locales con la misma referencia_original
-    const movimientosActualizados = movimientos.map(m => {
-      if (m.referencia_original === referenciaOriginal) {
-        return { ...m, referencia_limpia: nombreLimpio };
-      }
-      return m;
     });
-    setMovimientos(movimientosActualizados);
 
-    // 3. Actualizar también en localStorage
-    storage.setItem('tarjetas_movimientos', movimientosActualizados);
+    // 2. Persistir el nombre en los movimientos de esa clave
+    const actualizados = storage.getMovimientos().map(m =>
+      claveComercio(m.referencia_original) === clave ? { ...m, referencia_limpia: nombreLimpio } : m
+    );
+    storage.setItem('tarjetas_movimientos', actualizados);
 
-    // 4. Sincronizar con backend para futuras importaciones
+    // 3. Recalcular todo (incluye gastos fijos) desde localStorage
+    await fetchData();
+
+    // 4. Sincronizar con backend para futuras importaciones (regex equivalente a la clave)
     try {
       await fetch(`${API_BASE}/reglas`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          patron: referenciaOriginal,
+          patron: regexDeClave(clave),
+          es_regex: true,
           nombre_limpio: nombreLimpio,
-          referencia_original: referenciaOriginal
+          referencia_original: mov.referencia_original
         })
       });
     } catch (e) {
       // Silently fail - backend sync is optional
     }
+  };
+
+  // Período ('YYYY-MM') del resumen de un movimiento.
+  const periodoDeMov = (mov) => {
+    const r = resumenes.find(x => x.id === mov.resumen_id);
+    return periodoDeMovimiento(mov, r ? { [r.id]: `${r.anio}-${String(r.mes).padStart(2, '0')}` } : {});
+  };
+
+  // Cambio manual del tipo de gasto. Vale desde el resumen de ese movimiento hacia
+  // adelante, para toda su serie, y el detector ya no lo toca. Para aplicarlo desde
+  // antes, el usuario lo cambia en un resumen anterior.
+  const cambiarTipoGasto = async (mov, tipo) => {
+    const actual = tiposGasto[mov.id];
+    if (actual?.tipo === tipo) return;
+    storage.saveTipoOverride({
+      mov_id: mov.id,
+      tipo,
+      desde: periodoDeMov(mov),
+      tipo_previo: actual?.tipo || 'variable',
+      origen_previo: actual?.origen || 'auto'
+    });
+    // Métrica: cada cambio sobre un tipo AUTOMÁTICO es un error del detector.
+    if (!actual || actual.origen === 'auto') {
+      storage.registrarMetrica('correcciones');
+      storage.registrarMetrica(tipo === 'fijo' ? 'a_fijo' : 'a_variable');
+    }
+    await fetchData();
+  };
+
+  // Respuesta a una pregunta sobre un gasto fijo que falta en el último resumen.
+  const responderPreguntaFijo = async (pregunta, respuesta) => {
+    const base = { mov_id: pregunta.ultimo.mov_id, periodo: pregunta.periodo };
+    if (respuesta === 'mismo') {
+      storage.saveDecisionFijo({ tipo: 'enlace', mov_id: pregunta.candidato.mov_id, prev_id: pregunta.ultimo.mov_id, periodo: pregunta.periodo });
+      storage.saveDecisionFijo({ tipo: 'respondida', ...base });
+    } else if (respuesta === 'otro') {
+      // No es el mismo: se prohíbe ese enlace; si sigue faltando, se pregunta si se dio de baja.
+      storage.saveDecisionFijo({ tipo: 'no_enlace', mov_id: pregunta.candidato.mov_id, prev_id: pregunta.ultimo.mov_id });
+    } else if (respuesta === 'baja') {
+      storage.saveDecisionFijo({ tipo: 'baja', ...base });
+    } else if (respuesta === 'sigue') {
+      storage.saveDecisionFijo({ tipo: 'sigue', ...base });
+    } else {
+      storage.saveDecisionFijo({ tipo: 'omitida', ...base });
+    }
+    if (respuesta !== 'omitir') storage.registrarMetrica('preguntas_respondidas');
+    await fetchData();
   };
 
   // Theme toggle
@@ -1488,9 +1403,21 @@ const App = () => {
 
       // Aplicar reglas locales a los movimientos
       if (reglasLocales.length > 0) {
+        // Reglas por clave de comercio (las crea el usuario al renombrar): valen para
+        // todos los meses, aunque el banco cambie el código de factura. Tienen
+        // prioridad sobre las reglas viejas; entre ellas gana la más reciente.
+        const reglasClave = reglasLocales
+          .filter(r => r.es_clave)
+          .sort((a, b) => String(b.fecha_creacion || '').localeCompare(String(a.fecha_creacion || '')));
         movimientosData = movimientosData.map(m => {
+          if (reglasClave.length) {
+            const clave = claveComercio(m.referencia_original);
+            const rc = clave && reglasClave.find(r => r.patron === clave);
+            if (rc) return { ...m, referencia_limpia: rc.nombre_limpio };
+          }
           // Buscar si hay una regla que coincida con la referencia_original
           const regla = reglasLocales.find(r => {
+            if (r.es_clave) return false;
             if (r.es_exacta) {
               // Coincidencia exacta
               return r.patron === m.referencia_original;
@@ -1613,11 +1540,15 @@ const App = () => {
       setResumenes(resumenesData);
       setCuotasActivas(cuotasFormateadas);
 
-      // Analizar gastos fijos vs variables
-      const { gastosFijos: fijosSet, resumenMensual: fijosResumen, analisis: fijosAnalisis } =
-        analizarGastosFijosVariables(movimientosData, resumenesData);
+      // Gastos fijos vs variables (services/series.js): cadenas por ID de movimiento,
+      // luego los cambios manuales del usuario (desde su resumen hacia adelante).
+      const decisionesFijos = storage.getDecisionesFijos();
+      const series = construirCadenas(movimientosData, resumenesData, decisionesFijos);
+      const { tipos, fijos: fijosSet } = aplicarOverrides(movimientosData, series, storage.getTipoOverrides());
       setGastosFijos(fijosSet);
-      setGastosFijosDetalle({ ...fijosResumen, analisis: fijosAnalisis });
+      setTiposGasto(tipos);
+      setGastosFijosDetalle(resumenFijos(series, tipos));
+      setPreguntasFijos(preguntasPendientes(series, tipos, resumenesData, decisionesFijos));
       // Calcular totales de cuotas pendientes
       const totalPendienteCuotas = totalPendiente(cuotasActivasData, cotizacionVenta);
 
@@ -1761,6 +1692,7 @@ const App = () => {
     { id: 'cuotas', icon: Calendar, label: 'Cuotas', badge: cuotasActivas.filter(c => c.estado === 'vigente').length },
     { id: 'reintegros', icon: RefreshCcw, label: 'Reintegros', badge: reintegrosRecientes.length > 0 ? reintegrosRecientes.length : null },
     { id: 'importar', icon: Upload, label: 'Importar' },
+    { id: 'guia', icon: BookOpen, label: 'Guía' },
   ];
   
   // Format currency (usa las funciones helper globales)
@@ -1886,6 +1818,8 @@ const App = () => {
               gastosFijosDetalle={gastosFijosDetalle}
               cotizacion={cotizacion}
               consumosLive={consumosLive}
+              preguntasFijos={preguntasFijos}
+              onResponderPregunta={responderPreguntaFijo}
               onFiltrarMovimientos={(tipo) => {
                 setFiltroTipoGastoInicial(tipo);
                 setActiveView('movimientos');
@@ -1899,6 +1833,7 @@ const App = () => {
               searchQuery={searchQuery}
               formatCurrency={formatCurrency}
               onEditarDescripcion={guardarEdicionDescripcion}
+              onCambiarTipo={cambiarTipoGasto}
               gastosFijos={gastosFijos}
               filtroTipoGastoInicial={filtroTipoGastoInicial}
             />
@@ -1924,11 +1859,15 @@ const App = () => {
               formatCurrency={formatCurrency}
               searchQuery={searchQuery}
             />
+          ) : activeView === 'guia' ? (
+            <GuiaView onVerNovedades={() => setMostrarNovedades(true)} />
           ) : activeView === 'importar' ? (
-            <ImportarView onSuccess={fetchData} />
+            <ImportarView onSuccess={fetchData} preguntasFijos={preguntasFijos} onResponderPregunta={responderPreguntaFijo} />
           ) : null}
         </div>
       </main>
+
+      {mostrarNovedades && <NovedadesModal onCerrar={cerrarNovedades} />}
 
       {/* Modal de Configuración - Fuera del flujo principal */}
       <SettingsModal
@@ -1951,10 +1890,191 @@ const App = () => {
   );
 };
 
+/**
+ * Preguntas sobre gastos fijos que faltan en el último resumen. Una sola tarjeta con
+ * todas juntas, un toque por respuesta. Si el usuario no responde, la app decide
+ * sola (sin cargo 2 resúmenes seguidos => finalizado).
+ */
+const PreguntasFijosCard = ({ preguntas = [], onResponder }) => {
+  const [enviando, setEnviando] = useState(null);
+  if (!preguntas.length || !onResponder) return null;
+
+  const monto = (valor, moneda) => moneda === 'USD' ? formatMontoDolares(valor) : formatMonto(valor);
+  const mesLabel = (periodo) => {
+    const [a, m] = String(periodo).split('-').map(Number);
+    return new Date(a, m - 1, 1).toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
+  };
+  const responder = async (p, respuesta) => {
+    setEnviando(p.id);
+    try { await onResponder(p, respuesta); } finally { setEnviando(null); }
+  };
+  const boton = (p, respuesta, label, primario = false) => (
+    <button
+      type="button"
+      disabled={enviando === p.id}
+      onClick={() => responder(p, respuesta)}
+      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${primario
+        ? 'bg-gradient-to-r from-[var(--accent-1)] to-[var(--accent-2)] text-white'
+        : 'bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--text-primary)] hover:border-[var(--accent-1)]'}`}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <div className="glass-card p-5 border-l-4 border-l-[var(--accent-1)]">
+      <div className="flex items-center gap-2 mb-3">
+        <HelpCircle className="w-5 h-5 text-[var(--accent-1)]" />
+        <h3 className="font-semibold text-[var(--text-primary)]">
+          Revisá {preguntas.length === 1 ? 'un gasto fijo' : `${preguntas.length} gastos fijos`}
+        </h3>
+      </div>
+      <div className="space-y-3">
+        {preguntas.map(p => (
+          <div key={p.id} className="flex flex-col md:flex-row md:items-center gap-3 p-3 rounded-xl bg-[var(--glass-bg)]">
+            <p className="flex-1 text-sm text-[var(--text-secondary)]">
+              {p.tipo === 'cambio_monto' ? (
+                <>
+                  <span className="font-semibold text-[var(--text-primary)]">{p.nombre}</span> pasó de{' '}
+                  {monto(p.ultimo.monto, p.moneda)} a <span className="font-semibold text-[var(--text-primary)]">
+                  {monto(p.candidato.monto, p.moneda)}</span> ({p.tarjeta}, {mesLabel(p.periodo)}). ¿Es el mismo gasto?
+                </>
+              ) : (
+                <>
+                  No encontramos <span className="font-semibold text-[var(--text-primary)]">{p.nombre}</span> en
+                  el resumen de {mesLabel(p.periodo)} ({p.tarjeta}). ¿Lo diste de baja?
+                </>
+              )}
+            </p>
+            <div className="flex items-center gap-2 shrink-0">
+              {p.tipo === 'cambio_monto' ? (
+                <>
+                  {boton(p, 'mismo', 'Sí, cambió el precio', true)}
+                  {boton(p, 'otro', 'No, es otro')}
+                </>
+              ) : (
+                <>
+                  {boton(p, 'baja', 'Sí, lo di de baja', true)}
+                  {boton(p, 'sigue', 'No, sigue')}
+                </>
+              )}
+              <button
+                type="button"
+                onClick={() => responder(p, 'omitir')}
+                className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                title="Omitir: la app decide sola"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// ==================== Novedades y Guía ====================
+const ICONOS_GUIA = { Upload, LayoutDashboard, Receipt, Repeat, Calendar, Zap, RefreshCcw, Settings };
+
+/** Modal que aparece una vez por versión con lo nuevo. Contenido en novedades.js. */
+const NovedadesModal = ({ onCerrar }) => {
+  const actual = NOVEDADES[0];
+  if (!actual) return null;
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[90] p-4" onClick={() => onCerrar(false)}>
+      <div className="glass-card w-full max-w-lg max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="p-6 border-b border-[var(--glass-border)] flex items-start justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-xl bg-gradient-to-br from-[var(--accent-1)] to-[var(--accent-2)]">
+              <Sparkles className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-wide text-[var(--text-muted)]">Novedades · {actual.fecha}</p>
+              <h3 className="text-lg font-semibold text-[var(--text-primary)]">{actual.titulo}</h3>
+            </div>
+          </div>
+          <button onClick={() => onCerrar(false)} className="p-2 rounded-lg hover:bg-[var(--glass-bg)]" title="Cerrar">
+            <X className="w-5 h-5 text-[var(--text-muted)]" />
+          </button>
+        </div>
+        <ul className="p-6 space-y-4">
+          {actual.puntos.map((p, i) => (
+            <li key={i} className="flex gap-3">
+              <CheckCircle className="w-5 h-5 shrink-0 mt-0.5 text-emerald-500" />
+              <div>
+                <p className="font-medium text-[var(--text-primary)]">{p.titulo}</p>
+                <p className="text-sm text-[var(--text-secondary)] mt-0.5">{p.texto}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
+        <div className="p-6 pt-0 flex flex-col sm:flex-row gap-2 sm:justify-end">
+          <button
+            onClick={() => onCerrar(true)}
+            className="px-4 py-2 rounded-lg text-sm font-medium bg-[var(--glass-bg)] border border-[var(--glass-border)]
+                       text-[var(--text-primary)] hover:border-[var(--accent-1)] inline-flex items-center justify-center gap-2"
+          >
+            <BookOpen className="w-4 h-4" /> Ver guía completa
+          </button>
+          <button
+            onClick={() => onCerrar(false)}
+            className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-gradient-to-r from-[var(--accent-1)] to-[var(--accent-2)]"
+          >
+            Entendido
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/** Mini manual de todas las funciones. Siempre disponible desde el menú. */
+const GuiaView = ({ onVerNovedades }) => (
+  <div className="space-y-6">
+    <div className="glass-card p-6 flex flex-col md:flex-row md:items-center gap-4 justify-between">
+      <div>
+        <h3 className="text-lg font-semibold text-[var(--text-primary)]">Cómo usar Tarjeteando</h3>
+        <p className="text-sm text-[var(--text-muted)]">Todas las funciones, en pocas líneas. Versión {APP_VERSION}.</p>
+      </div>
+      <button
+        onClick={onVerNovedades}
+        className="px-4 py-2 rounded-lg text-sm font-medium bg-[var(--glass-bg)] border border-[var(--glass-border)]
+                   text-[var(--text-primary)] hover:border-[var(--accent-1)] inline-flex items-center gap-2 self-start"
+      >
+        <Sparkles className="w-4 h-4" /> Ver novedades
+      </button>
+    </div>
+    <div className="grid gap-4 md:grid-cols-2">
+      {GUIA.map(seccion => {
+        const Icono = ICONOS_GUIA[seccion.icono] || BookOpen;
+        return (
+          <section key={seccion.id} className="glass-card p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="p-2 rounded-lg bg-gradient-to-br from-[var(--accent-1)] to-[var(--accent-2)]">
+                <Icono className="w-4 h-4 text-white" />
+              </div>
+              <h4 className="font-semibold text-[var(--text-primary)]">{seccion.titulo}</h4>
+            </div>
+            <ul className="space-y-2">
+              {seccion.items.map((t, i) => (
+                <li key={i} className="flex gap-2 text-sm text-[var(--text-secondary)]">
+                  <ChevronRight className="w-4 h-4 shrink-0 mt-0.5 text-[var(--accent-1)]" />
+                  <span>{t}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        );
+      })}
+    </div>
+  </div>
+);
+
 // Dashboard View
 const DEFAULT_CARD_ORDER = ['live', 'fijos', 'cuotasActivas', 'cuotasProx', 'totalPagar'];
 
-const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [], chartColors, formatCurrency, theme, resumenes = [], onDeleteResumen, setActiveView, searchQuery = '', movimientos = [], cuotasActivas = [], nombresTarjetas = {}, onGuardarNombre, gastosFijos = new Set(), gastosFijosDetalle = null, cotizacion = null, onFiltrarMovimientos, consumosLive = [] }) => {
+const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [], chartColors, formatCurrency, theme, resumenes = [], onDeleteResumen, setActiveView, searchQuery = '', movimientos = [], cuotasActivas = [], nombresTarjetas = {}, onGuardarNombre, gastosFijos = new Set(), gastosFijosDetalle = null, cotizacion = null, onFiltrarMovimientos, consumosLive = [], preguntasFijos = [], onResponderPregunta }) => {
   const [showResumenes, setShowResumenes] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
   const [mesDetalleIdx, setMesDetalleIdx] = useState(null);
@@ -2023,6 +2143,8 @@ const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [
 
   return (
     <div className="space-y-6">
+      <PreguntasFijosCard preguntas={preguntasFijos} onResponder={onResponderPregunta} />
+
       {/* Modal de Resúmenes */}
       {showResumenes && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -2271,11 +2393,11 @@ const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [
               formatCurrency(totalFijos),
               () => onFiltrarMovimientos?.('fijo'),
               gastosFijosDetalle?.items?.length
-                ? `${gastosFijosDetalle.items.length} recurrentes detectados${
+                ? `${gastosFijosDetalle.items.length} gastos fijos${
                     gastosFijosDetalle.usd > 0
                       ? ` · USD ${gastosFijosDetalle.usd.toLocaleString('es-AR', { maximumFractionDigits: 2 })}/mes`
                       : ''}`
-                : 'sin recurrentes detectados',
+                : 'sin gastos fijos',
               gastosFijosDetalle?.items?.length
                 ? gastosFijosDetalle.items
                     .map(i => `${i.nombre} — ${i.moneda === 'USD' ? 'USD ' : '$'}${
@@ -2693,7 +2815,86 @@ const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [
 };
 
 // Movimientos View con paginación por mes y filtros
-const MovimientosView = ({ movimientos, tarjetas = [], resumenes = [], searchQuery, formatCurrency, onEditarDescripcion, gastosFijos = new Set(), filtroTipoGastoInicial = '' }) => {
+/**
+ * Badge Fijo/Variable de la columna Tipo. Click => desplegable para cambiarlo.
+ * El cambio vale desde el resumen de ese movimiento hacia adelante.
+ */
+const TipoGastoSelector = ({ esFijo, onCambiar }) => {
+  // El menú se dibuja en un portal con posición fija: la tabla tiene overflow y
+  // las filas animan con transform, dos cosas que recortarían un menú absoluto.
+  const [pos, setPos] = useState(null);
+  const abierto = !!pos;
+  const ref = React.useRef(null);
+  const menuRef = React.useRef(null);
+  const setAbierto = (valor) => {
+    if (typeof valor === 'function') valor = valor(abierto);
+    if (!valor) return setPos(null);
+    const r = ref.current?.getBoundingClientRect();
+    if (r) setPos({ top: r.bottom + 4, left: r.left });
+  };
+
+  useEffect(() => {
+    if (!abierto) return;
+    const cerrar = (e) => {
+      if (ref.current?.contains(e.target) || menuRef.current?.contains(e.target)) return;
+      setPos(null);
+    };
+    const cerrarSiempre = () => setPos(null);
+    document.addEventListener('mousedown', cerrar);
+    window.addEventListener('scroll', cerrarSiempre, true);
+    window.addEventListener('resize', cerrarSiempre);
+    return () => {
+      document.removeEventListener('mousedown', cerrar);
+      window.removeEventListener('scroll', cerrarSiempre, true);
+      window.removeEventListener('resize', cerrarSiempre);
+    };
+  }, [abierto]);
+
+  const estilos = {
+    fijo: 'bg-blue-500/15 text-blue-500 border-blue-500/30',
+    variable: 'bg-amber-500/15 text-amber-500 border-amber-500/30'
+  };
+  const actual = esFijo ? 'fijo' : 'variable';
+
+  return (
+    <div className="relative inline-block" ref={ref}>
+      <button
+        type="button"
+        disabled={!onCambiar}
+        onClick={() => setAbierto(a => !a)}
+        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border
+                    ${estilos[actual]} ${onCambiar ? 'cursor-pointer hover:brightness-110' : 'cursor-default'}`}
+        title={onCambiar ? 'Cambiar tipo de gasto' : undefined}
+      >
+        {esFijo ? <Repeat className="w-3 h-3" /> : <Shuffle className="w-3 h-3" />}
+        {esFijo ? 'Fijo' : 'Variable'}
+        {onCambiar && <ChevronDown className="w-3 h-3 opacity-70" />}
+      </button>
+      {abierto && createPortal(
+        <div ref={menuRef} style={{ position: 'fixed', top: pos.top, left: pos.left }}
+             className="z-[100] min-w-[9rem] rounded-xl border border-[var(--glass-border)]
+                        bg-[var(--bg-secondary)] backdrop-blur-xl shadow-xl p-1">
+          {[['fijo', 'Fijo', Repeat], ['variable', 'Variable', Shuffle]].map(([tipo, label, Icon]) => (
+            <button
+              key={tipo}
+              type="button"
+              onClick={() => { setAbierto(false); if (tipo !== actual) onCambiar(tipo); }}
+              className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-left
+                          hover:bg-[var(--glass-bg)] ${tipo === actual ? 'font-semibold text-[var(--text-primary)]' : 'text-[var(--text-secondary)]'}`}
+            >
+              <Icon className="w-3.5 h-3.5" />
+              {label}
+              {tipo === actual && <CheckCircle className="w-3.5 h-3.5 ml-auto text-emerald-500" />}
+            </button>
+          ))}
+        </div>,
+        document.body
+      )}
+    </div>
+  );
+};
+
+const MovimientosView = ({ movimientos, tarjetas = [], resumenes = [], searchQuery, formatCurrency, onEditarDescripcion, gastosFijos = new Set(), filtroTipoGastoInicial = '', onCambiarTipo }) => {
   const [mesActual, setMesActual] = useState(0);
   const [showFilters, setShowFilters] = useState(false);
 
@@ -2883,7 +3084,7 @@ const MovimientosView = ({ movimientos, tarjetas = [], resumenes = [], searchQue
   // Guardar edición de descripción
   const handleGuardarEdicion = (mov) => {
     if (nuevoNombre.trim() && nuevoNombre.trim() !== (mov.referencia_limpia || mov.referencia_original)) {
-      onEditarDescripcion?.(mov.referencia_original, nuevoNombre.trim());
+      onEditarDescripcion?.(mov, nuevoNombre.trim());
     }
     setEditandoId(null);
     setNuevoNombre('');
@@ -3167,21 +3368,10 @@ const MovimientosView = ({ movimientos, tarjetas = [], resumenes = [], searchQue
                     )}
                   </td>
                   <td className="p-4 text-sm">
-                    {esGastoFijo(mov, gastosFijos) ? (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full
-                                      bg-blue-500/15 text-blue-500 text-xs font-medium border border-blue-500/30"
-                            title="Gasto fijo - aparece todos los meses con monto similar">
-                        <Repeat className="w-3 h-3" />
-                        Fijo
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full
-                                      bg-amber-500/15 text-amber-500 text-xs font-medium border border-amber-500/30"
-                            title="Gasto variable">
-                        <Shuffle className="w-3 h-3" />
-                        Variable
-                      </span>
-                    )}
+                    <TipoGastoSelector
+                      esFijo={esGastoFijo(mov, gastosFijos)}
+                      onCambiar={onCambiarTipo ? (tipo) => onCambiarTipo(mov, tipo) : null}
+                    />
                   </td>
                   <td className="p-4 text-sm">
                     {mov.cuota_texto ? (
@@ -3843,7 +4033,7 @@ const ReglasView = ({ reglas, pendientes, onRefresh, searchQuery = '' }) => {
 };
 
 // Importar View
-const ImportarView = ({ onSuccess }) => {
+const ImportarView = ({ onSuccess, preguntasFijos = [], onResponderPregunta }) => {
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [results, setResults] = useState([]);
@@ -3999,6 +4189,13 @@ const ImportarView = ({ onSuccess }) => {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Después de importar: preguntas sobre gastos fijos que faltan en el resumen nuevo */}
+      {results.some(r => r.exito) && preguntasFijos.length > 0 && (
+        <div className="mt-6">
+          <PreguntasFijosCard preguntas={preguntasFijos} onResponder={onResponderPregunta} />
         </div>
       )}
     </div>
