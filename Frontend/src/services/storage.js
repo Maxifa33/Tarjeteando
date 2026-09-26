@@ -12,6 +12,12 @@ const STORAGE_KEYS = {
   TARJETAS: 'tarjetas_lista',
   CONFIG: 'tarjetas_config',
   CONSUMOS_LIVE: 'tarjetas_consumos_live',
+  // Últimos consumos por ciclo: { [grupoKey]: ciclo } (ver services/consumos/ciclos.js)
+  CICLOS_LIVE: 'tarjetas_ciclos_live',
+  // ult4 → { grupoKey, banco, red }: a qué tarjeta/SuperCard pertenece cada plástico
+  ALIAS_ULT4: 'tarjetas_alias_ult4',
+  // Mapeos de columnas de formatos de banco desconocidos, por firma de encabezados
+  PLANTILLAS_CONSUMOS: 'plantillas_consumos',
   // Cambios manuales del tipo de gasto: [{mov_id, tipo, desde, creado, tipo_previo}]
   TIPO_OVERRIDES: 'tarjetas_tipo_overrides',
   // Respuestas a las preguntas de gastos fijos: [{tipo, mov_id, prev_id?, periodo, creado}]
@@ -22,7 +28,9 @@ const STORAGE_KEYS = {
 };
 
 // 1.1.0: tarjeta en cada movimiento. 1.2.0: ID hash (SHA-256) por movimiento.
-const CURRENT_VERSION = '1.2.0';
+// 1.3.0: ciclos de Últimos consumos (keys nuevas, sin migración destructiva: los
+// consumos viejos sin grupo se reemplazan la próxima vez que se sube su archivo).
+const CURRENT_VERSION = '1.3.0';
 
 class StorageService {
   constructor() {
@@ -316,15 +324,34 @@ class StorageService {
     return this.setItem(STORAGE_KEYS.CONSUMOS_LIVE, [...existentes, ...aAgregar]);
   }
 
+  /** Reemplaza la lista completa (la usa services/consumos/live.js). */
+  setConsumosLive(consumos) {
+    return this.setItem(STORAGE_KEYS.CONSUMOS_LIVE, consumos);
+  }
+
   /**
    * Elimina consumos live de una tarjeta específica, o todos si no se pasa tarjeta.
+   * Sin tarjeta también vacía los ciclos (las Cards en curso). Los alias se
+   * conservan: la próxima importación no vuelve a preguntar el banco.
    */
   deleteConsumosLive(tarjeta = null) {
     if (!tarjeta) {
+      this.setItem(STORAGE_KEYS.CICLOS_LIVE, {});
       return this.setItem(STORAGE_KEYS.CONSUMOS_LIVE, []);
     }
     const filtrados = this.getConsumosLive().filter(c => c.tarjeta !== tarjeta);
     return this.setItem(STORAGE_KEYS.CONSUMOS_LIVE, filtrados);
+  }
+
+  getCiclosLive() { return this.getItem(STORAGE_KEYS.CICLOS_LIVE, {}); }
+  setCiclosLive(ciclos) { return this.setItem(STORAGE_KEYS.CICLOS_LIVE, ciclos); }
+  getAliasUlt4() { return this.getItem(STORAGE_KEYS.ALIAS_ULT4, {}); }
+  setAliasUlt4(alias) { return this.setItem(STORAGE_KEYS.ALIAS_ULT4, alias); }
+  getPlantillasConsumos() { return this.getItem(STORAGE_KEYS.PLANTILLAS_CONSUMOS, {}); }
+  savePlantillaConsumos(plantilla) {
+    const todas = this.getPlantillasConsumos();
+    todas[plantilla.firma] = { ...plantilla, creado_at: plantilla.creado_at || new Date().toISOString() };
+    return this.setItem(STORAGE_KEYS.PLANTILLAS_CONSUMOS, todas);
   }
 
   // ==================== EXPORT / IMPORT ====================
@@ -342,6 +369,9 @@ class StorageService {
         tarjetas: this.getTarjetas(),
         reglas: this.getReglas(),
         consumosLive: this.getConsumosLive(),
+        ciclosLive: this.getCiclosLive(),
+        aliasUlt4: this.getAliasUlt4(),
+        plantillasConsumos: this.getPlantillasConsumos(),
         tipoOverrides: this.getTipoOverrides(),
         decisionesFijos: this.getDecisionesFijos(),
         metricasDetector: this.getMetricasDetector(),
@@ -360,7 +390,8 @@ class StorageService {
       }
 
       const { resumenes, tarjetas, reglas, consumosLive, config,
-              tipoOverrides, decisionesFijos, metricasDetector } = data.data;
+              tipoOverrides, decisionesFijos, metricasDetector,
+              ciclosLive, aliasUlt4, plantillasConsumos } = data.data;
       // Backups viejos traen IDs posicionales: se normalizan al ID hash.
       const movimientos = data.data.movimientos ? conIdsHash(data.data.movimientos) : data.data.movimientos;
 
@@ -399,6 +430,11 @@ class StorageService {
           this.setItem(STORAGE_KEYS.CONSUMOS_LIVE, [...existingConsumos, ...newConsumos]);
         }
 
+        // Ciclos, alias y plantillas: objetos por clave; lo local tiene prioridad
+        if (ciclosLive) this.setItem(STORAGE_KEYS.CICLOS_LIVE, { ...ciclosLive, ...this.getCiclosLive() });
+        if (aliasUlt4) this.setItem(STORAGE_KEYS.ALIAS_ULT4, { ...aliasUlt4, ...this.getAliasUlt4() });
+        if (plantillasConsumos) this.setItem(STORAGE_KEYS.PLANTILLAS_CONSUMOS, { ...plantillasConsumos, ...this.getPlantillasConsumos() });
+
         // Merge cambios de tipo y respuestas (dedup por movimiento / por respuesta)
         if (tipoOverrides) {
           const existentes = this.getTipoOverrides();
@@ -419,6 +455,9 @@ class StorageService {
         if (tarjetas) this.setItem(STORAGE_KEYS.TARJETAS, tarjetas);
         if (reglas) this.setItem(STORAGE_KEYS.REGLAS, reglas);
         if (consumosLive) this.setItem(STORAGE_KEYS.CONSUMOS_LIVE, consumosLive);
+        if (ciclosLive) this.setItem(STORAGE_KEYS.CICLOS_LIVE, ciclosLive);
+        if (aliasUlt4) this.setItem(STORAGE_KEYS.ALIAS_ULT4, aliasUlt4);
+        if (plantillasConsumos) this.setItem(STORAGE_KEYS.PLANTILLAS_CONSUMOS, plantillasConsumos);
         if (tipoOverrides) this.setItem(STORAGE_KEYS.TIPO_OVERRIDES, tipoOverrides);
         if (decisionesFijos) this.setItem(STORAGE_KEYS.DECISIONES_FIJOS, decisionesFijos);
         if (metricasDetector) this.setItem(STORAGE_KEYS.METRICAS_DETECTOR, metricasDetector);

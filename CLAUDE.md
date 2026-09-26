@@ -101,6 +101,38 @@ Para otros bancos, el backend usa Claude Vision API como fallback automático (r
 
 ---
 
+## Cambios recientes (26/09/2026) — Últimos consumos en el dashboard, bandeja única, SuperCard
+
+Rama `feat/ultimos-consumos-supercard`. Diseño: `~/Claude/Projects/Tarjeteando/diseno/supercard-estratos.png`.
+
+**Glosario (usar siempre estas palabras):**
+- **Tarjeta**: cuenta de crédito que genera UN resumen (banco + red + últimos 4). Varios plásticos pueden compartir resumen.
+- **Resumen**: documento oficial del cierre. Datos cerrados.
+- **Últimos consumos**: export parcial del home banking (xlsx/xls/csv) con lo no facturado. Provisional.
+- **Card**: la tarjeta visual del dashboard. **SuperCard**: Card de un grupo (varios plásticos, mismo cierre y vto). **StatCard**: los KPIs de arriba.
+- **Ciclo**: período entre cierres. **Conciliación**: el Resumen reemplaza a los Últimos consumos de su ciclo.
+
+**Código nuevo (todo testeable en Node, `npm test` → 63 tests):**
+- `services/consumos/index.js` — `parseUltimosConsumos(hojas, {plantillas})` → bloques (1 por plástico). Recorre TODAS las hojas.
+  Orden: formato Santander/Galicia/Amex (`consumos-parser.js`) → Macro (`macro.js`) → plantilla guardada → `requiereMapeo`.
+- `services/consumos/macro.js` — números en formato inglés, cuotas en la descripción ("02/06"), fechas imposibles (31/09) corregidas con aviso, valida contra "Total consumos".
+- `services/consumos/generico.js` + `POST /api/v1/consumos/mapear-columnas` (Backend, `mapeo-columnas.service.js`) — bancos desconocidos: la IA recibe SOLO encabezados + 8 filas, devuelve el mapeo y el frontend lo guarda como plantilla (`plantillas_consumos`). Sin IA → `CSVColumnMapper` manual.
+- `services/consumos/ciclos.js` — `agruparBloques` (mismo archivo + mismo cierre y vto → grupo), `aplicarArchivo` (archivo nuevo REEMPLAZA grupo+ciclo), `resumenCard`, `cardsEnCurso`, `conciliarConResumen` (banco+red+cierre ±5 días; emparejamiento 1 a 1 por fecha ±1 y monto).
+- `services/consumos/live.js` — puente con storage. `components/LiveCards.jsx` — Card/SuperCard.
+- `parsearMontoConsumo` detecta es-AR vs inglés por el último separador. Nunca asumir.
+
+**Reglas:**
+- El banco NUNCA se infiere del formato (Santander, Galicia y Amex exportan igual): sale del alias `ult4 → banco`; la primera vez se pregunta.
+- El total de Últimos consumos YA incluye la cuota del mes de planes viejos: no sumarle `cuotas.js`.
+- Dos archivos distintos nunca forman un grupo. Un archivo posterior con un subconjunto de plásticos actualiza el mismo grupo.
+- Un plástico sin consumos en el ciclo no ocupa fila.
+
+**localStorage 1.3.0:** keys nuevas `tarjetas_ciclos_live`, `tarjetas_alias_ult4`, `plantillas_consumos`. Los consumos viejos sin grupo se reemplazan al subir de nuevo su archivo.
+**ConsumosLiveView** ya no tiene uploader propio: su botón lleva a Importar.
+**Build:** `node_modules` está instalado para macOS; en la VM de Cowork `vite build` falla por el binario de rollup (no es un bug del código).
+
+---
+
 ## Cambios recientes (24/09/2026) — series de gastos fijos, Tipo editable, Novedades y Guía
 
 Detalle en `references/contexto-tarjeteando.md` (sección 6b).

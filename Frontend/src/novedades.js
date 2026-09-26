@@ -10,9 +10,28 @@
  * 'novedades_version_vista'); la Guía está siempre disponible en el menú.
  */
 
-export const APP_VERSION = '2026.09.2';
+export const APP_VERSION = '2026.09.3';
 
 export const NOVEDADES = [
+  {
+    version: '2026.09.3',
+    fecha: 'septiembre 2026',
+    titulo: 'Últimos consumos en el dashboard',
+    puntos: [
+      {
+        titulo: 'Una sola bandeja para importar',
+        texto: 'En Importar arrastrá juntos resúmenes (PDF o capturas) y últimos consumos (Excel o CSV). La app reconoce cuál es cuál. Lee Santander, Galicia, Amex y Macro; si tu banco usa otro formato, lo aprende la primera vez.'
+      },
+      {
+        titulo: 'Cuánto va tu próximo resumen',
+        texto: 'Cada vez que subís los últimos consumos, el dashboard muestra por tarjeta cuánto llevás gastado en el ciclo, separado en 1 pago y cuotas, con el cierre y el vencimiento. Cuando subís el resumen de ese mes, lo reemplaza.'
+      },
+      {
+        titulo: 'Tarjetas del mismo resumen, juntas',
+        texto: 'Si un archivo trae varias tarjetas con el mismo cierre y vencimiento (por ejemplo una renovada), se muestran en una sola card, con el monto de cada una por separado.'
+      }
+    ]
+  },
   {
     version: '2026.09.2',
     fecha: 'septiembre 2026',
@@ -40,7 +59,10 @@ export const GUIA = [
     titulo: 'Importar resúmenes',
     icono: 'Upload',
     items: [
-      'Arrastrá los PDF de tus resúmenes a la sección Importar (podés subir varios juntos).',
+      'Arrastrá a Importar tus resúmenes (PDF o capturas) y tus últimos consumos (Excel .xlsx/.xls o CSV del home banking). Podés subir todo junto: la app reconoce cuál es cuál.',
+      'Últimos consumos: bajalos del home banking cuantas veces quieras antes del cierre. Cada archivo nuevo reemplaza al anterior de esa tarjeta, así lo anulado desaparece.',
+      'La primera vez que subís una tarjeta te preguntamos de qué banco es (el archivo no lo dice). Después no se pregunta más.',
+      'Si el formato de tu banco es nuevo, la app lo interpreta sola (o te pide indicar las columnas) y lo recuerda para la próxima.',
       'Se leen automáticamente Galicia (Visa y Mastercard), BBVA y Santander. Otros bancos se leen con reconocimiento de imagen.',
       'Si subís el mismo resumen dos veces, se reemplaza: no se duplican los movimientos y se conservan tus cambios.',
       'Tus datos quedan guardados en este navegador. Exportalos desde Configuración → Datos para tener un respaldo.'
@@ -51,6 +73,7 @@ export const GUIA = [
     titulo: 'Dashboard',
     icono: 'LayoutDashboard',
     items: [
+      'Últimos consumos: una card por tarjeta con lo que va del ciclo (estimado, sin impuestos), en 1 pago y en cuotas, cierre, vencimiento y disponible. Si varias tarjetas comparten cierre y vencimiento, van en una misma card con el monto de cada una. Al subir el resumen del ciclo, la card desaparece.',
       'Tarjetas de resumen: Últimos consumos, Gastos fijos, Cuotas activas, Cuotas del próximo mes y Total a pagar del mes de vencimiento más reciente.',
       'Podés reordenar esas tarjetas arrastrándolas; el orden se recuerda.',
       'En Total a pagar, el botón + USD→ARS suma los dólares al dólar tarjeta del día.',

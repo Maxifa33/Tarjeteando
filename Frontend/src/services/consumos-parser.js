@@ -54,17 +54,38 @@ export function parsearMontoConsumo(valor) {
   if (valor === null || valor === undefined || valor === '') return 0;
   if (typeof valor === 'number') return valor;
   let s = String(valor).trim();
-  // Quitar prefijos de moneda
-  s = s.replace(/U\$S/gi, '').replace(/\$/g, '').replace(/\s/g, '');
+  // Quitar prefijos de moneda (U$S, U$D, USD, ARS, $)
+  s = s.replace(/U\$[SD]/gi, '').replace(/\b(USD|ARS)\b/gi, '').replace(/\$/g, '').replace(/\s/g, '');
   if (s === '' || s === '-') return 0;
   // Detectar signo negativo
   const negativo = s.includes('-');
   s = s.replace(/-/g, '');
-  // Formato es-AR: punto = miles, coma = decimal
-  s = s.replace(/\./g, '').replace(',', '.');
+  s = normalizarSeparadores(s);
   const num = parseFloat(s);
   if (isNaN(num)) return 0;
   return negativo ? -num : num;
+}
+
+/**
+ * Detecta el formato del número y lo deja como '1234.56'.
+ * es-AR: "1.234,56" · en: "1,234.56" (Macro). Nunca se asume: se mira el último
+ * separador. Con un solo tipo de separador, 1-2 dígitos al final = decimales,
+ * 3 dígitos = miles ("1.234" → 1234, "30.84" → 30.84).
+ */
+export function normalizarSeparadores(s) {
+  const ultComa = s.lastIndexOf(',');
+  const ultPunto = s.lastIndexOf('.');
+  if (ultComa >= 0 && ultPunto >= 0) {
+    return ultComa > ultPunto
+      ? s.replace(/\./g, '').replace(',', '.')   // es-AR
+      : s.replace(/,/g, '');                       // en
+  }
+  const sep = ultComa >= 0 ? ',' : ultPunto >= 0 ? '.' : null;
+  if (!sep) return s;
+  const partes = s.split(sep);
+  const ultima = partes[partes.length - 1];
+  if (partes.length === 2 && ultima.length <= 2) return partes.join('.'); // decimal
+  return partes.join(''); // miles
 }
 
 /**
@@ -132,6 +153,16 @@ function hashId(consumo) {
   return btoaSafe(raw).replace(/=/g, '').replace(/\//g, '_').replace(/\+/g, '-');
 }
 
+/**
+ * Firma del formato "Últimos consumos" de Santander / Galicia / Amex (home banking):
+ * bloque "Consumido hasta el momento" + encabezado Fecha|Descripción|Cuotas|Comprobante.
+ */
+export function esFormatoSantander(rows) {
+  const texto = rows.slice(0, 40).map((r) => (r || []).filter(Boolean).join('|')).join('\n');
+  return /Consumido hasta el momento/i.test(texto) && /terminada en\s*\d{4}/i.test(texto)
+    || rows.some((r) => esFilaHeader(r || []) && (r || []).some((c) => /comprob/i.test(String(c || ''))));
+}
+
 // ==================== Parser principal ====================
 
 /**
@@ -147,6 +178,8 @@ export function parseRows(rows) {
     consumido_dolares: 0,
     fecha_cierre: '',
     fecha_vencimiento: '',
+    disponible: null,
+    limite: null,
     tarjetas_detectadas: [],
   };
   const subtotalesArchivo = {}; // { ult4: { pesos, dolares } }
@@ -167,6 +200,12 @@ export function parseRows(rows) {
       const next = rows[i + 1] || [];
       metadata.consumido_pesos = parsearMontoConsumo(next[0]);
       metadata.consumido_dolares = parsearMontoConsumo(next[1]);
+      continue;
+    }
+    if (/Ten[ée]s disponible/i.test(colA)) {
+      const next = rows[i + 1] || [];
+      metadata.disponible = parsearMontoConsumo(next[0]);
+      metadata.limite = parsearMontoConsumo(next[1]);
       continue;
     }
     if (/Fecha de cierre/i.test(colA)) {

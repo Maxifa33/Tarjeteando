@@ -1,8 +1,12 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import storage from './services/storage';
-import { parseConsumosFile, categorizarConsumo } from './services/consumos-parser';
+import { categorizarConsumo } from './services/consumos-parser';
 import { APP_VERSION, NOVEDADES, GUIA } from './novedades';
+import { parseUltimosConsumos, leerHojas, EXTENSIONES_CONSUMOS } from './services/consumos/index.js';
+import { agruparBloques, aliasConocido, cardsEnCurso } from './services/consumos/ciclos.js';
+import { importarGrupos, conciliarResumen, getAlias, getPlantillas, guardarPlantilla } from './services/consumos/live.js';
+import { LiveCardsSection } from './components/LiveCards.jsx';
 import {
   construirCadenas,
   aplicarOverrides,
@@ -1194,6 +1198,8 @@ const App = () => {
   const [proyecciones, setProyecciones] = useState(null);
   const [reglas, setReglas] = useState([]);
   const [consumosLive, setConsumosLive] = useState(() => storage.getConsumosLive());
+  const [ciclosLive, setCiclosLive] = useState(() => storage.getCiclosLive());
+  const refrescarLive = () => { setConsumosLive(storage.getConsumosLive()); setCiclosLive(storage.getCiclosLive()); };
   const [loading, setLoading] = useState(true);
 
   // Cotización USD
@@ -1239,14 +1245,9 @@ const App = () => {
   };
 
   // Handlers de consumos live (pre-resumen)
-  const handleImportConsumosLive = (nuevosConsumos) => {
-    storage.saveConsumosLive(nuevosConsumos);
-    setConsumosLive(storage.getConsumosLive());
-  };
-
   const handleDeleteConsumosLive = (tarjeta = null) => {
     storage.deleteConsumosLive(tarjeta);
-    setConsumosLive(storage.getConsumosLive());
+    refrescarLive();
   };
 
   // Renombrar un comercio. La regla se guarda por CLAVE DE COMERCIO (la descripción
@@ -1818,6 +1819,7 @@ const App = () => {
               gastosFijosDetalle={gastosFijosDetalle}
               cotizacion={cotizacion}
               consumosLive={consumosLive}
+              ciclosLive={ciclosLive}
               preguntasFijos={preguntasFijos}
               onResponderPregunta={responderPreguntaFijo}
               onFiltrarMovimientos={(tipo) => {
@@ -1843,8 +1845,8 @@ const App = () => {
               tarjetas={tarjetas}
               resumenes={resumenes}
               formatCurrency={formatCurrency}
-              onImport={handleImportConsumosLive}
               onDeleteConsumos={handleDeleteConsumosLive}
+              onIrAImportar={() => setActiveView('importar')}
             />
           ) : activeView === 'cuotas' ? (
             <CuotasView
@@ -1862,7 +1864,7 @@ const App = () => {
           ) : activeView === 'guia' ? (
             <GuiaView onVerNovedades={() => setMostrarNovedades(true)} />
           ) : activeView === 'importar' ? (
-            <ImportarView onSuccess={fetchData} preguntasFijos={preguntasFijos} onResponderPregunta={responderPreguntaFijo} />
+            <ImportarView onSuccess={() => { refrescarLive(); fetchData(); }} preguntasFijos={preguntasFijos} onResponderPregunta={responderPreguntaFijo} />
           ) : null}
         </div>
       </main>
@@ -2074,7 +2076,8 @@ const GuiaView = ({ onVerNovedades }) => (
 // Dashboard View
 const DEFAULT_CARD_ORDER = ['live', 'fijos', 'cuotasActivas', 'cuotasProx', 'totalPagar'];
 
-const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [], chartColors, formatCurrency, theme, resumenes = [], onDeleteResumen, setActiveView, searchQuery = '', movimientos = [], cuotasActivas = [], nombresTarjetas = {}, onGuardarNombre, gastosFijos = new Set(), gastosFijosDetalle = null, cotizacion = null, onFiltrarMovimientos, consumosLive = [], preguntasFijos = [], onResponderPregunta }) => {
+const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [], chartColors, formatCurrency, theme, resumenes = [], onDeleteResumen, setActiveView, searchQuery = '', movimientos = [], cuotasActivas = [], nombresTarjetas = {}, onGuardarNombre, gastosFijos = new Set(), gastosFijosDetalle = null, cotizacion = null, onFiltrarMovimientos, consumosLive = [], ciclosLive = {}, preguntasFijos = [], onResponderPregunta }) => {
+  const liveCards = useMemo(() => cardsEnCurso(ciclosLive, consumosLive), [ciclosLive, consumosLive]);
   const [showResumenes, setShowResumenes] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
   const [mesDetalleIdx, setMesDetalleIdx] = useState(null);
@@ -2344,9 +2347,9 @@ const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [
           : null;
 
         // Total gastado en "Últimos consumos" (pre-resumen), excluye pagos/devoluciones
-        const consumosGasto = consumosLive.filter(c => !c.es_pago);
-        const liveTotalPesos = consumosGasto.reduce((s, c) => s + (c.monto_pesos > 0 ? c.monto_pesos : 0), 0);
-        const liveTotalUSD = consumosGasto.reduce((s, c) => s + (c.monto_dolares > 0 ? c.monto_dolares : 0), 0);
+        // Suma de las Cards de ciclo en curso (lo conciliado con un resumen ya no cuenta).
+        const liveTotalPesos = liveCards.reduce((s, x) => s + x.datos.total_ars, 0);
+        const liveTotalUSD = liveCards.reduce((s, x) => s + x.datos.total_usd, 0);
 
         // Card compacta simple (icono + label + valor)
         const simpleCard = (Icon, label, value, onClick, sub = null, tooltip = null) => (
@@ -2494,6 +2497,9 @@ const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [
           </div>
         );
       })()}
+
+      {/* Últimos consumos: una Card por tarjeta, o SuperCard si comparten cierre y vto */}
+      <LiveCardsSection cards={liveCards} onVerDetalle={() => setActiveView?.('consumos-live')} />
 
       {/* Cards Grid */}
       <div className="flex items-center justify-between mb-2">
@@ -4033,39 +4039,48 @@ const ReglasView = ({ reglas, pendientes, onRefresh, searchQuery = '' }) => {
 };
 
 // Importar View
+const BANCOS_COMUNES = ['Santander', 'Galicia', 'BBVA', 'Macro', 'Nación', 'Provincia', 'HSBC', 'ICBC', 'Patagonia', 'Supervielle', 'Credicoop', 'Ciudad', 'Brubank', 'Naranja X', 'American Express'];
+
+// Texto de una línea para un grupo importado: "Santander Visa #3327 · #1510 — 25 consumos · ✓ total del banco"
+const describirGrupo = (g, alias) => {
+  const a = g.bloques.map(b => alias[b.ult4]).find(Boolean) || {};
+  const n = g.bloques.reduce((s, b) => s + b.consumos.filter(c => !c.es_pago).length, 0);
+  const ok = g.bloques.every(b => b.validado);
+  return `${a.banco || ''} ${a.red || g.bloques[0].red} ${g.bloques.map(b => `#${b.ult4}`).join(' · ')} — ${n} consumos${ok ? ' · ✓ coincide con el total del banco' : ''}`;
+};
+
+/**
+ * Bandeja única de importación: resúmenes (PDF / capturas → backend) y
+ * últimos consumos (Excel / CSV → se leen en el navegador). Reconoce cuál es
+ * cuál por el tipo de archivo y, dentro de los Excel, por su formato.
+ */
 const ImportarView = ({ onSuccess, preguntasFijos = [], onResponderPregunta }) => {
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [results, setResults] = useState([]);
-  
-  const handleUpload = async (files) => {
-    if (!files.length) return;
+  const [pendientes, setPendientes] = useState([]);   // archivos a los que les falta el banco
+  const [mapeoManual, setMapeoManual] = useState(null); // formato nuevo sin IA disponible
 
-    setUploading(true);
-    setResults([]);
+  const bancosSugeridos = useMemo(() => {
+    const propios = storage.getTarjetas().map(t => t.banco).filter(b => b && b !== 'Desconocido');
+    return [...new Set([...propios, ...BANCOS_COMUNES])];
+  }, [results]);
 
+  // ---------- Resúmenes (PDF / imagen) ----------
+  const subirResumenes = async (files) => {
     const formData = new FormData();
-    Array.from(files).forEach(file => {
-      formData.append('pdfs', file);
-    });
-
+    files.forEach(file => formData.append('pdfs', file));
     try {
-      const response = await fetch(`${API_BASE}/resumenes/upload`, {
-        method: 'POST',
-        body: formData
-      });
+      const response = await fetch(`${API_BASE}/resumenes/upload`, { method: 'POST', body: formData });
       const data = await response.json();
-
-      // Guardar cada resultado exitoso en localStorage
       const resultados = data.data?.resultados || data.resultados || [];
       for (const resultado of resultados) {
+        resultado.tipo = 'resumen';
         if (resultado.exito && resultado.datos) {
           const { resumen, movimientos, tarjeta } = resultado.datos;
-
-          // Guardar tarjeta (detectar banco desde nombre si no viene en resumen)
+          let banco = resumen?.banco;
+          let tipo = resumen?.tipo;
           if (tarjeta) {
-            let banco = resumen?.banco;
-            let tipo = resumen?.tipo;
             if (!banco || banco === 'Desconocido') {
               const n = tarjeta.toUpperCase();
               if (n.includes('GALICIA')) banco = 'Galicia';
@@ -4078,22 +4093,15 @@ const ImportarView = ({ onSuccess, preguntasFijos = [], onResponderPregunta }) =
               const n = tarjeta.toUpperCase();
               if (n.includes('AMEX') || n.includes('AMERICAN EXPRESS')) tipo = 'AMEX';
               else if (n.includes('MASTERCARD')) tipo = 'MASTERCARD';
-              else if (n.includes('VISA')) tipo = 'VISA';
               else tipo = 'VISA';
             }
-            storage.saveTarjeta({
-              nombre: tarjeta,
-              banco: banco || 'Desconocido',
-              tipo: tipo
-            });
+            storage.saveTarjeta({ nombre: tarjeta, banco: banco || 'Desconocido', tipo });
           }
-
-          // Guardar resumen
           if (resumen) {
             const resumenId = `${tarjeta}-${resumen.anio}-${resumen.mes}`;
-            const resumenData = {
+            storage.saveResumen({
               id: resumenId,
-              tarjeta: tarjeta,
+              tarjeta,
               mes: resumen.mes,
               anio: resumen.anio,
               fecha_cierre: resumen.fecha_cierre,
@@ -4105,30 +4113,118 @@ const ImportarView = ({ onSuccess, preguntasFijos = [], onResponderPregunta }) =
               impuestos: resumen.impuestos || {},
               cantidad_movimientos: movimientos?.length || 0,
               fecha_importacion: new Date().toISOString()
-            };
-            storage.saveResumen(resumenData);
-
-            // Guardar movimientos
+            });
             if (movimientos && movimientos.length > 0) {
               storage.saveMovimientos(resumenId, movimientos, tarjeta);
             }
+            // Si había Últimos consumos de este ciclo, el resumen los reemplaza en el dashboard.
+            const conciliados = conciliarResumen({ banco, tipo, fecha_cierre: resumen.fecha_cierre }, movimientos || []);
+            if (conciliados.length) resultado.detalle = 'Reemplaza los Últimos consumos de este ciclo en el dashboard';
           }
         }
       }
-
-      setResults(resultados);
-      onSuccess?.();
+      return resultados;
     } catch (error) {
       console.error('Upload error:', error);
-      setResults([{ archivo: 'Error', exito: false, error: error.message }]);
+      return [{ archivo: files.map(f => f.name).join(', '), tipo: 'resumen', exito: false, error: error.message }];
+    }
+  };
+
+  // ---------- Últimos consumos (Excel / CSV) ----------
+  const procesarHojas = async (hojas, nombre, { permitirIA = true } = {}) => {
+    let res = parseUltimosConsumos(hojas, { plantillas: getPlantillas() });
+
+    if (res.requiereMapeo && permitirIA) {
+      const prep = res.requiereMapeo;
+      try {
+        const r = await fetch(`${API_BASE}/consumos/mapear-columnas`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ encabezados: prep.headers, filas_muestra: prep.filas_muestra, texto_cabecera: prep.texto_cabecera })
+        });
+        const data = await r.json();
+        const m = data?.data;
+        if (r.ok && m?.mapeo && (m.confianza ?? 0) >= 0.7) {
+          guardarPlantilla({ firma: prep.firma, mapeo: m.mapeo, banco: m.banco_detectado || '', red: m.red_detectada || '', origen: 'ia' });
+          res = parseUltimosConsumos(hojas, { plantillas: getPlantillas() });
+        }
+      } catch (e) {
+        console.warn('[Importar] Mapeo con IA no disponible:', e.message);
+      }
+    }
+    if (res.requiereMapeo) {
+      setMapeoManual({ nombre, hojas, prep: res.requiereMapeo });
+      return { archivo: nombre, tipo: 'consumos', exito: false, error: 'Formato nuevo: indicá qué columna es cada dato.' };
+    }
+    if (!res.bloques.length) {
+      return { archivo: nombre, tipo: 'consumos', exito: false, error: res.warnings[0] || 'No se reconocieron consumos.' };
     }
 
+    const grupos = agruparBloques(res.bloques);
+    const alias = getAlias();
+    const archivo = { id: `${nombre}|${Date.now()}`, nombre };
+    const faltan = grupos.map((g, i) => ({ i, g })).filter(x => !aliasConocido(x.g, alias));
+    if (faltan.length) {
+      setPendientes(p => [...p, {
+        archivo, grupos, warnings: res.warnings,
+        faltan: faltan.map(({ i, g }) => ({ i, ult4s: g.bloques.map(b => b.ult4), red: g.bloques[0].red, banco: res.banco_sugerido || '' }))
+      }]);
+      return { archivo: nombre, tipo: 'consumos', exito: true, pendiente: true, detalle: 'Indicá de qué banco es la tarjeta (una sola vez).', warnings: res.warnings };
+    }
+    importarGrupos({ grupos, asignaciones: {}, archivo });
+    const aliasNuevo = getAlias();
+    return { archivo: nombre, tipo: 'consumos', exito: true, detalle: grupos.map(g => describirGrupo(g, aliasNuevo)).join('\n'), warnings: res.warnings };
+  };
+
+  const confirmarPendiente = (idx) => {
+    const p = pendientes[idx];
+    if (p.faltan.some(f => !f.banco.trim())) return;
+    const asignaciones = Object.fromEntries(p.faltan.map(f => [f.i, { banco: f.banco.trim() }]));
+    importarGrupos({ grupos: p.grupos, asignaciones, archivo: p.archivo });
+    const alias = getAlias();
+    setPendientes(prev => prev.filter((_, j) => j !== idx));
+    setResults(prev => prev.map(r => r.archivo === p.archivo.nombre && r.pendiente
+      ? { ...r, pendiente: false, detalle: p.grupos.map(g => describirGrupo(g, alias)).join('\n') }
+      : r));
+    onSuccess?.();
+  };
+
+  const confirmarMapeoManual = async (map) => {
+    const { nombre, hojas, prep } = mapeoManual;
+    guardarPlantilla({
+      firma: prep.firma, origen: 'manual',
+      mapeo: { fecha: map.fecha, descripcion: map.descripcion, monto_ars: map.monto, monto_usd: map.montoDolares || null, cuotas: map.cuotas || null }
+    });
+    setMapeoManual(null);
+    const r = await procesarHojas(hojas, nombre, { permitirIA: false });
+    setResults(prev => [...prev.filter(x => x.archivo !== nombre), r]);
+    onSuccess?.();
+  };
+
+  const handleUpload = async (fileList) => {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    setUploading(true);
+    setResults([]);
+    const planillas = files.filter(f => EXTENSIONES_CONSUMOS.test(f.name));
+    const resumenesArch = files.filter(f => !EXTENSIONES_CONSUMOS.test(f.name));
+    const out = [];
+    if (resumenesArch.length) out.push(...await subirResumenes(resumenesArch));
+    for (const f of planillas) {
+      try {
+        out.push(await procesarHojas(await leerHojas(await f.arrayBuffer()), f.name));
+      } catch (err) {
+        out.push({ archivo: f.name, tipo: 'consumos', exito: false, error: `No se pudo leer el archivo: ${err.message}` });
+      }
+    }
+    setResults(out);
+    onSuccess?.();
     setUploading(false);
   };
-  
+
   return (
     <div className="max-w-2xl mx-auto">
-      <div 
+      <div
         className={`glass-card p-12 text-center border-2 border-dashed transition-all cursor-pointer
                     ${dragOver ? 'border-[var(--accent-1)] bg-[var(--accent-1)]/10' : 'border-[var(--glass-border)]'}`}
         onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
@@ -4140,11 +4236,10 @@ const ImportarView = ({ onSuccess, preguntasFijos = [], onResponderPregunta }) =
           id="file-input"
           type="file"
           multiple
-          accept=".pdf,image/png,image/jpeg,image/jpg,image/webp"
+          accept=".pdf,image/png,image/jpeg,image/jpg,image/webp,.xlsx,.xls,.csv"
           className="hidden"
-          onChange={(e) => handleUpload(e.target.files)}
+          onChange={(e) => { handleUpload(e.target.files); e.target.value = ''; }}
         />
-
         {uploading ? (
           <div className="animate-pulse">
             <Sparkles className="w-16 h-16 mx-auto mb-4 text-[var(--accent-1)]" />
@@ -4154,46 +4249,93 @@ const ImportarView = ({ onSuccess, preguntasFijos = [], onResponderPregunta }) =
           <>
             <Upload className="w-16 h-16 mx-auto mb-4 text-[var(--accent-1)] opacity-70" />
             <p className="text-lg font-medium text-[var(--text-primary)] mb-2">
-              Arrastrá tus resúmenes aquí
+              Arrastrá resúmenes o últimos consumos
             </p>
             <p className="text-sm text-[var(--text-muted)]">
-              PDF o screenshots (PNG, JPG, WebP)
+              Resúmenes: PDF o capturas · Últimos consumos: Excel (.xlsx, .xls) o CSV
             </p>
+            <p className="text-xs text-[var(--text-muted)] mt-1">La app reconoce cuál es cuál. Podés subir varios juntos.</p>
           </>
         )}
       </div>
-      
+
+      {/* Tarjetas nuevas: preguntar el banco una sola vez */}
+      {pendientes.map((p, idx) => (
+        <div key={p.archivo.id} className="glass-card p-5 mt-6 border-l-4 border-l-[var(--accent-1)]">
+          <p className="text-sm font-medium text-[var(--text-primary)] mb-1">¿De qué banco es?</p>
+          <p className="text-xs text-[var(--text-muted)] mb-4">{p.archivo.nombre} · el archivo no lo dice. Te lo preguntamos una sola vez.</p>
+          {p.faltan.map((f, k) => (
+            <div key={k} className="flex flex-wrap items-center gap-3 mb-3">
+              <span className="font-mono text-sm text-[var(--text-primary)]">
+                {f.red} {f.ult4s.map(u => `#${u}`).join(' · ')}
+              </span>
+              <input
+                list={`bancos-${idx}-${k}`}
+                value={f.banco}
+                placeholder="Banco"
+                onChange={(e) => setPendientes(prev => prev.map((pp, j) => j !== idx ? pp : {
+                  ...pp, faltan: pp.faltan.map((ff, kk) => kk === k ? { ...ff, banco: e.target.value } : ff)
+                }))}
+                className="flex-1 min-w-[160px] px-3 py-2 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--text-primary)] text-sm"
+              />
+              <datalist id={`bancos-${idx}-${k}`}>
+                {bancosSugeridos.map(b => <option key={b} value={b} />)}
+              </datalist>
+            </div>
+          ))}
+          <div className="flex justify-end">
+            <button
+              onClick={() => confirmarPendiente(idx)}
+              disabled={p.faltan.some(f => !f.banco.trim())}
+              className="px-4 py-2 rounded-lg bg-[var(--accent-1)] text-white font-medium text-sm disabled:opacity-50"
+            >
+              Confirmar
+            </button>
+          </div>
+        </div>
+      ))}
+
       {/* Results */}
       {results.length > 0 && (
         <div className="mt-6 space-y-3">
           {results.map((r, idx) => (
-            <div 
+            <div
               key={idx}
-              className={`glass-card p-4 flex items-center gap-3 opacity-0 animate-fade-in-up
-                         ${r.exito ? 'border-l-4 border-l-emerald-500' : 'border-l-4 border-l-red-500'}`}
+              className={`glass-card p-4 flex items-start gap-3 opacity-0 animate-fade-in-up
+                         ${!r.exito ? 'border-l-4 border-l-red-500' : r.pendiente ? 'border-l-4 border-l-amber-400' : 'border-l-4 border-l-emerald-500'}`}
               style={{ animationDelay: `${idx * 100}ms`, animationFillMode: 'forwards' }}
             >
-              {r.exito ? (
-                <CheckCircle className="w-5 h-5 text-emerald-500" />
-              ) : (
-                <XCircle className="w-5 h-5 text-red-500" />
-              )}
-              <div className="flex-1">
-                <p className="font-medium text-[var(--text-primary)]">{r.archivo}</p>
+              {!r.exito ? <XCircle className="w-5 h-5 text-red-500 mt-0.5" />
+                : r.pendiente ? <AlertCircle className="w-5 h-5 text-amber-400 mt-0.5" />
+                : <CheckCircle className="w-5 h-5 text-emerald-500 mt-0.5" />}
+              <div className="flex-1 min-w-0">
+                <p className="font-medium text-[var(--text-primary)] truncate">{r.archivo}</p>
+                <p className="text-[10px] uppercase tracking-widest text-[var(--text-muted)] mt-0.5">
+                  {r.tipo === 'consumos' ? 'Últimos consumos' : 'Resumen'}
+                </p>
                 {r.error && <p className="text-sm text-red-400">{r.error}</p>}
                 {r.movimientos && (
-                  <p className="text-sm text-[var(--text-muted)]">
-                    {r.movimientos} movimientos importados
-                  </p>
+                  <p className="text-sm text-[var(--text-muted)]">{r.movimientos} movimientos importados</p>
                 )}
+                {r.detalle && <p className="text-sm text-[var(--text-secondary)] whitespace-pre-line">{r.detalle}</p>}
+                {r.warnings?.map((w, i) => <p key={i} className="text-xs text-amber-500 mt-1">{w}</p>)}
               </div>
             </div>
           ))}
         </div>
       )}
 
+      {mapeoManual && (
+        <CSVColumnMapper
+          headers={mapeoManual.prep.headers}
+          preview={mapeoManual.prep.filas_muestra}
+          onConfirm={confirmarMapeoManual}
+          onCancel={() => setMapeoManual(null)}
+        />
+      )}
+
       {/* Después de importar: preguntas sobre gastos fijos que faltan en el resumen nuevo */}
-      {results.some(r => r.exito) && preguntasFijos.length > 0 && (
+      {results.some(r => r.exito && r.tipo === 'resumen') && preguntasFijos.length > 0 && (
         <div className="mt-6">
           <PreguntasFijosCard preguntas={preguntasFijos} onResponder={onResponderPregunta} />
         </div>
@@ -4271,11 +4413,8 @@ const CSVColumnMapper = ({ headers, preview, onConfirm, onCancel }) => {
   );
 };
 
-const ConsumosLiveView = ({ consumosLive = [], tarjetas = [], resumenes = [], formatCurrency, onImport, onDeleteConsumos }) => {
-  const [showUploader, setShowUploader] = useState(consumosLive.length === 0);
-  const [parsing, setParsing] = useState(false);
-  const [dragOver, setDragOver] = useState(false);
-  const [parseResult, setParseResult] = useState(null);
+const ConsumosLiveView = ({ consumosLive = [], tarjetas = [], resumenes = [], formatCurrency, onDeleteConsumos, onIrAImportar }) => {
+  // La importación se hace desde la bandeja única (Importar); esta vista es el detalle.
   const [filtroTexto, setFiltroTexto] = useState('');
   const [filtroTarjeta, setFiltroTarjeta] = useState('');
   const [filtroCategoria, setFiltroCategoria] = useState('');
@@ -4355,28 +4494,6 @@ const ConsumosLiveView = ({ consumosLive = [], tarjetas = [], resumenes = [], fo
   const tarjetasUnicas = [...new Set(consumosLive.map((c) => c.tarjeta))];
   const categoriasUnicas = [...new Set(consumosLive.filter((c) => !c.es_pago).map((c) => c.categoria))];
 
-  const handleFile = async (files) => {
-    const file = files?.[0];
-    if (!file) return;
-    setParsing(true);
-    setParseResult(null);
-    try {
-      const buffer = await file.arrayBuffer();
-      const result = parseConsumosFile(buffer);
-      setParseResult(result);
-    } catch (err) {
-      setParseResult({ consumos: [], metadata: {}, warnings: [`Error al leer el archivo: ${err.message}`] });
-    }
-    setParsing(false);
-  };
-
-  const confirmarImport = () => {
-    if (!parseResult?.consumos?.length) return;
-    onImport?.(parseResult.consumos, parseResult.metadata);
-    setParseResult(null);
-    setShowUploader(false);
-  };
-
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -4398,104 +4515,19 @@ const ConsumosLiveView = ({ consumosLive = [], tarjetas = [], resumenes = [], fo
             </button>
           )}
           <button
-            onClick={() => setShowUploader((v) => !v)}
+            onClick={() => onIrAImportar?.()}
             className="px-4 py-2 rounded-lg bg-[var(--accent-1)] text-white font-medium text-sm flex items-center gap-1.5"
           >
-            <Plus className="w-4 h-4" /> Importar Excel
+            <Upload className="w-4 h-4" /> Importar
           </button>
         </div>
       </div>
 
-      {/* Uploader */}
-      {showUploader && (
-        <div className="glass-card p-6">
-          {!parseResult ? (
-            <div
-              className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all
-                          ${dragOver ? 'border-[var(--accent-1)] bg-[var(--accent-1)]/10' : 'border-[var(--glass-border)]'}`}
-              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={(e) => { e.preventDefault(); setDragOver(false); handleFile(e.dataTransfer.files); }}
-              onClick={() => document.getElementById('consumos-file-input').click()}
-            >
-              <input
-                id="consumos-file-input"
-                type="file"
-                accept=".xlsx,.xls,.csv"
-                className="hidden"
-                onChange={(e) => handleFile(e.target.files)}
-              />
-              {parsing ? (
-                <div className="animate-pulse">
-                  <Sparkles className="w-12 h-12 mx-auto mb-3 text-[var(--accent-1)]" />
-                  <p className="text-[var(--text-primary)]">Procesando archivo...</p>
-                </div>
-              ) : (
-                <>
-                  <Upload className="w-12 h-12 mx-auto mb-3 text-[var(--accent-1)] opacity-70" />
-                  <p className="font-medium text-[var(--text-primary)] mb-1">
-                    Arrastrá el Excel de "Últimos consumos"
-                  </p>
-                  <p className="text-sm text-[var(--text-muted)]">
-                    Export de home banking Galicia (.xlsx) o CSV
-                  </p>
-                </>
-              )}
-            </div>
-          ) : (
-            <div>
-              <h4 className="font-semibold text-[var(--text-primary)] mb-3">Vista previa</h4>
-              {parseResult.warnings?.length > 0 && (
-                <div className="mb-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30">
-                  {parseResult.warnings.map((w, i) => (
-                    <p key={i} className="text-sm text-amber-500 flex items-start gap-2">
-                      <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" /> {w}
-                    </p>
-                  ))}
-                </div>
-              )}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-                <div className="p-3 rounded-lg bg-[var(--glass-bg)]">
-                  <p className="text-xs text-[var(--text-muted)]">Consumos</p>
-                  <p className="text-lg font-bold text-[var(--text-primary)]">{parseResult.consumos.length}</p>
-                </div>
-                <div className="p-3 rounded-lg bg-[var(--glass-bg)]">
-                  <p className="text-xs text-[var(--text-muted)]">Tarjetas</p>
-                  <p className="text-lg font-bold text-[var(--text-primary)]">{parseResult.metadata.tarjetas_detectadas?.length || 0}</p>
-                </div>
-                <div className="p-3 rounded-lg bg-[var(--glass-bg)]">
-                  <p className="text-xs text-[var(--text-muted)]">Consumido</p>
-                  <p className="text-lg font-bold text-[var(--text-primary)]">{formatCurrency(parseResult.metadata.consumido_pesos || 0)}</p>
-                </div>
-                <div className="p-3 rounded-lg bg-[var(--glass-bg)]">
-                  <p className="text-xs text-[var(--text-muted)]">Cierre</p>
-                  <p className="text-sm font-bold text-[var(--text-primary)]">{parseResult.metadata.fecha_cierre || '—'}</p>
-                </div>
-              </div>
-              <div className="flex justify-end gap-2">
-                <button onClick={() => setParseResult(null)} className="px-4 py-2 rounded-lg bg-[var(--glass-bg)] text-[var(--text-muted)] text-sm">
-                  Cancelar
-                </button>
-                <button
-                  onClick={confirmarImport}
-                  disabled={!parseResult.consumos.length}
-                  className="px-4 py-2 rounded-lg bg-emerald-500 text-white font-medium text-sm disabled:opacity-50"
-                >
-                  Importar {parseResult.consumos.length} consumos
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
       {consumosLive.length === 0 ? (
-        !showUploader && (
-          <div className="glass-card p-12 text-center">
-            <Zap className="w-12 h-12 mx-auto mb-3 text-[var(--text-muted)] opacity-50" />
-            <p className="text-[var(--text-muted)]">Todavía no importaste consumos. Subí el Excel de "Últimos consumos" de tu banco.</p>
-          </div>
-        )
+        <div className="glass-card p-12 text-center">
+          <Zap className="w-12 h-12 mx-auto mb-3 text-[var(--text-muted)] opacity-50" />
+          <p className="text-[var(--text-muted)]">Todavía no importaste consumos. Subí el Excel de "Últimos consumos" de tu banco desde Importar.</p>
+        </div>
       ) : (
         <>
           {/* StatCards */}

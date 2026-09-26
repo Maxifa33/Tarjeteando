@@ -15,6 +15,7 @@ const fs = require('fs');
 const multer = require('multer');
 const PDFParserService = require('./services/pdf-parser.service');
 const VisionParserService = require('./services/vision-parser.service');
+const MapeoColumnasService = require('./services/mapeo-columnas.service');
 
 // Configurar multer para aceptar PDFs e imágenes
 const upload = multer({
@@ -809,6 +810,30 @@ app.post('/api/v1/resumenes/upload', upload.array('pdfs'), async (req, res) => {
       success: false,
       error: { message: error.message }
     });
+  }
+});
+
+// ==================== ÚLTIMOS CONSUMOS: FORMATOS NUEVOS ====================
+// Solo encabezados + filas de muestra; el frontend guarda el resultado como plantilla.
+app.post('/api/v1/consumos/mapear-columnas', async (req, res) => {
+  const { encabezados, filas_muestra = [], texto_cabecera = '' } = req.body || {};
+  if (!Array.isArray(encabezados) || encabezados.length < 2) {
+    return res.status(400).json({ success: false, error: { message: 'encabezados requeridos' } });
+  }
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return res.status(503).json({ success: false, error: { message: 'IA no configurada (falta ANTHROPIC_API_KEY)' } });
+  }
+  try {
+    const servicio = new MapeoColumnasService(process.env.ANTHROPIC_API_KEY);
+    const data = await servicio.mapear({
+      encabezados: encabezados.slice(0, 30).map(String),
+      filas_muestra: (Array.isArray(filas_muestra) ? filas_muestra : []).slice(0, 8).map((f) => (f || []).slice(0, 30).map((c) => String(c ?? '').slice(0, 120))),
+      texto_cabecera: String(texto_cabecera).slice(0, 1500),
+    });
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('[mapear-columnas]', error.message);
+    res.status(502).json({ success: false, error: { message: 'No se pudo mapear el formato' } });
   }
 });
 
