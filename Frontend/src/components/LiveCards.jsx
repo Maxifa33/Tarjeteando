@@ -7,7 +7,7 @@
  *  - Una sola tarjeta en el grupo → misma Card, sin barra ni filas.
  *  - Mismo archivo con ciclos distintos → Cards separadas con una marca discreta.
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { Zap, AlertCircle, Link2 } from 'lucide-react';
 
 const COLOR_BANCO = {
@@ -81,7 +81,32 @@ function Plasticos({ miembros, color }) {
   );
 }
 
-export function LiveCard({ ciclo, datos, hermanos = [], onClick }) {
+// El archivo no dice el banco: la Card lo pide una vez y no vuelve a preguntar.
+function BancoPicker({ grupoKey, bancos = [], onAsignar }) {
+  const [valor, setValor] = useState('');
+  const listId = `bancos-${grupoKey.replace(/[^a-z0-9]/gi, '')}`;
+  const guardar = () => valor.trim() && onAsignar?.(grupoKey, valor.trim());
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2" onClick={(e) => e.stopPropagation()}>
+      <span className="text-xs text-amber-500">¿De qué banco es?</span>
+      <input
+        list={listId}
+        value={valor}
+        placeholder="Banco"
+        onChange={(e) => setValor(e.target.value)}
+        onKeyDown={(e) => e.key === 'Enter' && guardar()}
+        className="w-36 px-2.5 py-1 rounded-lg bg-[var(--glass-bg)] border border-amber-400/60 text-[var(--text-primary)] text-sm"
+      />
+      <datalist id={listId}>{bancos.map((b) => <option key={b} value={b} />)}</datalist>
+      <button onClick={guardar} disabled={!valor.trim()}
+              className="px-3 py-1 rounded-lg bg-[var(--accent-1)] text-white text-xs font-medium disabled:opacity-40">
+        Guardar
+      </button>
+    </div>
+  );
+}
+
+export function LiveCard({ ciclo, datos, hermanos = [], onClick, onAsignarBanco, bancos }) {
   const color = colorDe(ciclo.banco, ciclo.red);
   const { miembros, es_super } = datos;
   const total = partes(datos.total_ars);
@@ -97,9 +122,10 @@ export function LiveCard({ ciclo, datos, hermanos = [], onClick }) {
         <div className="min-w-0 flex-1">
           <Caps className="!text-[var(--accent-1)] whitespace-nowrap">Últimos consumos</Caps>
           <h3 className="text-lg font-bold text-[var(--text-primary)] leading-tight mt-1">
-            {ciclo.banco}<span className="text-[var(--text-muted)] font-normal mx-1.5">–</span>{ciclo.red}
+            {ciclo.banco && (<>{ciclo.banco}<span className="text-[var(--text-muted)] font-normal mx-1.5">–</span></>)}{ciclo.red}
             {!es_super && (<><span className="text-[var(--text-muted)] font-normal mx-1.5">–</span>#{miembros[0]?.ult4 || ciclo.principal}</>)}
           </h3>
+          {!ciclo.banco && <BancoPicker grupoKey={ciclo.grupoKey} bancos={bancos} onAsignar={onAsignarBanco} />}
           {es_super && (
             <div className="flex flex-wrap gap-1.5 mt-2">
               {miembros.map((m, i) => (
@@ -249,7 +275,7 @@ export function LiveCard({ ciclo, datos, hermanos = [], onClick }) {
   );
 }
 
-export function LiveCardsSection({ cards, onVerDetalle }) {
+export function LiveCardsSection({ cards, onVerDetalle, onAsignarBanco, bancos }) {
   if (!cards.length) return null;
   return (
     <div>
@@ -263,7 +289,7 @@ export function LiveCardsSection({ cards, onVerDetalle }) {
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {cards.map((x) => (
-          <LiveCard key={x.ciclo.grupoKey} ciclo={x.ciclo} datos={x.datos} hermanos={x.hermanos} onClick={onVerDetalle} />
+          <LiveCard key={x.ciclo.grupoKey} ciclo={x.ciclo} datos={x.datos} hermanos={x.hermanos} onClick={onVerDetalle} onAsignarBanco={onAsignarBanco} bancos={bancos} />
         ))}
       </div>
     </div>

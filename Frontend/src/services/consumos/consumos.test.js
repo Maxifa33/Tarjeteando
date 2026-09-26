@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { parseUltimosConsumos } from './index.js';
-import { agruparBloques, aplicarArchivo, resumenCard, cardsEnCurso, conciliarConResumen } from './ciclos.js';
+import { agruparBloques, aplicarArchivo, resumenCard, cardsEnCurso, conciliarConResumen, asignarBanco } from './ciclos.js';
 import { parsearMontoConsumo } from '../consumos-parser.js';
 import { fechaSegura } from './comun.js';
 import { prepararMapeo, parseGenerico } from './generico.js';
@@ -173,4 +173,20 @@ test('Formato desconocido: pide mapeo con muestra mínima y luego lee con la pla
   assert.equal(b.consumos.length, 3);
   assert.equal(b.consumos[1].cuota_actual, 3);
   assert.equal(b.consumos[2].monto_dolares, 9.99);
+});
+
+test('Sin banco igual se importa; la Card lo pide y al guardarlo no se vuelve a preguntar', () => {
+  const g = agruparBloques(parseUltimosConsumos(fx('santander-visa').hojas).bloques);
+  let est = aplicarArchivo({ grupos: g, archivo: { id: 'f1', nombre: 'a' }, estado: vacio() });
+  const cards = cardsEnCurso(est.ciclos, est.consumos, '2026-09-26');
+  assert.equal(cards.length, 1);
+  assert.equal(cards[0].ciclo.banco, '');
+  est = { ...est, ...asignarBanco(est, cards[0].ciclo.grupoKey, 'Santander') };
+  assert.equal(est.alias['1510'].banco, 'Santander');
+  assert.equal(Object.values(est.ciclos)[0].banco, 'Santander');
+  // Re-subir: mismo grupo, ya con banco
+  est = aplicarArchivo({ grupos: g, archivo: { id: 'f2', nombre: 'a' }, estado: est });
+  assert.equal(Object.keys(est.ciclos).length, 1);
+  assert.equal(Object.values(est.ciclos)[0].banco, 'Santander');
+  assert.ok(est.consumos.every((c) => c.tarjeta.startsWith('Santander Visa')));
 });

@@ -52,10 +52,10 @@ export function aplicarArchivo({ grupos, asignaciones = {}, archivo, estado, aho
   grupos.forEach((g, i) => {
     const conocido = aliasConocido(g, alias);
     const principal = g.bloques[0];
-    const banco = conocido?.banco || asignaciones[i]?.banco;
-    if (!banco) return; // sin banco no se puede ubicar: la UI lo pregunta antes
+    // Sin banco igual se importa: la Card lo pide después (asignarBanco).
+    const banco = conocido?.banco || asignaciones[i]?.banco || '';
     const red = conocido?.red || principal.red;
-    const grupoKey = conocido?.grupoKey || claveGrupo(banco, red, principal.ult4);
+    const grupoKey = conocido?.grupoKey || claveGrupo(banco || 'sin-banco', red, principal.ult4);
 
     for (const b of g.bloques) if (b.ult4) alias[b.ult4] = { grupoKey, banco, red };
 
@@ -71,7 +71,7 @@ export function aplicarArchivo({ grupos, asignaciones = {}, archivo, estado, aho
       for (const c of b.consumos) {
         consumos.push({
           ...c,
-          tarjeta: `${banco} ${red} ${c.tarjeta_ult4 || b.ult4}`.trim(),
+          tarjeta: `${banco} ${red} ${c.tarjeta_ult4 || b.ult4}`.trim().replace(/\s+/g, ' '),
           grupo_key: grupoKey,
           ciclo_cierre: cierre,
           estado: 'provisional',
@@ -194,4 +194,21 @@ export function conciliarConResumen({ ciclos, consumos }, { banco, tipo, fecha_c
     conciliados.push(ciclo.grupoKey);
   }
   return { ciclos: nuevosCiclos, consumos: nuevosConsumos, conciliados };
+}
+
+/**
+ * El usuario indica el banco de una Card que llegó sin banco (el archivo no lo
+ * dice). Se guarda en el alias de todos sus plásticos: no se vuelve a preguntar.
+ * La clave del grupo no cambia, así las próximas importaciones caen en la misma Card.
+ */
+export function asignarBanco({ alias, ciclos, consumos }, grupoKey, banco) {
+  const b = String(banco || '').trim();
+  if (!b || !ciclos[grupoKey]) return { alias, ciclos, consumos };
+  const nuevoAlias = Object.fromEntries(Object.entries(alias).map(([u, a]) => [u, a.grupoKey === grupoKey ? { ...a, banco: b } : a]));
+  const ciclo = { ...ciclos[grupoKey], banco: b };
+  return {
+    alias: nuevoAlias,
+    ciclos: { ...ciclos, [grupoKey]: ciclo },
+    consumos: consumos.map((c) => (c.grupo_key === grupoKey ? { ...c, tarjeta: `${b} ${ciclo.red} ${c.tarjeta_ult4}` } : c)),
+  };
 }

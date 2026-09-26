@@ -3,7 +3,7 @@
  * App.jsx / ImportarView llaman a estas funciones; ellas leen y guardan.
  */
 import storage from '../storage.js';
-import { aplicarArchivo, conciliarConResumen } from './ciclos.js';
+import { aplicarArchivo, conciliarConResumen, asignarBanco } from './ciclos.js';
 
 const estadoActual = () => ({
   alias: storage.getAliasUlt4(),
@@ -33,3 +33,10 @@ export function conciliarResumen({ banco, tipo, fecha_cierre }, movimientos) {
 export const getAlias = () => storage.getAliasUlt4();
 export const getPlantillas = () => storage.getPlantillasConsumos();
 export const guardarPlantilla = (p) => storage.savePlantillaConsumos(p);
+
+export function guardarBanco(grupoKey, banco) {
+  const r = asignarBanco(estadoActual(), grupoKey, banco);
+  storage.setAliasUlt4(r.alias);
+  storage.setCiclosLive(r.ciclos);
+  storage.setConsumosLive(r.consumos);
+}

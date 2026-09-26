@@ -122,7 +122,7 @@ Rama `feat/ultimos-consumos-supercard`. Diseño: `~/Claude/Projects/Tarjeteando/
 - `parsearMontoConsumo` detecta es-AR vs inglés por el último separador. Nunca asumir.
 
 **Reglas:**
-- El banco NUNCA se infiere del formato (Santander, Galicia y Amex exportan igual): sale del alias `ult4 → banco`; la primera vez se pregunta.
+- El banco NUNCA se infiere del formato (Santander, Galicia y Amex exportan igual): sale del alias `ult4 → banco`. La importación NUNCA se frena por falta de banco: se importa con banco vacío y la Card lo pide (`BancoPicker` → `asignarBanco`). La clave del grupo no cambia al asignarlo.
 - El total de Últimos consumos YA incluye la cuota del mes de planes viejos: no sumarle `cuotas.js`.
 - Dos archivos distintos nunca forman un grupo. Un archivo posterior con un subconjunto de plásticos actualiza el mismo grupo.
 - Un plástico sin consumos en el ciclo no ocupa fila.

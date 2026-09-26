@@ -5,7 +5,7 @@ import { categorizarConsumo } from './services/consumos-parser';
 import { APP_VERSION, NOVEDADES, GUIA } from './novedades';
 import { parseUltimosConsumos, leerHojas, EXTENSIONES_CONSUMOS } from './services/consumos/index.js';
 import { agruparBloques, aliasConocido, cardsEnCurso } from './services/consumos/ciclos.js';
-import { importarGrupos, conciliarResumen, getAlias, getPlantillas, guardarPlantilla } from './services/consumos/live.js';
+import { importarGrupos, conciliarResumen, getAlias, getPlantillas, guardarPlantilla, guardarBanco } from './services/consumos/live.js';
 import { LiveCardsSection } from './components/LiveCards.jsx';
 import {
   construirCadenas,
@@ -1820,6 +1820,7 @@ const App = () => {
               cotizacion={cotizacion}
               consumosLive={consumosLive}
               ciclosLive={ciclosLive}
+              onAsignarBanco={(grupoKey, banco) => { guardarBanco(grupoKey, banco); refrescarLive(); }}
               preguntasFijos={preguntasFijos}
               onResponderPregunta={responderPreguntaFijo}
               onFiltrarMovimientos={(tipo) => {
@@ -2076,7 +2077,7 @@ const GuiaView = ({ onVerNovedades }) => (
 // Dashboard View
 const DEFAULT_CARD_ORDER = ['live', 'fijos', 'cuotasActivas', 'cuotasProx', 'totalPagar'];
 
-const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [], chartColors, formatCurrency, theme, resumenes = [], onDeleteResumen, setActiveView, searchQuery = '', movimientos = [], cuotasActivas = [], nombresTarjetas = {}, onGuardarNombre, gastosFijos = new Set(), gastosFijosDetalle = null, cotizacion = null, onFiltrarMovimientos, consumosLive = [], ciclosLive = {}, preguntasFijos = [], onResponderPregunta }) => {
+const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [], chartColors, formatCurrency, theme, resumenes = [], onDeleteResumen, setActiveView, searchQuery = '', movimientos = [], cuotasActivas = [], nombresTarjetas = {}, onGuardarNombre, gastosFijos = new Set(), gastosFijosDetalle = null, cotizacion = null, onFiltrarMovimientos, consumosLive = [], ciclosLive = {}, onAsignarBanco, preguntasFijos = [], onResponderPregunta }) => {
   const liveCards = useMemo(() => cardsEnCurso(ciclosLive, consumosLive), [ciclosLive, consumosLive]);
   const [showResumenes, setShowResumenes] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
@@ -2499,7 +2500,7 @@ const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [
       })()}
 
       {/* Últimos consumos: una Card por tarjeta, o SuperCard si comparten cierre y vto */}
-      <LiveCardsSection cards={liveCards} onVerDetalle={() => setActiveView?.('consumos-live')} />
+      <LiveCardsSection cards={liveCards} onVerDetalle={() => setActiveView?.('consumos-live')} onAsignarBanco={onAsignarBanco} bancos={BANCOS_COMUNES} />
 
       {/* Cards Grid */}
       <div className="flex items-center justify-between mb-2">
@@ -4046,7 +4047,7 @@ const describirGrupo = (g, alias) => {
   const a = g.bloques.map(b => alias[b.ult4]).find(Boolean) || {};
   const n = g.bloques.reduce((s, b) => s + b.consumos.filter(c => !c.es_pago).length, 0);
   const ok = g.bloques.every(b => b.validado);
-  return `${a.banco || ''} ${a.red || g.bloques[0].red} ${g.bloques.map(b => `#${b.ult4}`).join(' · ')} — ${n} consumos${ok ? ' · ✓ coincide con el total del banco' : ''}`;
+  return `${a.banco || '(banco sin indicar)'} ${a.red || g.bloques[0].red} ${g.bloques.map(b => `#${b.ult4}`).join(' · ')} — ${n} consumos${ok ? ' · ✓ coincide con el total del banco' : ''}`;
 };
 
 /**
@@ -4058,13 +4059,7 @@ const ImportarView = ({ onSuccess, preguntasFijos = [], onResponderPregunta }) =
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [results, setResults] = useState([]);
-  const [pendientes, setPendientes] = useState([]);   // archivos a los que les falta el banco
   const [mapeoManual, setMapeoManual] = useState(null); // formato nuevo sin IA disponible
-
-  const bancosSugeridos = useMemo(() => {
-    const propios = storage.getTarjetas().map(t => t.banco).filter(b => b && b !== 'Desconocido');
-    return [...new Set([...propios, ...BANCOS_COMUNES])];
-  }, [results]);
 
   // ---------- Resúmenes (PDF / imagen) ----------
   const subirResumenes = async (files) => {
@@ -4160,33 +4155,20 @@ const ImportarView = ({ onSuccess, preguntasFijos = [], onResponderPregunta }) =
       return { archivo: nombre, tipo: 'consumos', exito: false, error: res.warnings[0] || 'No se reconocieron consumos.' };
     }
 
+    // Se importa SIEMPRE al instante. Si el archivo no dice el banco (Santander,
+    // Galicia y Amex exportan igual) la Card del dashboard lo pide una sola vez.
     const grupos = agruparBloques(res.bloques);
     const alias = getAlias();
     const archivo = { id: `${nombre}|${Date.now()}`, nombre };
-    const faltan = grupos.map((g, i) => ({ i, g })).filter(x => !aliasConocido(x.g, alias));
-    if (faltan.length) {
-      setPendientes(p => [...p, {
-        archivo, grupos, warnings: res.warnings,
-        faltan: faltan.map(({ i, g }) => ({ i, ult4s: g.bloques.map(b => b.ult4), red: g.bloques[0].red, banco: res.banco_sugerido || '' }))
-      }]);
-      return { archivo: nombre, tipo: 'consumos', exito: true, pendiente: true, detalle: 'Indicá de qué banco es la tarjeta (una sola vez).', warnings: res.warnings };
-    }
-    importarGrupos({ grupos, asignaciones: {}, archivo });
+    const asignaciones = Object.fromEntries(grupos.map((g, i) => [i, { banco: aliasConocido(g, alias) ? undefined : (res.banco_sugerido || '') }]));
+    importarGrupos({ grupos, asignaciones, archivo });
     const aliasNuevo = getAlias();
-    return { archivo: nombre, tipo: 'consumos', exito: true, detalle: grupos.map(g => describirGrupo(g, aliasNuevo)).join('\n'), warnings: res.warnings };
-  };
-
-  const confirmarPendiente = (idx) => {
-    const p = pendientes[idx];
-    if (p.faltan.some(f => !f.banco.trim())) return;
-    const asignaciones = Object.fromEntries(p.faltan.map(f => [f.i, { banco: f.banco.trim() }]));
-    importarGrupos({ grupos: p.grupos, asignaciones, archivo: p.archivo });
-    const alias = getAlias();
-    setPendientes(prev => prev.filter((_, j) => j !== idx));
-    setResults(prev => prev.map(r => r.archivo === p.archivo.nombre && r.pendiente
-      ? { ...r, pendiente: false, detalle: p.grupos.map(g => describirGrupo(g, alias)).join('\n') }
-      : r));
-    onSuccess?.();
+    const faltaBanco = grupos.some(g => g.bloques.some(b => !aliasNuevo[b.ult4]?.banco));
+    return {
+      archivo: nombre, tipo: 'consumos', exito: true, pendiente: faltaBanco,
+      detalle: grupos.map(g => describirGrupo(g, aliasNuevo)).join('\n') + (faltaBanco ? '\nFalta el banco: indicalo en su Card del Dashboard.' : ''),
+      warnings: res.warnings
+    };
   };
 
   const confirmarMapeoManual = async (map) => {
@@ -4258,42 +4240,6 @@ const ImportarView = ({ onSuccess, preguntasFijos = [], onResponderPregunta }) =
           </>
         )}
       </div>
-
-      {/* Tarjetas nuevas: preguntar el banco una sola vez */}
-      {pendientes.map((p, idx) => (
-        <div key={p.archivo.id} className="glass-card p-5 mt-6 border-l-4 border-l-[var(--accent-1)]">
-          <p className="text-sm font-medium text-[var(--text-primary)] mb-1">¿De qué banco es?</p>
-          <p className="text-xs text-[var(--text-muted)] mb-4">{p.archivo.nombre} · el archivo no lo dice. Te lo preguntamos una sola vez.</p>
-          {p.faltan.map((f, k) => (
-            <div key={k} className="flex flex-wrap items-center gap-3 mb-3">
-              <span className="font-mono text-sm text-[var(--text-primary)]">
-                {f.red} {f.ult4s.map(u => `#${u}`).join(' · ')}
-              </span>
-              <input
-                list={`bancos-${idx}-${k}`}
-                value={f.banco}
-                placeholder="Banco"
-                onChange={(e) => setPendientes(prev => prev.map((pp, j) => j !== idx ? pp : {
-                  ...pp, faltan: pp.faltan.map((ff, kk) => kk === k ? { ...ff, banco: e.target.value } : ff)
-                }))}
-                className="flex-1 min-w-[160px] px-3 py-2 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--text-primary)] text-sm"
-              />
-              <datalist id={`bancos-${idx}-${k}`}>
-                {bancosSugeridos.map(b => <option key={b} value={b} />)}
-              </datalist>
-            </div>
-          ))}
-          <div className="flex justify-end">
-            <button
-              onClick={() => confirmarPendiente(idx)}
-              disabled={p.faltan.some(f => !f.banco.trim())}
-              className="px-4 py-2 rounded-lg bg-[var(--accent-1)] text-white font-medium text-sm disabled:opacity-50"
-            >
-              Confirmar
-            </button>
-          </div>
-        </div>
-      ))}
 
       {/* Results */}
       {results.length > 0 && (

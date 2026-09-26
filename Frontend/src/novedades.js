@@ -61,7 +61,7 @@ export const GUIA = [
     items: [
       'Arrastrá a Importar tus resúmenes (PDF o capturas) y tus últimos consumos (Excel .xlsx/.xls o CSV del home banking). Podés subir todo junto: la app reconoce cuál es cuál.',
       'Últimos consumos: bajalos del home banking cuantas veces quieras antes del cierre. Cada archivo nuevo reemplaza al anterior de esa tarjeta, así lo anulado desaparece.',
-      'La primera vez que subís una tarjeta te preguntamos de qué banco es (el archivo no lo dice). Después no se pregunta más.',
+      'Se importa al instante. Si el archivo no dice de qué banco es la tarjeta, su card en el Dashboard te lo pregunta una sola vez.',
       'Si el formato de tu banco es nuevo, la app lo interpreta sola (o te pide indicar las columnas) y lo recuerda para la próxima.',
       'Se leen automáticamente Galicia (Visa y Mastercard), BBVA y Santander. Otros bancos se leen con reconocimiento de imagen.',
       'Si subís el mismo resumen dos veces, se reemplaza: no se duplican los movimientos y se conservan tus cambios.',
