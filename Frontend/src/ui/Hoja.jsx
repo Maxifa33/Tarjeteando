@@ -1,9 +1,12 @@
 import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 
 /**
  * Hoja inferior de vidrio para celular. Entra desde abajo con --spring.
  * Esc, el velo o la X la cierran. Se usa desde la fase 4.
+ * Va en un portal a <body>: así queda por encima del riel y el vidrio desenfoca
+ * de verdad lo que hay detrás (dentro de <main> no puede).
  */
 const Hoja = ({ abierta, onCerrar, titulo, children }) => {
   const [visible, setVisible] = useState(false);
@@ -18,7 +21,7 @@ const Hoja = ({ abierta, onCerrar, titulo, children }) => {
 
   if (!abierta) return null;
 
-  return (
+  return createPortal(
     <div style={{ position: 'fixed', inset: 0, zIndex: 60 }}>
       <button
         type="button"
@@ -56,7 +59,8 @@ const Hoja = ({ abierta, onCerrar, titulo, children }) => {
         </div>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 

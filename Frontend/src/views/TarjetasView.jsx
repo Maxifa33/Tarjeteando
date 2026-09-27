@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Pencil, Check, X, ChevronRight, Trash2 } from 'lucide-react';
 import PilaWallet from '../ui/PilaWallet.jsx';
 import Plastico from '../ui/Plastico.jsx';
@@ -116,7 +117,8 @@ const ResumenesCargados = ({ resumenes, onBorrar, onCerrar, compacto }) => {
   );
   const tituloTxt = `Resúmenes cargados (${resumenes.length})`;
   if (compacto) return <Hoja abierta titulo={tituloTxt} onCerrar={onCerrar}>{lista}</Hoja>;
-  return (
+  // En un portal: por encima de la barra superior.
+  return createPortal(
     <div style={{ position: 'fixed', inset: 0, zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
       <button type="button" aria-label="Cerrar" tabIndex={-1} onClick={onCerrar} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,.32)', border: 0 }} />
       <div role="dialog" aria-modal="true" aria-label={tituloTxt} className="vidrio entra" style={{ position: 'relative', width: 'min(640px, 100%)', maxHeight: '80vh', overflowY: 'auto', borderRadius: 28, padding: '20px 24px' }}>
@@ -126,7 +128,8 @@ const ResumenesCargados = ({ resumenes, onBorrar, onCerrar, compacto }) => {
         </div>
         {lista}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 

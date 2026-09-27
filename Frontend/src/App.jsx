@@ -11,6 +11,7 @@ import AppShell from './ui/AppShell.jsx';
 import { manchasDeLuz, manchasElegida } from './ui/identidad.js';
 import MesView from './views/MesView.jsx';
 import TarjetasView from './views/TarjetasView.jsx';
+import MovimientosView from './views/MovimientosView.jsx';
 import { armarTarjetas, buscarTarjeta } from './services/tarjetas.js';
 import { serieEvolucion, detalleMes } from './services/evolucion.js';
 import { cicloDePago, cuotasDelMes, desfasePorTarjeta, proximoMes, sumarMeses, composicionPorTarjeta, composicionDesdeTarjetas, fijosPorTarjeta } from './services/mes.js';
@@ -1757,8 +1758,6 @@ const App = () => {
     { tipo: 'item', id: 'ajustes', label: 'Ajustes', onSelect: () => setSettingsOpen(true) },
     { tipo: 'item', id: 'consumos-live', label: 'Últimos consumos', onSelect: () => setActiveView('consumos-live') },
     { tipo: 'item', id: 'reglas', label: 'Reglas de nombres', onSelect: () => setActiveView('reglas') },
-    // Reintegros pasa a ser un filtro de Movimientos en la fase 4.
-    { tipo: 'item', id: 'reintegros', label: `Reintegros${reintegrosRecientes.length ? ` (${reintegrosRecientes.length})` : ''}`, onSelect: () => setActiveView('reintegros') },
     { tipo: 'item', id: 'guia', label: 'Guía y novedades', onSelect: () => setActiveView('guia') },
     { tipo: 'sep' },
     { tipo: 'titulo', label: 'Apariencia' },
@@ -1824,7 +1823,17 @@ const App = () => {
     () => armarTarjetas({ tarjetas, resumenes, ciclosLive, consumosLive }),
     [tarjetas, resumenes, ciclosLive, consumosLive]
   );
-  const [filtroMovTarjeta, setFiltroMovTarjeta] = useState(null); // { tarjeta, n }
+  // Para abrir Movimientos ya filtrado desde otra vista: { tarjeta?, tipo?, n }
+  const [movimientosFiltro, setMovimientosFiltro] = useState(null);
+  // Plan elegido al entrar a Cuotas desde un movimiento ("Ver plan en Cuotas"); lo usa la fase 5.
+  const [planElegido, setPlanElegido] = useState(null);
+  // Reintegros ya no es una vista: es un filtro de Movimientos.
+  useEffect(() => {
+    if (activeView === 'reintegros') {
+      setMovimientosFiltro({ tipo: 'reintegros', n: Date.now() });
+      setActiveView('movimientos');
+    }
+  }, [activeView]);
   // La tarjeta elegida tiñe el fondo.
   const elegidaLuz = activeView === 'tarjetas' ? buscarTarjeta(listaTarjetas, tarjetaElegida)?.id : null;
   const manchasVista = manchasElegida(manchas, elegidaLuz);
@@ -1862,7 +1871,7 @@ const App = () => {
         menu={menuMas}
         manchas={manchasVista}
         railIzquierda={apariencia.railIzquierda}
-        titulo={activeView === 'dashboard' ? null : TITULOS[activeView]}
+        titulo={activeView === 'dashboard' || activeView === 'movimientos' ? null : TITULOS[activeView]}
         subtitulo={(() => {
           const f = new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' }).replace(',', '');
           return f.charAt(0).toUpperCase() + f.slice(1);
@@ -1915,7 +1924,7 @@ const App = () => {
               onDeleteResumen={async (r) => { storage.deleteResumen(r.id); await fetchData(); }}
               onVerMovimientos={(t) => {
                 if (t.tarjeta) {
-                  setFiltroMovTarjeta({ tarjeta: t.tarjeta.nombre, n: Date.now() });
+                  setMovimientosFiltro({ tarjeta: t.tarjeta.nombre, n: Date.now() });
                   setActiveView('movimientos');
                 } else {
                   setActiveView('consumos-live'); // grupo sin resúmenes: sus consumos viven ahí
@@ -1928,13 +1937,20 @@ const App = () => {
               movimientos={movimientos}
               tarjetas={tarjetas}
               resumenes={resumenes}
-              searchQuery={searchQuery}
-              formatCurrency={formatCurrency}
+              reintegros={reintegros}
+              periodoRecienteLabel={periodoRecienteLabel}
+              gastosFijos={gastosFijos}
+              planes={cuotasActivas}
+              preguntas={preguntasFijos}
+              busqueda={searchQuery}
+              onBuscar={setSearchQuery}
               onEditarDescripcion={guardarEdicionDescripcion}
               onCambiarTipo={cambiarTipoGasto}
-              gastosFijos={gastosFijos}
+              onVerPlan={(plan) => { setPlanElegido(plan.id); setActiveView('cuotas'); }}
+              filtro={movimientosFiltro}
               filtroTipoGastoInicial={filtroTipoGastoInicial}
-              tarjetaInicial={filtroMovTarjeta}
+              nombresTarjetas={nombresTarjetas}
+              oscuro={oscuro}
             />
           ) : activeView === 'consumos-live' ? (
             <ConsumosLiveView
@@ -1948,13 +1964,6 @@ const App = () => {
           ) : activeView === 'cuotas' ? (
             <CuotasView
               cuotas={cuotasActivas}
-              formatCurrency={formatCurrency}
-              searchQuery={searchQuery}
-            />
-          ) : activeView === 'reintegros' ? (
-            <ReintegrosView
-              reintegros={reintegros}
-              periodoRecienteLabel={periodoRecienteLabel}
               formatCurrency={formatCurrency}
               searchQuery={searchQuery}
             />
@@ -2929,714 +2938,7 @@ const DashboardView = ({ foco = null, dashboard, tarjetas, proyecciones, proyecc
   );
 };
 
-// Movimientos View con paginación por mes y filtros
-/**
- * Badge Fijo/Variable de la columna Tipo. Click => desplegable para cambiarlo.
- * El cambio vale desde el resumen de ese movimiento hacia adelante.
- */
-const TipoGastoSelector = ({ esFijo, onCambiar }) => {
-  // El menú se dibuja en un portal con posición fija: la tabla tiene overflow y
-  // las filas animan con transform, dos cosas que recortarían un menú absoluto.
-  const [pos, setPos] = useState(null);
-  const abierto = !!pos;
-  const ref = React.useRef(null);
-  const menuRef = React.useRef(null);
-  const setAbierto = (valor) => {
-    if (typeof valor === 'function') valor = valor(abierto);
-    if (!valor) return setPos(null);
-    const r = ref.current?.getBoundingClientRect();
-    if (r) setPos({ top: r.bottom + 4, left: r.left });
-  };
-
-  useEffect(() => {
-    if (!abierto) return;
-    const cerrar = (e) => {
-      if (ref.current?.contains(e.target) || menuRef.current?.contains(e.target)) return;
-      setPos(null);
-    };
-    const cerrarSiempre = () => setPos(null);
-    document.addEventListener('mousedown', cerrar);
-    window.addEventListener('scroll', cerrarSiempre, true);
-    window.addEventListener('resize', cerrarSiempre);
-    return () => {
-      document.removeEventListener('mousedown', cerrar);
-      window.removeEventListener('scroll', cerrarSiempre, true);
-      window.removeEventListener('resize', cerrarSiempre);
-    };
-  }, [abierto]);
-
-  const estilos = {
-    fijo: 'bg-blue-500/15 text-blue-500 border-blue-500/30',
-    variable: 'bg-amber-500/15 text-amber-500 border-amber-500/30'
-  };
-  const actual = esFijo ? 'fijo' : 'variable';
-
-  return (
-    <div className="relative inline-block" ref={ref}>
-      <button
-        type="button"
-        disabled={!onCambiar}
-        onClick={() => setAbierto(a => !a)}
-        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border
-                    ${estilos[actual]} ${onCambiar ? 'cursor-pointer hover:brightness-110' : 'cursor-default'}`}
-        title={onCambiar ? 'Cambiar tipo de gasto' : undefined}
-      >
-        {esFijo ? <Repeat className="w-3 h-3" /> : <Shuffle className="w-3 h-3" />}
-        {esFijo ? 'Fijo' : 'Variable'}
-        {onCambiar && <ChevronDown className="w-3 h-3 opacity-70" />}
-      </button>
-      {abierto && createPortal(
-        <div ref={menuRef} style={{ position: 'fixed', top: pos.top, left: pos.left }}
-             className="z-[100] min-w-[9rem] rounded-xl border border-[var(--glass-border)]
-                        bg-[var(--bg-secondary)] backdrop-blur-xl shadow-xl p-1">
-          {[['fijo', 'Fijo', Repeat], ['variable', 'Variable', Shuffle]].map(([tipo, label, Icon]) => (
-            <button
-              key={tipo}
-              type="button"
-              onClick={() => { setAbierto(false); if (tipo !== actual) onCambiar(tipo); }}
-              className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-left
-                          hover:bg-[var(--glass-bg)] ${tipo === actual ? 'font-semibold text-[var(--text-primary)]' : 'text-[var(--text-secondary)]'}`}
-            >
-              <Icon className="w-3.5 h-3.5" />
-              {label}
-              {tipo === actual && <CheckCircle className="w-3.5 h-3.5 ml-auto text-emerald-500" />}
-            </button>
-          ))}
-        </div>,
-        document.body
-      )}
-    </div>
-  );
-};
-
-const MovimientosView = ({ movimientos, tarjetas = [], resumenes = [], searchQuery, formatCurrency, onEditarDescripcion, gastosFijos = new Set(), filtroTipoGastoInicial = '', onCambiarTipo, tarjetaInicial = null }) => {
-  const [mesActual, setMesActual] = useState(0);
-  const [showFilters, setShowFilters] = useState(false);
-
-  // Resúmenes ordenados de más reciente a más antiguo (fecha_cierre, fallback anio/mes)
-  const resumenesOrdenados = [...resumenes].sort((a, b) => {
-    const fechaA = a.fecha_cierre || `${a.anio}-${String(a.mes).padStart(2, '0')}-01`;
-    const fechaB = b.fecha_cierre || `${b.anio}-${String(b.mes).padStart(2, '0')}-01`;
-    return fechaB.localeCompare(fechaA);
-  });
-
-  const [modoFiltro, setModoFiltro] = useState(() => {
-    const guardado = localStorage.getItem('movimientos_modo_filtro');
-    return guardado === 'resumen' ? 'resumen' : 'mes';
-  });
-  const [resumenSeleccionado, setResumenSeleccionado] = useState('');
-
-  // Inicializar/resetear resumen seleccionado al resumen más reciente disponible
-  useEffect(() => {
-    if (modoFiltro !== 'resumen') return;
-    const existe = resumenesOrdenados.some(r => r.id === resumenSeleccionado);
-    if (!existe) {
-      if (resumenesOrdenados.length > 0) {
-        setResumenSeleccionado(resumenesOrdenados[0].id);
-      } else {
-        setModoFiltro('mes');
-      }
-    }
-  }, [modoFiltro, resumenesOrdenados, resumenSeleccionado]);
-
-  const cambiarModoFiltro = (modo) => {
-    setModoFiltro(modo);
-    localStorage.setItem('movimientos_modo_filtro', modo);
-  };
-
-  const periodoResumen = (r) => {
-    return r.fecha_cierre
-      ? new Date(r.fecha_cierre + 'T12:00:00').toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })
-      : (r.anio && r.mes ? new Date(r.anio, r.mes - 1).toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }) : 'período desconocido');
-  };
-
-  const labelResumen = (r) => {
-    const tarjetaInfo = tarjetas.find(t => t.nombre === r.tarjeta);
-    const banco = tarjetaInfo?.banco || 'Banco desconocido';
-    return `${banco} ${r.tarjeta} — ${periodoResumen(r)}`;
-  };
-
-  // Label compacto para los botones de paginación por resumen
-  const labelResumenCorto = (r) => {
-    const periodo = r.fecha_cierre
-      ? new Date(r.fecha_cierre + 'T12:00:00').toLocaleDateString('es-AR', { month: 'short', year: '2-digit' }).replace('.', '')
-      : (r.anio && r.mes ? new Date(r.anio, r.mes - 1).toLocaleDateString('es-AR', { month: 'short', year: '2-digit' }).replace('.', '') : '—');
-    return { tarjeta: r.tarjeta, periodo };
-  };
-
-  const resumenActivo = resumenesOrdenados.find(r => r.id === resumenSeleccionado);
-  const periodoResumenActivo = resumenActivo ? periodoResumen(resumenActivo) : '';
-  const resumenActualIdx = resumenesOrdenados.findIndex(r => r.id === resumenSeleccionado);
-
-  // Navegar a un resumen por su índice dentro de resumenesOrdenados
-  const irAResumen = (idx) => {
-    const r = resumenesOrdenados[idx];
-    if (r) setResumenSeleccionado(r.id);
-  };
-
-  // Ventana deslizante de 6 resúmenes, manteniendo visible el seleccionado
-  const RESUMENES_POR_PAGINA = 6;
-  const resumenesVentanaStart = Math.max(
-    0,
-    Math.min(
-      resumenActualIdx - Math.floor(RESUMENES_POR_PAGINA / 2),
-      resumenesOrdenados.length - RESUMENES_POR_PAGINA
-    )
-  );
-  const resumenesVentana = resumenesOrdenados
-    .map((r, idx) => ({ r, idx }))
-    .slice(resumenesVentanaStart, resumenesVentanaStart + RESUMENES_POR_PAGINA);
-
-  // Estado para edición inline
-  const [editandoId, setEditandoId] = useState(null);
-  const [nuevoNombre, setNuevoNombre] = useState('');
-
-  // Estados de filtros
-  const [filtroTarjeta, setFiltroTarjeta] = useState('');
-  const [filtroBanco, setFiltroBanco] = useState('');
-  const [filtroFechaDesde, setFiltroFechaDesde] = useState('');
-  const [filtroFechaHasta, setFiltroFechaHasta] = useState('');
-  const [filtroMoneda, setFiltroMoneda] = useState('');
-  const [filtroCuotas, setFiltroCuotas] = useState('');
-  const [filtroTipoGasto, setFiltroTipoGasto] = useState(filtroTipoGastoInicial); // '', 'fijo', 'variable'
-
-  // Desde Tarjetas ("Ver todos"): por resumen, en el último resumen de esa tarjeta.
-  useEffect(() => {
-    if (!tarjetaInicial?.tarjeta) return;
-    const ultimo = resumenesOrdenados.find(r => r.tarjeta === tarjetaInicial.tarjeta);
-    setFiltroTarjeta(tarjetaInicial.tarjeta);
-    setShowFilters(true);
-    if (ultimo) {
-      cambiarModoFiltro('resumen');
-      setResumenSeleccionado(ultimo.id);
-    }
-  }, [tarjetaInicial?.n]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Actualizar filtro si cambia el prop inicial y mostrar filtros si hay uno activo
-  useEffect(() => {
-    if (filtroTipoGastoInicial) {
-      setFiltroTipoGasto(filtroTipoGastoInicial);
-      setShowFilters(true);
-    }
-  }, [filtroTipoGastoInicial]);
-
-  // Obtener opciones únicas para los filtros
-  const tarjetasUnicas = [...new Set(movimientos.map(m => m.tarjeta))].sort();
-  const bancosUnicos = [...new Set(tarjetas.map(t => t.banco))].filter(Boolean).sort();
-
-  // Limpiar todos los filtros
-  const limpiarFiltros = () => {
-    setFiltroTarjeta('');
-    setFiltroBanco('');
-    setFiltroFechaDesde('');
-    setFiltroFechaHasta('');
-    setFiltroMoneda('');
-    setFiltroCuotas('');
-    setFiltroTipoGasto('');
-  };
-
-  // Contar filtros activos
-  const filtrosActivos = [filtroTarjeta, filtroBanco, filtroFechaDesde, filtroFechaHasta, filtroMoneda, filtroCuotas, filtroTipoGasto]
-    .filter(Boolean).length;
-
-  // Obtener meses únicos ordenados (más reciente primero)
-  const mesesUnicos = [...new Set(movimientos.map(m => mesKeyDeFecha(m.fecha_compra)).filter(Boolean))]
-    .sort().reverse();
-
-  const mesSeleccionado = mesesUnicos[mesActual] || mesesUnicos[0];
-
-  // Filtrar movimientos
-  const filtered = movimientos.filter(m => {
-    if (modoFiltro === 'resumen') {
-      // Filtro por resumen seleccionado
-      if (resumenSeleccionado && m.resumen_id !== resumenSeleccionado) return false;
-    } else if (mesSeleccionado && !filtroFechaDesde && !filtroFechaHasta) {
-      // Filtro por mes (paginación)
-      if (mesKeyDeFecha(m.fecha_compra) !== mesSeleccionado) return false;
-    }
-
-    // Filtro por búsqueda global
-    if (searchQuery &&
-        !m.referencia_limpia?.toLowerCase().includes(searchQuery.toLowerCase()) &&
-        !m.referencia_original?.toLowerCase().includes(searchQuery.toLowerCase())) {
-      return false;
-    }
-
-    // Filtro por tarjeta
-    if (filtroTarjeta && m.tarjeta !== filtroTarjeta) return false;
-
-    // Filtro por banco
-    if (filtroBanco) {
-      const tarjetaInfo = tarjetas.find(t => t.nombre === m.tarjeta);
-      if (!tarjetaInfo || tarjetaInfo.banco !== filtroBanco) return false;
-    }
-
-    // Filtro por fecha desde
-    if (filtroFechaDesde) {
-      const fechaMov = parseFechaLocal(m.fecha_compra);
-      const fechaDesde = parseFechaLocal(filtroFechaDesde);
-      if (!fechaMov || fechaMov < fechaDesde) return false;
-    }
-
-    // Filtro por fecha hasta
-    if (filtroFechaHasta) {
-      const fechaMov = parseFechaLocal(m.fecha_compra);
-      const fechaHasta = parseFechaLocal(filtroFechaHasta);
-      if (fechaHasta) fechaHasta.setHours(23, 59, 59, 999);
-      if (!fechaMov || fechaMov > fechaHasta) return false;
-    }
-
-    // Filtro por moneda
-    if (filtroMoneda === 'ARS' && !(m.monto_pesos > 0)) return false;
-    if (filtroMoneda === 'USD' && !(m.monto_dolares > 0)) return false;
-
-    // Filtro por cuotas
-    if (filtroCuotas === 'si' && !m.cuota_texto) return false;
-    if (filtroCuotas === 'no' && m.cuota_texto) return false;
-
-    // Filtro por tipo de gasto (fijo/variable)
-    if (filtroTipoGasto === 'fijo' && !esGastoFijo(m, gastosFijos)) return false;
-    if (filtroTipoGasto === 'variable' && esGastoFijo(m, gastosFijos)) return false;
-
-    return true;
-  });
-
-  // Detectar si es última cuota
-  const esUltimaCuota = (cuotaTexto) => {
-    if (!cuotaTexto) return false;
-    const match = cuotaTexto.match(/(\d+)\/(\d+)/);
-    return match && match[1] === match[2];
-  };
-
-  // Guardar edición de descripción
-  const handleGuardarEdicion = (mov) => {
-    if (nuevoNombre.trim() && nuevoNombre.trim() !== (mov.referencia_limpia || mov.referencia_original)) {
-      onEditarDescripcion?.(mov, nuevoNombre.trim());
-    }
-    setEditandoId(null);
-    setNuevoNombre('');
-  };
-
-  // Iniciar edición
-  const handleIniciarEdicion = (mov) => {
-    setEditandoId(mov.id);
-    setNuevoNombre(mov.referencia_limpia || mov.referencia_original);
-  };
-
-  return (
-    <div className="space-y-4">
-      {/* Panel de filtros */}
-      <div className="glass-card p-4">
-        <div className="flex items-center justify-between mb-4">
-          <button
-            onClick={() => setShowFilters(!showFilters)}
-            className="flex items-center gap-2 text-[var(--text-primary)] font-medium"
-          >
-            <Filter className="w-4 h-4" />
-            Filtros
-            {filtrosActivos > 0 && (
-              <span className="px-2 py-0.5 text-xs rounded-full bg-[var(--accent-1)] text-white">
-                {filtrosActivos}
-              </span>
-            )}
-          </button>
-
-          {filtrosActivos > 0 && (
-            <button
-              onClick={limpiarFiltros}
-              className="text-sm text-[var(--accent-1)] hover:underline"
-            >
-              Limpiar filtros
-            </button>
-          )}
-        </div>
-
-        {showFilters && (
-          <div className="pt-3 border-t border-[var(--glass-border)] space-y-4">
-            {/* Modo de agrupación: por mes / por resumen */}
-            <div className="flex flex-wrap items-center gap-3">
-              <label className="block text-xs text-[var(--text-muted)]">Agrupar por</label>
-              <div
-                className="inline-flex gap-1 p-1 rounded-lg bg-[var(--glass-bg)]"
-                title={resumenesOrdenados.length === 0 ? 'Importá un resumen primero' : ''}
-              >
-                <button
-                  onClick={() => cambiarModoFiltro('mes')}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all
-                             ${modoFiltro === 'mes'
-                               ? 'bg-gradient-to-r from-[var(--accent-1)] to-[var(--accent-2)] text-white'
-                               : 'text-[var(--text-secondary)] hover:bg-opacity-80'}`}
-                >
-                  Por mes
-                </button>
-                <button
-                  onClick={() => cambiarModoFiltro('resumen')}
-                  disabled={resumenesOrdenados.length === 0}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed
-                             ${modoFiltro === 'resumen'
-                               ? 'bg-gradient-to-r from-[var(--accent-1)] to-[var(--accent-2)] text-white'
-                               : 'text-[var(--text-secondary)] hover:bg-opacity-80'}`}
-                >
-                  Por resumen
-                </button>
-              </div>
-
-              {modoFiltro === 'resumen' && resumenesOrdenados.length > 0 && (
-                <select
-                  value={resumenSeleccionado}
-                  onChange={(e) => setResumenSeleccionado(e.target.value)}
-                  className="px-3 py-2 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)]
-                             text-[var(--text-primary)] text-sm focus:outline-none focus:border-[var(--accent-1)]"
-                >
-                  {resumenesOrdenados.map(r => (
-                    <option key={r.id} value={r.id}>{labelResumen(r)}</option>
-                  ))}
-                </select>
-              )}
-            </div>
-
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
-            {/* Filtro por Tarjeta */}
-            <div>
-              <label className="block text-xs text-[var(--text-muted)] mb-1">Tarjeta</label>
-              <select
-                value={filtroTarjeta}
-                onChange={(e) => setFiltroTarjeta(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)]
-                           text-[var(--text-primary)] text-sm focus:outline-none focus:border-[var(--accent-1)]"
-              >
-                <option value="">Todas</option>
-                {tarjetasUnicas.map(t => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Filtro por Banco */}
-            <div>
-              <label className="block text-xs text-[var(--text-muted)] mb-1">Banco</label>
-              <select
-                value={filtroBanco}
-                onChange={(e) => setFiltroBanco(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)]
-                           text-[var(--text-primary)] text-sm focus:outline-none focus:border-[var(--accent-1)]"
-              >
-                <option value="">Todos</option>
-                {bancosUnicos.map(b => (
-                  <option key={b} value={b}>{b}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Filtro fecha desde */}
-            <div>
-              <label className="block text-xs text-[var(--text-muted)] mb-1">Desde</label>
-              <input
-                type="date"
-                value={filtroFechaDesde}
-                onChange={(e) => setFiltroFechaDesde(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)]
-                           text-[var(--text-primary)] text-sm focus:outline-none focus:border-[var(--accent-1)]"
-              />
-            </div>
-
-            {/* Filtro fecha hasta */}
-            <div>
-              <label className="block text-xs text-[var(--text-muted)] mb-1">Hasta</label>
-              <input
-                type="date"
-                value={filtroFechaHasta}
-                onChange={(e) => setFiltroFechaHasta(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)]
-                           text-[var(--text-primary)] text-sm focus:outline-none focus:border-[var(--accent-1)]"
-              />
-            </div>
-
-            {/* Filtro por Moneda */}
-            <div>
-              <label className="block text-xs text-[var(--text-muted)] mb-1">Moneda</label>
-              <select
-                value={filtroMoneda}
-                onChange={(e) => setFiltroMoneda(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)]
-                           text-[var(--text-primary)] text-sm focus:outline-none focus:border-[var(--accent-1)]"
-              >
-                <option value="">Todas</option>
-                <option value="ARS">Pesos (ARS)</option>
-                <option value="USD">Dólares (USD)</option>
-              </select>
-            </div>
-
-            {/* Filtro por Cuotas */}
-            <div>
-              <label className="block text-xs text-[var(--text-muted)] mb-1">Cuotas</label>
-              <select
-                value={filtroCuotas}
-                onChange={(e) => setFiltroCuotas(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)]
-                           text-[var(--text-primary)] text-sm focus:outline-none focus:border-[var(--accent-1)]"
-              >
-                <option value="">Todas</option>
-                <option value="si">Con cuotas</option>
-                <option value="no">Sin cuotas</option>
-              </select>
-            </div>
-
-            {/* Filtro por Tipo de Gasto */}
-            <div>
-              <label className="block text-xs text-[var(--text-muted)] mb-1">Tipo</label>
-              <select
-                value={filtroTipoGasto}
-                onChange={(e) => setFiltroTipoGasto(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)]
-                           text-[var(--text-primary)] text-sm focus:outline-none focus:border-[var(--accent-1)]"
-              >
-                <option value="">Todos</option>
-                <option value="fijo">Fijos</option>
-                <option value="variable">Variables</option>
-              </select>
-            </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div className="glass-card overflow-hidden">
-        <div className="p-6 border-b border-[var(--glass-border)] flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-[var(--text-primary)]">
-            {filtered.length} movimientos
-          </h3>
-          {modoFiltro === 'resumen' && resumenActivo ? (
-            <span className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-[var(--accent-1)] to-[var(--accent-2)] text-white text-sm font-medium">
-              Período: {periodoResumenActivo}
-            </span>
-          ) : mesSeleccionado && !filtroFechaDesde && !filtroFechaHasta && (() => {
-            const [anio, mesNum] = mesSeleccionado.split('-');
-            const nombreMes = new Date(anio, parseInt(mesNum) - 1).toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
-            return (
-              <span className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-[var(--accent-1)] to-[var(--accent-2)] text-white text-sm font-medium capitalize">
-                {nombreMes}
-              </span>
-            );
-          })()}
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="bg-[var(--glass-bg)]">
-                <th className="text-left p-4 text-sm font-medium text-[var(--text-muted)]">Fecha</th>
-                <th className="text-left p-4 text-sm font-medium text-[var(--text-muted)]">Tarjeta</th>
-                <th className="text-left p-4 text-sm font-medium text-[var(--text-muted)]">Descripción</th>
-                <th className="text-left p-4 text-sm font-medium text-[var(--text-muted)]">Tipo</th>
-                <th className="text-left p-4 text-sm font-medium text-[var(--text-muted)]">Cuota</th>
-                <th className="text-right p-4 text-sm font-medium text-[var(--text-muted)]">Monto</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.slice(0, 100).map((mov, idx) => (
-                <tr
-                  key={mov.id || idx}
-                  className="border-b border-[var(--glass-border)] hover:bg-[var(--glass-bg)]
-                             transition-colors opacity-0 animate-fade-in-up"
-                  style={{ animationDelay: `${Math.min(idx, 20) * 30}ms`, animationFillMode: 'forwards' }}
-                >
-                  <td className="p-4 text-sm text-[var(--text-secondary)]">
-                    {parseFechaLocal(mov.fecha_compra)?.toLocaleDateString('es-AR') || '—'}
-                  </td>
-                  <td className="p-4">
-                    <span className="px-2 py-1 rounded-lg text-xs font-medium bg-[var(--glass-bg)]
-                                     text-[var(--text-secondary)]">
-                      {mov.tarjeta}
-                    </span>
-                  </td>
-                  <td className="p-4 text-sm text-[var(--text-primary)] font-medium">
-                    {editandoId === mov.id ? (
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          value={nuevoNombre}
-                          onChange={(e) => setNuevoNombre(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') handleGuardarEdicion(mov);
-                            if (e.key === 'Escape') { setEditandoId(null); setNuevoNombre(''); }
-                          }}
-                          autoFocus
-                          className="flex-1 px-2 py-1 rounded-lg bg-[var(--glass-bg)] border border-[var(--accent-1)]
-                                     text-[var(--text-primary)] text-sm focus:outline-none"
-                        />
-                        <button
-                          onClick={() => handleGuardarEdicion(mov)}
-                          className="p-1.5 rounded-lg bg-emerald-500/20 text-emerald-500 hover:bg-emerald-500/30"
-                          title="Guardar"
-                        >
-                          <CheckCircle className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => { setEditandoId(null); setNuevoNombre(''); }}
-                          className="p-1.5 rounded-lg bg-red-500/20 text-red-500 hover:bg-red-500/30"
-                          title="Cancelar"
-                        >
-                          <XCircle className="w-4 h-4" />
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-2 group">
-                        <span>{mov.referencia_limpia || mov.referencia_original}</span>
-                        <button
-                          onClick={() => handleIniciarEdicion(mov)}
-                          className="opacity-0 group-hover:opacity-100 p-1 rounded-lg hover:bg-[var(--glass-bg)]
-                                     text-[var(--text-muted)] hover:text-[var(--accent-1)] transition-all"
-                          title="Editar descripcion"
-                        >
-                          <Edit3 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    )}
-                  </td>
-                  <td className="p-4 text-sm">
-                    <TipoGastoSelector
-                      esFijo={esGastoFijo(mov, gastosFijos)}
-                      onCambiar={onCambiarTipo ? (tipo) => onCambiarTipo(mov, tipo) : null}
-                    />
-                  </td>
-                  <td className="p-4 text-sm">
-                    {mov.cuota_texto ? (
-                      esUltimaCuota(mov.cuota_texto) ? (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full
-                                        bg-gradient-to-r from-emerald-500/20 to-teal-500/20
-                                        text-emerald-400 font-semibold border border-emerald-500/30">
-                          <Trophy className="w-3.5 h-3.5" />
-                          {mov.cuota_texto}
-                        </span>
-                      ) : (
-                        <span className="text-[var(--text-muted)]">{mov.cuota_texto}</span>
-                      )
-                    ) : (
-                      <span className="text-[var(--text-muted)]">-</span>
-                    )}
-                  </td>
-                  <td className="p-4 text-right">
-                    {mov.monto_pesos > 0 && (
-                      <span className="text-sm font-semibold text-[var(--text-primary)]">
-                        {formatCurrency(mov.monto_pesos)}
-                      </span>
-                    )}
-                    {mov.monto_dolares > 0 && (
-                      <span className="block text-sm font-medium text-emerald-500">
-                        {formatCurrency(mov.monto_dolares, 'USD')}
-                      </span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {filtered.length > 100 && (
-            <p className="text-center text-sm text-[var(--text-muted)] py-4">
-              Mostrando 100 de {filtered.length} movimientos. Usa los filtros para refinar.
-            </p>
-          )}
-        </div>
-
-        {/* Paginación por mes - solo si no hay filtros de fecha ni modo "por resumen" */}
-        {modoFiltro !== 'resumen' && mesesUnicos.length > 1 && !filtroFechaDesde && !filtroFechaHasta && (
-          <div className="p-4 border-t border-[var(--glass-border)] flex items-center justify-between">
-            <button
-              onClick={() => setMesActual(prev => Math.min(prev + 1, mesesUnicos.length - 1))}
-              disabled={mesActual >= mesesUnicos.length - 1}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--glass-bg)]
-                         text-[var(--text-secondary)] hover:bg-opacity-80 transition-all
-                         disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <ChevronRight className="w-4 h-4 rotate-180" />
-              Mes Anterior
-            </button>
-
-            <div className="flex items-center gap-2">
-              {mesesUnicos.slice(Math.max(0, mesActual - 2), mesActual + 3).map((mes) => {
-                const [anio, mesNum] = mes.split('-');
-                const nombreMes = new Date(anio, mesNum - 1).toLocaleDateString('es-AR', { month: 'short' });
-                const isSelected = mes === mesSeleccionado;
-                return (
-                  <button
-                    key={mes}
-                    onClick={() => setMesActual(mesesUnicos.indexOf(mes))}
-                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all
-                               ${isSelected
-                                 ? 'bg-gradient-to-r from-[var(--accent-1)] to-[var(--accent-2)] text-white'
-                                 : 'bg-[var(--glass-bg)] text-[var(--text-secondary)] hover:bg-opacity-80'}`}
-                  >
-                    {nombreMes} {anio.slice(2)}
-                  </button>
-                );
-              })}
-            </div>
-
-            <button
-              onClick={() => setMesActual(prev => Math.max(prev - 1, 0))}
-              disabled={mesActual <= 0}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--glass-bg)]
-                         text-[var(--text-secondary)] hover:bg-opacity-80 transition-all
-                         disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Mes Siguiente
-              <ChevronRight className="w-4 h-4" />
-            </button>
-          </div>
-        )}
-
-        {/* Paginación por resumen - reemplaza la de mes cuando el modo es "por resumen" */}
-        {modoFiltro === 'resumen' && resumenesOrdenados.length > 1 && (
-          <div className="p-4 border-t border-[var(--glass-border)] flex items-center justify-between gap-2">
-            <button
-              onClick={() => irAResumen(Math.min(resumenActualIdx + 1, resumenesOrdenados.length - 1))}
-              disabled={resumenActualIdx >= resumenesOrdenados.length - 1}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--glass-bg)]
-                         text-[var(--text-secondary)] hover:bg-opacity-80 transition-all
-                         disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
-            >
-              <ChevronRight className="w-4 h-4 rotate-180" />
-              Resumen Anterior
-            </button>
-
-            <div className="flex items-center gap-2 overflow-x-auto">
-              {resumenesVentana.map(({ r, idx }) => {
-                const { tarjeta, periodo } = labelResumenCorto(r);
-                const isSelected = idx === resumenActualIdx;
-                return (
-                  <button
-                    key={r.id}
-                    onClick={() => irAResumen(idx)}
-                    title={labelResumen(r)}
-                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all whitespace-nowrap
-                               ${isSelected
-                                 ? 'bg-gradient-to-r from-[var(--accent-1)] to-[var(--accent-2)] text-white'
-                                 : 'bg-[var(--glass-bg)] text-[var(--text-secondary)] hover:bg-opacity-80'}`}
-                  >
-                    <span className="max-w-[80px] truncate inline-block align-middle">{tarjeta}</span>
-                    <span className="opacity-70"> · {periodo}</span>
-                  </button>
-                );
-              })}
-            </div>
-
-            <button
-              onClick={() => irAResumen(Math.max(resumenActualIdx - 1, 0))}
-              disabled={resumenActualIdx <= 0}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--glass-bg)]
-                         text-[var(--text-secondary)] hover:bg-opacity-80 transition-all
-                         disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
-            >
-              Resumen Siguiente
-              <ChevronRight className="w-4 h-4" />
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
+// MovimientosView se mudó a views/MovimientosView.jsx (fase 4).
 
 // Cuotas View con última cuota destacada
 const CuotasView = ({ cuotas = [], formatCurrency, searchQuery = '' }) => {
