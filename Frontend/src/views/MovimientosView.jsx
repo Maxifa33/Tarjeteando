@@ -285,6 +285,7 @@ const MovimientosView = ({
       nombre={m.referencia_limpia || m.referencia_original || 'Sin descripción'}
       tipo={tipoDeFila(m, gastosFijos)}
       plastico={idDe(m.tarjeta).plastico}
+      nombreTarjeta={nombreTarjeta(m.tarjeta)}
       seleccionado={!usarHoja && sel?.id === m.id}
       onClick={() => elegir(m)}
       compacto={compacto}

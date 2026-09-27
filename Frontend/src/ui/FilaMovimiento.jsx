@@ -6,7 +6,7 @@ import { pesos, dolares } from './formato.js';
  * etiquetas y monto. Celular: sin etiquetas; el tipo va como texto en la 2.ª línea.
  * tipo: 'variable' | 'fijo' | 'cuota' | 'reintegro'
  */
-const FilaMovimiento = forwardRef(({ mov, nombre, tipo, plastico, seleccionado = false, onClick, compacto = false }, ref) => {
+const FilaMovimiento = forwardRef(({ mov, nombre, tipo, plastico, nombreTarjeta = null, seleccionado = false, onClick, compacto = false }, ref) => {
   const usd = Number(mov.monto_dolares) || 0;
   const ars = Number(mov.monto_pesos) || 0;
   const esReint = tipo === 'reintegro';
@@ -17,7 +17,7 @@ const FilaMovimiento = forwardRef(({ mov, nombre, tipo, plastico, seleccionado =
 
   // Celular: 'Fijo · ·4410' (o el nombre de la tarjeta si no hay últimos 4).
   const segunda = compacto
-    ? [tipoTxt, mov.tarjeta_ult4 ? `·${mov.tarjeta_ult4}` : mov.tarjeta].filter(Boolean).join(' · ')
+    ? [tipoTxt, mov.tarjeta_ult4 ? `·${mov.tarjeta_ult4}` : (nombreTarjeta || mov.tarjeta)].filter(Boolean).join(' · ')
     : `${mov.referencia_original || ''}${ult4}`;
 
   return (

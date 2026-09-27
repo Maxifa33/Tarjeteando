@@ -4,7 +4,7 @@
 import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { armarTarjetas, buscarTarjeta, resumenTodas } from './tarjetas.js';
+import { armarTarjetas, buscarTarjeta, resumenTodas, nombreVisible, migrarNombresLive } from './tarjetas.js';
 
 const HOY = '2026-09-26';
 const tarjetas = [
@@ -96,5 +96,29 @@ describe('resumenTodas', () => {
     assert.equal(r.disponible, 23750000);
     assert.equal(r.limite, 26200000);
     assert.equal(r.plasticos, 5);
+  });
+});
+
+describe('nombres personalizados', () => {
+  test('nombreVisible: por id de tarjeta, por live:<grupoKey> o el nombre', () => {
+    const nombres = { 2: 'Santander de Maxi', 'live:sin-banco|Mastercard|8823': 'La MC nueva' };
+    assert.equal(nombreVisible('VISA Santander', { tarjetas, nombres }), 'Santander de Maxi');
+    assert.equal(nombreVisible('sin-banco|Mastercard|8823', { tarjetas, nombres, fallback: 'Sin banco Mastercard' }), 'La MC nueva');
+    assert.equal(nombreVisible('VISA Macro', { tarjetas, nombres }), 'VISA Macro');
+  });
+
+  test('migrarNombresLive: el nombre pasa a la tarjeta cuando llega su resumen', () => {
+    const conMC = [...tarjetas, { id: 4, nombre: 'Mastercard Galicia', banco: 'Galicia', tipo: 'Mastercard' }];
+    const ciclos = { 'Galicia|Mastercard|8823': { grupoKey: 'Galicia|Mastercard|8823', banco: 'Galicia', red: 'Mastercard', estado: 'conciliado' } };
+    const r = migrarNombresLive({ 'live:Galicia|Mastercard|8823': 'La MC nueva' }, { tarjetas: conMC, ciclosLive: ciclos });
+    assert.deepEqual(r, { 4: 'La MC nueva' });
+    // Idempotente y sin cambios si no hay nada que mudar.
+    assert.equal(migrarNombresLive(r, { tarjetas: conMC, ciclosLive: ciclos }), r);
+  });
+
+  test('migrarNombresLive: un nombre ya puesto en la tarjeta no se pisa', () => {
+    const conMC = [{ id: 4, nombre: 'Mastercard Galicia', banco: 'Galicia', tipo: 'Mastercard' }];
+    const ciclos = { g: { grupoKey: 'g', banco: 'Galicia', red: 'Mastercard' } };
+    assert.deepEqual(migrarNombresLive({ 4: 'Ya tenía', 'live:g': 'Otro' }, { tarjetas: conMC, ciclosLive: ciclos }), { 4: 'Ya tenía' });
   });
 });

@@ -7,12 +7,15 @@ import React from 'react';
  */
 export const TAM_PLASTICO = { web: { w: 400, h: 252 }, compacto: { w: 358, h: 226 } };
 
-const Plastico = ({ identidad, banco, red, estado, monto, vence, ultimos4 = [], superCard = false, compacto = false }) => {
-  const { w, h } = compacto ? TAM_PLASTICO.compacto : TAM_PLASTICO.web;
+const Plastico = ({ identidad, banco, red, estado, monto, vence, ultimos4 = [], superCard = false, compacto = false, ancho = null }) => {
+  const base = compacto ? TAM_PLASTICO.compacto : TAM_PLASTICO.web;
+  // En pantallas más angostas que el plástico, se achica manteniendo la proporción.
+  const w = ancho ? Math.min(base.w, ancho) : base.w;
+  const h = Math.round((w * base.h) / base.w);
   const fg = identidad.texto;
   const fg2 = identidad.texto2;
   return (
-    <div style={{ position: 'relative', width: w }}>
+    <div style={{ position: 'relative', width: w, maxWidth: '100%' }}>
       {superCard && (
         <div aria-hidden="true" style={{ position: 'absolute', left: 12, right: 12, top: -9, height: 60, borderRadius: 18, background: identidad.plastico, opacity: 0.55 }} />
       )}

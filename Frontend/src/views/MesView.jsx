@@ -215,7 +215,8 @@ const MesView = ({
   onImportar,
   tarjetas = [],
   oscuro = true,
-  evolucion = null
+  evolucion = null,
+  nombreDe = (id, fallback) => fallback || id // nombre personalizado de la tarjeta (fase 6)
 }) => {
   const compacto = useCompacto();
   const [refEvo, anchoEvo] = useAncho();
@@ -264,7 +265,7 @@ const MesView = ({
     return {
       tarjeta: ordenApilado(lista).map(t => {
         const id = ids.get(t.nombre);
-        return { id: t.nombre, nombre: t.etiqueta || t.nombre, color: oscuro ? id.chartOscuro : id.chartClaro };
+        return { id: t.nombre, nombre: nombreDe(t.nombre, t.etiqueta || t.nombre), color: oscuro ? id.chartOscuro : id.chartClaro };
       }),
       tipo: [
         { id: 'cuotas', nombre: 'Cuotas', color: 'var(--r1)' },
@@ -431,7 +432,7 @@ const MesView = ({
     const vivos = ciclo.porTarjeta.filter(t => t.fuente === 'en_curso');
     const ultimo = vivos.map(t => t.actualizado).filter(Boolean).sort().pop();
     if (vivos.length) partes.push(`Últimos consumos${ultimo ? ` de ${momento(ultimo)}` : ''}`);
-    ciclo.porTarjeta.filter(t => t.fuente === 'resumen_cerrado').forEach(t => partes.push(`resumen cerrado de ${t.nombre}`));
+    ciclo.porTarjeta.filter(t => t.fuente === 'resumen_cerrado').forEach(t => partes.push(`resumen cerrado de ${nombreDe(t.tarjetaId, t.nombre)}`));
     return partes.join(' · ');
   })();
 
@@ -442,12 +443,12 @@ const MesView = ({
         <>
           <p style={{ margin: '8px 0 0', fontSize: 15, lineHeight: '22px', color: 'var(--label2)' }}>
             {yaAbierto ? (
-              <>Todavía no hay consumos importados de ciclos que se paguen en {mes}. El de {yaAbierto.nombre} arrancó el <strong style={{ color: 'var(--label)', fontWeight: 600 }}>{diaLargo(sumarDia(yaAbierto.cierre))}</strong>: importá sus Últimos consumos para verlo acá.</>
+              <>Todavía no hay consumos importados de ciclos que se paguen en {mes}. El de {nombreDe(yaAbierto.tarjetaId, yaAbierto.nombre)} arrancó el <strong style={{ color: 'var(--label)', fontWeight: 600 }}>{diaLargo(sumarDia(yaAbierto.cierre))}</strong>: importá sus Últimos consumos para verlo acá.</>
             ) : (
               <>
                 Todavía no abrió ningún ciclo que se pague en {mes}.
                 {primerCierre && (
-                  <> El primero arranca el <strong style={{ color: 'var(--label)', fontWeight: 600 }}>{diaLargo(sumarDia(primerCierre.cierre))}</strong>, el día después del cierre de {primerCierre.nombre}.</>
+                  <> El primero arranca el <strong style={{ color: 'var(--label)', fontWeight: 600 }}>{diaLargo(sumarDia(primerCierre.cierre))}</strong>, el día después del cierre de {nombreDe(primerCierre.tarjetaId, primerCierre.nombre)}.</>
                 )}
               </>
             )}
@@ -467,14 +468,14 @@ const MesView = ({
                 key={t.tarjetaId}
                 type="button"
                 onClick={() => (sinDatos ? onImportar?.() : onAbrirTarjeta?.(t.tarjetaId))}
-                aria-label={sinDatos ? `${t.nombre}: sin datos de este ciclo. Importar Últimos consumos` : `Abrir ${t.nombre} en Tarjetas`}
+                aria-label={sinDatos ? `${nombreDe(t.tarjetaId, t.nombre)}: sin datos de este ciclo. Importar Últimos consumos` : `Abrir ${nombreDe(t.tarjetaId, t.nombre)} en Tarjetas`}
                 className="fila"
                 style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6, padding: '10px 8px', borderBottom: '0.5px solid var(--sep)', borderRadius: 0, textAlign: 'left', color: 'var(--label)', minHeight: 56 }}
               >
                 <span style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%' }}>
                   <MiniPlastico fondo={id.plastico} multi={t.plasticos.length > 1} />
                   <span style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                    <span style={{ fontSize: 14, fontWeight: 600 }}>{t.nombre}</span>
+                    <span style={{ fontSize: 14, fontWeight: 600 }}>{nombreDe(t.tarjetaId, t.nombre)}</span>
                     <span className="cap">{metaDe(t)}</span>
                   </span>
                   {!sinDatos && (

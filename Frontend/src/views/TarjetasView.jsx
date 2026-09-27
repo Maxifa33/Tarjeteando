@@ -553,7 +553,7 @@ const TarjetasView = ({
   );
 
   const pila = unaSola ? (
-    <Plastico {...cartas[0]} compacto={compacto} />
+    <Plastico {...cartas[0]} compacto={compacto} ancho={compacto && typeof window !== 'undefined' ? window.innerWidth - 32 : null} />
   ) : (
     <PilaWallet tarjetas={cartas} elegida={sel?.id || null} onElegir={onElegir} compacto={compacto} oscuro={oscuro} />
   );

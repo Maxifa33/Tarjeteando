@@ -142,6 +142,8 @@
   font-size: 13px;
   font-weight: 500;
   color: var(--label);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 /* Celular: áreas táctiles de 44 px */
 @media (max-width: 767.98px) {
@@ -219,6 +221,9 @@
   text-align: left;
 }
 .tj .menu-mas button:hover { background: var(--fill2); }
+@media (max-width: 767.98px) {
+  .tj .menu-mas button { min-height: 44px; font-size: 15px; }
+}
 .tj .menu-mas .sep {
   height: 0.5px;
   background: var(--sep);

@@ -13,7 +13,7 @@ import MesView from './views/MesView.jsx';
 import TarjetasView from './views/TarjetasView.jsx';
 import MovimientosView from './views/MovimientosView.jsx';
 import CuotasView from './views/CuotasView.jsx';
-import { armarTarjetas, buscarTarjeta } from './services/tarjetas.js';
+import { armarTarjetas, buscarTarjeta, nombreVisible, migrarNombresLive } from './services/tarjetas.js';
 import { serieEvolucion, detalleMes } from './services/evolucion.js';
 import { cicloDePago, cuotasDelMes, desfasePorTarjeta, proximoMes, sumarMeses, composicionPorTarjeta, composicionDesdeTarjetas, fijosPorTarjeta } from './services/mes.js';
 import { clasesApariencia, modoEfectivo, temaLegacy } from './services/apariencia.js';
@@ -1821,6 +1821,18 @@ const App = () => {
     return { columnas, detalles };
   }, [mes, resumenes, movimientos, tiposGasto, cuotasActivas, gastosFijosDetalle, cotizacionVenta]);
 
+  // Nombres personalizados en todas las vistas (fase 6).
+  const nombreDe = (id, fallback) => nombreVisible(id, { tarjetas, nombres: nombresTarjetas, fallback });
+  // Una tarjeta que solo existía por Últimos consumos y ahora tiene resumen: su nombre
+  // ('live:<grupoKey>') pasa a la clave de la tarjeta.
+  useEffect(() => {
+    const migrados = migrarNombresLive(nombresTarjetas, { tarjetas, ciclosLive });
+    if (migrados !== nombresTarjetas) {
+      setNombresTarjetas(migrados);
+      try { localStorage.setItem('nombresTarjetas', JSON.stringify(migrados)); } catch { /* sin storage */ }
+    }
+  }, [tarjetas, ciclosLive, nombresTarjetas]);
+
   // ===== Sección Tarjetas (fase 3) =====
   const listaTarjetas = useMemo(
     () => armarTarjetas({ tarjetas, resumenes, ciclosLive, consumosLive }),
@@ -1916,6 +1928,7 @@ const App = () => {
               tarjetas={tarjetas}
               oscuro={oscuro}
               evolucion={evolucion}
+              nombreDe={nombreDe}
             />
           ) : activeView === 'tarjetas' ? (
             <TarjetasView

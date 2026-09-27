@@ -133,3 +133,38 @@ export function resumenTodas(lista = []) {
     plasticos: lista.reduce((s, t) => s + Math.max(1, t.ultimos4.length), 0)
   };
 }
+
+/**
+ * Nombre para mostrar de una tarjeta en cualquier vista. Los nombres personalizados
+ * (localStorage 'nombresTarjetas') se guardan por id de la tarjeta de la lista, o por
+ * 'live:<grupoKey>' si la tarjeta solo existe por Últimos consumos.
+ */
+export function nombreVisible(tarjetaId, { tarjetas = [], nombres = {}, fallback = null } = {}) {
+  const t = tarjetas.find((x) => x.nombre === tarjetaId);
+  if (t && nombres[t.id]) return nombres[t.id];
+  if (nombres[`live:${tarjetaId}`]) return nombres[`live:${tarjetaId}`];
+  return fallback || tarjetaId;
+}
+
+/**
+ * Cuando una tarjeta que solo existía por Últimos consumos pasa a tener resumen, su
+ * nombre personalizado ('live:<grupoKey>') se muda a la clave de la tarjeta. Se
+ * empareja por banco + red contra todos los ciclos (también los ya conciliados).
+ * Devuelve el mismo objeto si no hay nada que mudar.
+ */
+export function migrarNombresLive(nombres = {}, { tarjetas = [], ciclosLive = {} } = {}) {
+  const claves = Object.keys(nombres).filter((k) => k.startsWith('live:'));
+  if (!claves.length) return nombres;
+  let out = nombres;
+  claves.forEach((k) => {
+    const grupoKey = k.slice(5);
+    const ciclo = ciclosLive[grupoKey];
+    if (!ciclo) return;
+    const t = tarjetas.find((x) => cicloEsDeTarjeta(ciclo, x));
+    if (!t || t.id == null) return;
+    if (out === nombres) out = { ...nombres };
+    if (!out[t.id]) out[t.id] = out[k];
+    delete out[k];
+  });
+  return out;
+}

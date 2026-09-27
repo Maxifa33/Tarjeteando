@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Plastico, { TAM_PLASTICO } from './Plastico.jsx';
 
 /**
@@ -10,10 +10,23 @@ import Plastico, { TAM_PLASTICO } from './Plastico.jsx';
  * tarjetas: [{ id, identidad, banco, red, estado, monto, vence, ultimos4, superCard, aria }]
  */
 const PilaWallet = ({ tarjetas = [], elegida = null, onElegir, compacto = false, oscuro = true }) => {
-  const { w, h } = compacto ? TAM_PLASTICO.compacto : TAM_PLASTICO.web;
+  const base = compacto ? TAM_PLASTICO.compacto : TAM_PLASTICO.web;
+  // Ancho disponible (pantallas de 320 px o texto grande): la pila se achica entera.
+  const ref = useRef(null);
+  const [disponible, setDisponible] = useState(null);
+  useEffect(() => {
+    const el = ref.current?.parentElement;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(([e]) => setDisponible(Math.floor(e.contentRect.width)));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const w = disponible ? Math.min(base.w, disponible) : base.w;
+  const k = w / base.w;
+  const h = Math.round(base.h * k);
   const n = tarjetas.length;
-  const paso = compacto || n > 6 ? 64 : 80;
-  const base = compacto ? 252 : 290;
+  const paso = Math.round((compacto || n > 6 ? 64 : 80) * k);
+  const inicioCantos = Math.round((compacto ? 252 : 290) * k);
   const canto = compacto ? 12 : 16;
   const hayElegida = tarjetas.some(t => t.id === elegida);
   const otras = tarjetas.filter(t => t.id !== elegida);
@@ -22,17 +35,18 @@ const PilaWallet = ({ tarjetas = [], elegida = null, onElegir, compacto = false,
     if (!hayElegida) return { y: i * paso, s: 1, z: i + 1, b: 1 };
     if (t.id === elegida) return { y: 0, s: 1, z: 50, b: 1 };
     const j = otras.indexOf(t);
-    return { y: base + j * canto, s: Math.min(0.96, 0.92 - (2 - j) * 0.02), z: j + 1, b: oscuro ? 0.7 : 0.94 };
+    return { y: inicioCantos + j * canto, s: Math.min(0.96, 0.92 - (2 - j) * 0.02), z: j + 1, b: oscuro ? 0.7 : 0.94 };
   };
 
   const alto = !hayElegida
     ? (n - 1) * paso + h + 10
     : compacto
-      ? base + (n - 2) * canto + 18 // recorte: la elegida entera y los cantos de las demás
-      : base + (n - 2) * canto + h * 0.92 + 10;
+      ? inicioCantos + (n - 2) * canto + 18 // recorte: la elegida entera y los cantos de las demás
+      : inicioCantos + (n - 2) * canto + h * 0.92 + 10;
 
   return (
     <div
+      ref={ref}
       className="pila-carta"
       role="group"
       aria-label="Tarjetas"
@@ -68,6 +82,7 @@ const PilaWallet = ({ tarjetas = [], elegida = null, onElegir, compacto = false,
                   ultimos4={t.ultimos4}
                   superCard={t.superCard}
                   compacto={compacto}
+                  ancho={w}
                 />
               </div>
             </button>
