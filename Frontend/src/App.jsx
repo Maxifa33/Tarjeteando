@@ -8,10 +8,12 @@ import { agruparBloques, aliasConocido, cardsEnCurso } from './services/consumos
 import { importarGrupos, conciliarResumen, getAlias, getPlantillas, guardarPlantilla, guardarBanco } from './services/consumos/live.js';
 import { LiveCardsSection } from './components/LiveCards.jsx';
 import AppShell from './ui/AppShell.jsx';
-import { manchasDeLuz } from './ui/identidad.js';
+import { manchasDeLuz, manchasElegida } from './ui/identidad.js';
 import MesView from './views/MesView.jsx';
+import TarjetasView from './views/TarjetasView.jsx';
+import { armarTarjetas, buscarTarjeta } from './services/tarjetas.js';
 import { serieEvolucion, detalleMes } from './services/evolucion.js';
-import { cicloDePago, composicion as componerMes, cuotasDelMes, desfasePorTarjeta, proximoMes, sumarMeses } from './services/mes.js';
+import { cicloDePago, cuotasDelMes, desfasePorTarjeta, proximoMes, sumarMeses, composicionPorTarjeta, composicionDesdeTarjetas, fijosPorTarjeta } from './services/mes.js';
 import { clasesApariencia, modoEfectivo, temaLegacy } from './services/apariencia.js';
 import {
   construirCadenas,
@@ -1787,7 +1789,11 @@ const App = () => {
     const cuotas = cuotasDelMes(cuotasActivas, ciclo.mesKey, { desfase, cotizacionVenta, tarjetas: conDatos });
     const fijosArs = gastosFijosDetalle?.ars || 0;
     const fijosUsd = gastosFijosDetalle?.usd || 0;
-    const comp = componerMes({ porTarjeta: ciclo.porTarjeta, cuotasDelMes: cuotas.total, fijosArs, fijosUsd });
+    // Fase 3: la composición del mes es la suma de "Esta tarjeta en el mes" de cada tarjeta.
+    const porTarjetaComp = composicionPorTarjeta({
+      porTarjeta: ciclo.porTarjeta, cuotas: cuotas.items, fijosPorTarjeta: fijosPorTarjeta(gastosFijosDetalle?.items)
+    });
+    const comp = composicionDesdeTarjetas(porTarjetaComp, { porTarjeta: ciclo.porTarjeta, fijosUsd });
 
     const mesSiguiente = sumarMeses(ciclo.mesKey, 1);
     const siguiente = cicloDePago({ tarjetas, resumenes, ciclosLive, consumosLive, mesKey: mesSiguiente });
@@ -1795,7 +1801,7 @@ const App = () => {
     const cuotasPorTarjeta = {};
     cuotasProx.items.forEach(i => { if (!i.es_estimado_usd) cuotasPorTarjeta[i.tarjeta] = (cuotasPorTarjeta[i.tarjeta] || 0) + i.monto; });
     const prox = proximoMes({ cuotasDelMes: cuotasProx.total, fijosArs, fijosUsd, porTarjetaSiguiente: siguiente.porTarjeta, cuotasPorTarjeta });
-    return { ciclo, comp, cuotas, siguiente, cuotasProx, prox, desfase };
+    return { ciclo, comp, porTarjetaComp, cuotas, siguiente, cuotasProx, prox, desfase };
   }, [tarjetas, resumenes, ciclosLive, consumosLive, cuotasActivas, cotizacionVenta, gastosFijosDetalle]);
 
   // Evolución y proyección (fase 2): 12 pagados + en curso + 6 comprometidos.
@@ -1803,13 +1809,23 @@ const App = () => {
     const opts = { desfase: mes.desfase, cotizacionVenta };
     const columnas = serieEvolucion({
       resumenes, movimientos, tipos: tiposGasto, planes: cuotasActivas, fijos: gastosFijosDetalle,
-      ciclo: mes.ciclo, composicion: mes.comp, ...opts
+      ciclo: mes.ciclo, composicion: mes.comp, porTarjetaComp: mes.porTarjetaComp, ...opts
     });
     const detalles = Object.fromEntries(columnas
       .filter(c => c.tipo === 'comprometido')
       .map(c => [c.mesKey, detalleMes(c, cuotasActivas, opts)]));
     return { columnas, detalles };
   }, [mes, resumenes, movimientos, tiposGasto, cuotasActivas, gastosFijosDetalle, cotizacionVenta]);
+
+  // ===== Sección Tarjetas (fase 3) =====
+  const listaTarjetas = useMemo(
+    () => armarTarjetas({ tarjetas, resumenes, ciclosLive, consumosLive }),
+    [tarjetas, resumenes, ciclosLive, consumosLive]
+  );
+  const [filtroMovTarjeta, setFiltroMovTarjeta] = useState(null); // { tarjeta, n }
+  // La tarjeta elegida tiñe el fondo.
+  const elegidaLuz = activeView === 'tarjetas' ? buscarTarjeta(listaTarjetas, tarjetaElegida)?.id : null;
+  const manchasVista = manchasElegida(manchas, elegidaLuz);
 
   // Format currency (usa las funciones helper globales)
   const formatCurrency = (amount, currency = 'ARS') => {
@@ -1842,7 +1858,7 @@ const App = () => {
           if (q && (activeView === 'dashboard' || activeView === 'tarjetas')) setActiveView('movimientos');
         }}
         menu={menuMas}
-        manchas={manchas}
+        manchas={manchasVista}
         railIzquierda={apariencia.railIzquierda}
         titulo={activeView === 'dashboard' ? null : TITULOS[activeView]}
         subtitulo={(() => {
@@ -1875,36 +1891,35 @@ const App = () => {
               evolucion={evolucion}
             />
           ) : activeView === 'tarjetas' ? (
-            // Tarjetas: placeholder hasta la fase 3 (el dashboard, con foco en "Mis Tarjetas").
-            <DashboardView
-              foco={activeView === 'tarjetas' ? 'tarjetas' : null}
-              dashboard={{...dashboard, total_reintegros: reintegrosRecientes.reduce((sum, r) => sum + Math.abs(r.monto_pesos || 0), 0)}}
+            <TarjetasView
+              lista={listaTarjetas}
               tarjetas={tarjetas}
-              proyecciones={proyecciones}
-              proyeccionCuotas={proyeccionCuotas}
-              chartColors={chartColors}
-              formatCurrency={formatCurrency}
-              theme={theme}
-              resumenes={resumenes}
-              onDeleteResumen={fetchData}
-              setActiveView={setActiveView}
-              searchQuery={searchQuery}
+              elegida={tarjetaElegida}
+              onElegir={setTarjetaElegida}
+              composicionPorTarjeta={mes.porTarjetaComp}
+              mesKey={mes.ciclo.mesKey}
+              totalMes={mes.comp.total}
+              cuotasProximo={mes.cuotasProx}
+              planes={cuotasActivas}
               movimientos={movimientos}
-              cuotasActivas={cuotasActivas}
+              consumosLive={consumosLive}
+              historial={evolucion.columnas}
+              cotizacion={cotizacion}
               nombresTarjetas={nombresTarjetas}
               onGuardarNombre={guardarNombreTarjeta}
-              gastosFijos={gastosFijos}
-              gastosFijosDetalle={gastosFijosDetalle}
-              cotizacion={cotizacion}
-              consumosLive={consumosLive}
-              ciclosLive={ciclosLive}
               onAsignarBanco={(grupoKey, banco) => { guardarBanco(grupoKey, banco); refrescarLive(); }}
-              preguntasFijos={preguntasFijos}
-              onResponderPregunta={responderPreguntaFijo}
-              onFiltrarMovimientos={(tipo) => {
-                setFiltroTipoGastoInicial(tipo);
-                setActiveView('movimientos');
+              bancos={BANCOS_COMUNES}
+              resumenes={resumenes}
+              onDeleteResumen={async (r) => { storage.deleteResumen(r.id); await fetchData(); }}
+              onVerMovimientos={(t) => {
+                if (t.tarjeta) {
+                  setFiltroMovTarjeta({ tarjeta: t.tarjeta.nombre, n: Date.now() });
+                  setActiveView('movimientos');
+                } else {
+                  setActiveView('consumos-live'); // grupo sin resúmenes: sus consumos viven ahí
+                }
               }}
+              oscuro={oscuro}
             />
           ) : activeView === 'movimientos' ? (
             <MovimientosView
@@ -1917,6 +1932,7 @@ const App = () => {
               onCambiarTipo={cambiarTipoGasto}
               gastosFijos={gastosFijos}
               filtroTipoGastoInicial={filtroTipoGastoInicial}
+              tarjetaInicial={filtroMovTarjeta}
             />
           ) : activeView === 'consumos-live' ? (
             <ConsumosLiveView
@@ -2991,7 +3007,7 @@ const TipoGastoSelector = ({ esFijo, onCambiar }) => {
   );
 };
 
-const MovimientosView = ({ movimientos, tarjetas = [], resumenes = [], searchQuery, formatCurrency, onEditarDescripcion, gastosFijos = new Set(), filtroTipoGastoInicial = '', onCambiarTipo }) => {
+const MovimientosView = ({ movimientos, tarjetas = [], resumenes = [], searchQuery, formatCurrency, onEditarDescripcion, gastosFijos = new Set(), filtroTipoGastoInicial = '', onCambiarTipo, tarjetaInicial = null }) => {
   const [mesActual, setMesActual] = useState(0);
   const [showFilters, setShowFilters] = useState(false);
 
@@ -3081,6 +3097,18 @@ const MovimientosView = ({ movimientos, tarjetas = [], resumenes = [], searchQue
   const [filtroMoneda, setFiltroMoneda] = useState('');
   const [filtroCuotas, setFiltroCuotas] = useState('');
   const [filtroTipoGasto, setFiltroTipoGasto] = useState(filtroTipoGastoInicial); // '', 'fijo', 'variable'
+
+  // Desde Tarjetas ("Ver todos"): por resumen, en el último resumen de esa tarjeta.
+  useEffect(() => {
+    if (!tarjetaInicial?.tarjeta) return;
+    const ultimo = resumenesOrdenados.find(r => r.tarjeta === tarjetaInicial.tarjeta);
+    setFiltroTarjeta(tarjetaInicial.tarjeta);
+    setShowFilters(true);
+    if (ultimo) {
+      cambiarModoFiltro('resumen');
+      setResumenSeleccionado(ultimo.id);
+    }
+  }, [tarjetaInicial?.n]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Actualizar filtro si cambia el prop inicial y mostrar filtros si hay uno activo
   useEffect(() => {

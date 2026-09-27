@@ -268,3 +268,53 @@ export function proximoMes({ cuotasDelMes: cuotas = 0, fijosArs = 0, fijosUsd = 
     avisos: []
   };
 }
+
+/**
+ * "Esta tarjeta en el mes": la composición del pago, tarjeta por tarjeta.
+ * Solo las tarjetas con datos del ciclo. Cuotas en pesos de esa tarjeta + sus fijos en
+ * pesos; variables es el residuo. Si cuotas + fijos superan lo importado (p. ej. un fijo
+ * que todavía no se cobró en el ciclo en curso), el total de la tarjeta sube a
+ * cuotas + fijos: es plata ya comprometida.
+ *
+ * @param p.porTarjeta       cicloDePago(...).porTarjeta
+ * @param p.cuotas           cuotasDelMes(...).items del mismo mes
+ * @param p.fijosPorTarjeta  { [tarjetaId]: fijos en pesos }
+ * @returns {{ [tarjetaId]: { cuotas, fijos, variables, total, importado, completado } }}
+ */
+export function composicionPorTarjeta({ porTarjeta = [], cuotas = [], fijosPorTarjeta = {} } = {}) {
+  const out = {};
+  porTarjeta.filter((t) => t.fuente !== 'sin_datos').forEach((t) => {
+    const c = r2(cuotas.filter((q) => q.tarjeta === t.tarjetaId && !q.es_estimado_usd).reduce((s, q) => s + q.monto, 0));
+    const f = r2(fijosPorTarjeta[t.tarjetaId] || 0);
+    const importado = r2(t.total);
+    const variables = r2(Math.max(0, importado - c - f));
+    out[t.tarjetaId] = {
+      cuotas: c, fijos: f, variables,
+      total: r2(c + f + variables),
+      importado,
+      completado: importado < c + f // el total sube a lo comprometido
+    };
+  });
+  return out;
+}
+
+/**
+ * Composición del mes como suma de las tarjetas: así la cápsula de Mes y la suma de
+ * "Esta tarjeta en el mes" coinciden siempre.
+ */
+export function composicionDesdeTarjetas(porTarjetaComp = {}, { porTarjeta = [], fijosUsd = 0 } = {}) {
+  const lista = Object.values(porTarjetaComp);
+  const suma = (k) => r2(lista.reduce((s, x) => s + x[k], 0));
+  const avisos = [];
+  const sinDatos = porTarjeta.filter((t) => t.fuente === 'sin_datos');
+  if (sinDatos.length) avisos.push({ tipo: 'tarjeta_sin_datos', tarjetas: sinDatos.map((t) => t.tarjetaId) });
+  if (lista.some((x) => x.completado)) avisos.push({ tipo: 'datos_inconsistentes' });
+  return { cuotas: suma('cuotas'), fijos: suma('fijos'), fijosUsd: r2(fijosUsd), variables: suma('variables'), total: suma('total'), avisos };
+}
+
+/** Fijos en pesos por tarjeta (gastosFijosDetalle.items). */
+export function fijosPorTarjeta(items = []) {
+  const out = {};
+  items.filter((f) => f.moneda !== 'USD').forEach((f) => { out[f.tarjeta] = r2((out[f.tarjeta] || 0) + (f.montoTipico || 0)); });
+  return out;
+}

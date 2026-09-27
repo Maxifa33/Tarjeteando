@@ -134,3 +134,18 @@ export function manchasDeLuz(items = [], { oscuro = true } = {}) {
     };
   });
 }
+
+/**
+ * Campo de luz con una tarjeta elegida (sección Tarjetas): la elegida crece a 1.6 y se
+ * corre arriba a la izquierda; las demás se achican a 0.45 con opacidad 0.45 abajo a
+ * la derecha. Si la elegida no está entre las manchas, no cambia nada.
+ */
+export function manchasElegida(manchas = [], clave = null) {
+  if (!clave || !manchas.some((m) => m.clave === clave)) return manchas;
+  let j = 0;
+  return manchas.map((m) => {
+    if (m.clave === clave) return { ...m, x: -0.11, y: 0.07, escala: 1.6, opacidad: 1.15 };
+    const i = j++;
+    return { ...m, x: 0.69 + i * 0.0625, y: 0.59 + i * 0.034, escala: 0.45, opacidad: 0.45 };
+  });
+}

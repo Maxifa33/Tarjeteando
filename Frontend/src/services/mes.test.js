@@ -12,7 +12,10 @@ import {
   cuotasDelMes,
   desfasePorTarjeta,
   mesDelProximoVencimiento,
-  sumarMeses
+  sumarMeses,
+  composicionPorTarjeta,
+  composicionDesdeTarjetas,
+  fijosPorTarjeta
 } from './mes.js';
 import { construirPlanes, proyectarCuotas } from './cuotas.js';
 
@@ -255,5 +258,52 @@ describe('proximoMes', () => {
     });
     assert.equal(p.variables, 50000);
     assert.equal(p.abierto, true);
+  });
+});
+
+describe('composicionPorTarjeta', () => {
+  const c = cicloDePago({ hoy: HOY, tarjetas, resumenes, ciclosLive, consumosLive });
+  // Cuotas y fijos del fixture del prototipo, repartidos por tarjeta.
+  const cuotas = [
+    { tarjeta: 'VISA Santander', monto: 108327.44 },
+    { tarjeta: 'VISA Galicia', monto: 116423 },
+    { tarjeta: 'Mastercard Galicia', monto: 33343 },
+    { tarjeta: 'VISA BBVA', monto: 95800 },
+    { tarjeta: 'VISA BBVA', monto: 20, monto_dolares: 20, es_estimado_usd: true }
+  ];
+  const fijos = fijosPorTarjeta([
+    { tarjeta: 'VISA Santander', moneda: 'ARS', montoTipico: 30899 },
+    { tarjeta: 'VISA Galicia', moneda: 'ARS', montoTipico: 36499 },
+    { tarjeta: 'Mastercard Galicia', moneda: 'ARS', montoTipico: 3599 },
+    { tarjeta: 'VISA BBVA', moneda: 'USD', montoTipico: 22.99 }
+  ]);
+  const porT = composicionPorTarjeta({ porTarjeta: c.porTarjeta, cuotas, fijosPorTarjeta: fijos });
+
+  test('la suma por tarjeta = la composición total del mes', () => {
+    const comp = composicion({ porTarjeta: c.porTarjeta, cuotasDelMes: 353893.44, fijosArs: 70997 });
+    const desde = composicionDesdeTarjetas(porT, { porTarjeta: c.porTarjeta });
+    assert.equal(desde.total, comp.total);
+    assert.equal(desde.cuotas, comp.cuotas);
+    assert.equal(desde.fijos, comp.fijos);
+    assert.equal(desde.variables, comp.variables);
+  });
+
+  test('por tarjeta: cuotas + fijos + variables = total importado', () => {
+    assert.deepEqual(porT['VISA Galicia'], { cuotas: 116423, fijos: 36499, variables: 259458.2, total: 412380.2, importado: 412380.2, completado: false });
+    assert.equal(porT['VISA BBVA'].cuotas, 95800, 'las cuotas en USD no entran');
+    assert.equal(porT['VISA BBVA'].fijos, 0, 'los fijos en USD no entran');
+  });
+
+  test('si cuotas + fijos superan lo importado, el total sube y hay aviso', () => {
+    const p = composicionPorTarjeta({ porTarjeta: [{ tarjetaId: 'x', fuente: 'en_curso', total: 100 }], cuotas: [{ tarjeta: 'x', monto: 80 }], fijosPorTarjeta: { x: 50 } });
+    assert.equal(p.x.total, 130);
+    assert.equal(p.x.variables, 0);
+    const d = composicionDesdeTarjetas(p, { porTarjeta: [{ tarjetaId: 'x', fuente: 'en_curso' }] });
+    assert.deepEqual(d.avisos, [{ tipo: 'datos_inconsistentes' }]);
+  });
+
+  test('tarjeta sin datos: no tiene composición', () => {
+    const p = composicionPorTarjeta({ porTarjeta: [{ tarjetaId: 'y', fuente: 'sin_datos', total: 0 }], fijosPorTarjeta: { y: 999 } });
+    assert.deepEqual(p, {});
   });
 });

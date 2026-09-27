@@ -1,7 +1,7 @@
 import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { identidadTarjeta, identidades, ordenApilado, manchasDeLuz, claveConocida } from './identidad.js';
+import { identidadTarjeta, identidades, ordenApilado, manchasDeLuz, claveConocida, manchasElegida } from './identidad.js';
 
 describe('identidadTarjeta', () => {
   test('el mismo banco y red siempre da el mismo color', () => {
@@ -93,5 +93,24 @@ describe('manchasDeLuz', () => {
     const t = { tarjeta: { nombre: 'VISA BBVA', banco: 'BBVA' }, peso: 1 };
     assert.equal(manchasDeLuz([t], { oscuro: true })[0].color, '#4C8FEA');
     assert.equal(manchasDeLuz([t], { oscuro: false })[0].color, '#1B5FAF');
+  });
+});
+
+describe('manchasElegida', () => {
+  const base = manchasDeLuz([
+    { tarjeta: { nombre: 'VISA Santander', banco: 'Santander' }, peso: 1 },
+    { tarjeta: { nombre: 'VISA BBVA', banco: 'BBVA' }, peso: 1 },
+    { tarjeta: { nombre: 'VISA Galicia', banco: 'Galicia' }, peso: 1 }
+  ]);
+  test('la elegida escala 1.6; las demás 0.45 con opacidad 0.45', () => {
+    const m = manchasElegida(base, 'VISA BBVA');
+    const bbva = m.find(x => x.clave === 'VISA BBVA');
+    assert.equal(bbva.escala, 1.6);
+    assert.ok(m.filter(x => x.clave !== 'VISA BBVA').every(x => x.escala === 0.45 && x.opacidad === 0.45));
+    assert.deepEqual(m.map(x => x.color), base.map(x => x.color), 'el color no cambia');
+  });
+  test('sin elegida o elegida desconocida: igual que antes', () => {
+    assert.equal(manchasElegida(base, null), base);
+    assert.equal(manchasElegida(base, 'otra'), base);
   });
 });

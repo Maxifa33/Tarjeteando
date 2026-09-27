@@ -298,6 +298,35 @@
   gap: 6px;
 }
 
+/* ---------- Plásticos y pila tipo Wallet ---------- */
+
+.tj .plastico {
+  position: relative;
+  border-radius: 20px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  overflow: hidden;
+  isolation: isolate;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .14) inset, 0 14px 36px rgba(0, 0, 0, .30);
+}
+.tj .plastico::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(115deg, rgba(255, 255, 255, .20) 0%, rgba(255, 255, 255, 0) 38%);
+  pointer-events: none;
+}
+.tj .pila-carta {
+  transition: transform var(--spring-dur) var(--spring), filter var(--spring-dur) var(--spring);
+}
+.tj .pila-lift {
+  transition: transform .35s var(--spring);
+}
+.tj .pila-slot:hover .pila-lift { transform: translateY(-6px); }
+.tj .pila-slot:active .pila-lift { transform: translateY(-2px) scale(.985); transition-duration: .12s; }
+
 /* ---------- Campo de luz ---------- */
 
 .tj .campo-luz {
@@ -342,6 +371,8 @@
   .tj .entra { animation: none; }
   .tj .hoja-panel { transition: none; }
   .tj .graf-pila > div { transition: none; }
+  .tj .pila-carta, .tj .pila-lift { transition: none; }
+  .tj .pila-slot:hover .pila-lift, .tj .pila-slot:active .pila-lift { transform: none; }
 }
 
 @media (prefers-reduced-transparency: reduce) {

@@ -47,7 +47,7 @@ function repartir(total, cuotas, fijos) {
  */
 export function serieEvolucion({
   resumenes = [], movimientos = [], tipos = {}, planes = [], fijos = null,
-  ciclo, composicion, desfase = {}, cotizacionVenta = 0, pasados = 12, futuros = 6
+  ciclo, composicion, porTarjetaComp = null, desfase = {}, cotizacionVenta = 0, pasados = 12, futuros = 6
 } = {}) {
   const mesCiclo = ciclo.mesKey;
   const idxCiclo = indiceMesKey(mesCiclo);
@@ -97,13 +97,21 @@ export function serieEvolucion({
   }
 
   // ---- en curso ----
+  // Con la composición por tarjeta (fase 3) la columna coincide con la cápsula de Mes.
   const porTarjetaCurso = {};
-  ciclo.porTarjeta.filter((t) => t.fuente !== 'sin_datos').forEach((t) => { porTarjetaCurso[t.tarjetaId] = r2(t.total); });
+  let porTipoCurso;
+  if (porTarjetaComp) {
+    Object.entries(porTarjetaComp).forEach(([id, x]) => { porTarjetaCurso[id] = r2(x.total); });
+    const suma = (k) => r2(Object.values(porTarjetaComp).reduce((s, x) => s + x[k], 0));
+    porTipoCurso = { cuotas: suma('cuotas'), fijos: suma('fijos'), variables: suma('variables') };
+  } else {
+    ciclo.porTarjeta.filter((t) => t.fuente !== 'sin_datos').forEach((t) => { porTarjetaCurso[t.tarjetaId] = r2(t.total); });
+  }
   const totalCurso = r2(Object.values(porTarjetaCurso).reduce((s, v) => s + v, 0));
   columnas.push({
     mesKey: mesCiclo, label: labelMes(mesCiclo), anioCorto: anioCorto(mesCiclo), tipo: 'en_curso',
     porTarjeta: porTarjetaCurso,
-    porTipo: repartir(totalCurso, composicion?.cuotas || 0, composicion?.fijos || 0),
+    porTipo: porTipoCurso || repartir(totalCurso, composicion?.cuotas || 0, composicion?.fijos || 0),
     total: totalCurso,
     usdAparte: r2(ciclo.porTarjeta.reduce((s, t) => s + (t.totalUsd || 0), 0)), usdExcluido: 0
   });
