@@ -267,10 +267,18 @@ class StorageService {
     return this.getItem(STORAGE_KEYS.DECISIONES_FIJOS, []);
   }
 
+  /** Guarda una respuesta y devuelve su id (para poder deshacerla). */
   saveDecisionFijo(decision) {
     const lista = this.getDecisionesFijos();
-    lista.push({ ...decision, creado: new Date().toISOString() });
-    return this.setItem(STORAGE_KEYS.DECISIONES_FIJOS, lista);
+    const id = `df_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    lista.push({ ...decision, id, creado: new Date().toISOString() });
+    return this.setItem(STORAGE_KEYS.DECISIONES_FIJOS, lista) ? id : null;
+  }
+
+  /** Deshacer: saca una respuesta por id. */
+  removeDecisionFijo(id) {
+    if (!id) return false;
+    return this.setItem(STORAGE_KEYS.DECISIONES_FIJOS, this.getDecisionesFijos().filter(d => d.id !== id));
   }
 
   getMetricasDetector() {

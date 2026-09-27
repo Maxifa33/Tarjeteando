@@ -101,6 +101,17 @@ Para otros bancos, el backend usa Claude Vision API como fallback automático (r
 
 ---
 
+## Rediseño B+C (rama `feat/rediseno-bc`, en curso)
+
+Specs por fase en `rediseno-2026/specs/`. Fase 0 (marco, tokens, apariencia) y fase 1 (sección **Mes**) hechas.
+
+**Regla del ciclo de pago (sección Mes, `Frontend/src/services/mes.js`):**
+- El mes que se muestra es el del **próximo vencimiento ≥ hoy** (resúmenes cerrados sin vencer + ciclos en curso de Últimos consumos).
+- Por tarjeta: resumen cerrado que vence ese mes → su total a pagar; si no hay, el ciclo en curso de Últimos consumos que vence ese mes (tarjeta ↔ ciclo por banco + red); si no, `sin_datos` (no suma, aviso).
+- Cuotas del mes: cada tarjeta factura en su mes de cierre y paga `desfase` meses después (del último resumen: vto − cierre, default 1). `cuotasDelMes` elige por mes, nunca por posición en `proyectarCuotas`. Las cuotas en USD van aparte.
+- **Variables = total − cuotas − fijos** (residuo; si da negativo, 0 + aviso). Nunca sumar cuotas al total de Últimos consumos.
+- Tope mensual en `config.tope_mensual` (null = sin tope). Las respuestas a preguntas de fijos tienen `id` (`removeDecisionFijo` para Deshacer).
+
 ## Cambios recientes (26/09/2026) — Últimos consumos en el dashboard, bandeja única, SuperCard
 
 Rama `feat/ultimos-consumos-supercard`. Diseño: `~/Claude/Projects/Tarjeteando/diseno/supercard-estratos.png`.

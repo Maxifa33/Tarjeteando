@@ -143,6 +143,10 @@
   font-weight: 500;
   color: var(--label);
 }
+/* Celular: áreas táctiles de 44 px */
+@media (max-width: 767.98px) {
+  .tj .seg button { height: 44px; border-radius: 10px; }
+}
 .tj .seg button.on {
   background: var(--solid);
   font-weight: 600;

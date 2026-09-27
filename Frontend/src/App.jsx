@@ -9,6 +9,8 @@ import { importarGrupos, conciliarResumen, getAlias, getPlantillas, guardarPlant
 import { LiveCardsSection } from './components/LiveCards.jsx';
 import AppShell from './ui/AppShell.jsx';
 import { manchasDeLuz } from './ui/identidad.js';
+import MesView from './views/MesView.jsx';
+import { cicloDePago, composicion as componerMes, cuotasDelMes, desfasePorTarjeta, proximoMes, sumarMeses } from './services/mes.js';
 import { clasesApariencia, modoEfectivo, temaLegacy } from './services/apariencia.js';
 import {
   construirCadenas,
@@ -1336,22 +1338,32 @@ const App = () => {
   };
 
   // Respuesta a una pregunta sobre un gasto fijo que falta en el último resumen.
+  // Devuelve los ids de las decisiones guardadas, para poder deshacerlas desde Mes.
   const responderPreguntaFijo = async (pregunta, respuesta) => {
     const base = { mov_id: pregunta.ultimo.mov_id, periodo: pregunta.periodo };
+    const ids = [];
+    const guardar = (d) => ids.push(storage.saveDecisionFijo(d));
     if (respuesta === 'mismo') {
-      storage.saveDecisionFijo({ tipo: 'enlace', mov_id: pregunta.candidato.mov_id, prev_id: pregunta.ultimo.mov_id, periodo: pregunta.periodo });
-      storage.saveDecisionFijo({ tipo: 'respondida', ...base });
+      guardar({ tipo: 'enlace', mov_id: pregunta.candidato.mov_id, prev_id: pregunta.ultimo.mov_id, periodo: pregunta.periodo });
+      guardar({ tipo: 'respondida', ...base });
     } else if (respuesta === 'otro') {
       // No es el mismo: se prohíbe ese enlace; si sigue faltando, se pregunta si se dio de baja.
-      storage.saveDecisionFijo({ tipo: 'no_enlace', mov_id: pregunta.candidato.mov_id, prev_id: pregunta.ultimo.mov_id });
+      guardar({ tipo: 'no_enlace', mov_id: pregunta.candidato.mov_id, prev_id: pregunta.ultimo.mov_id });
     } else if (respuesta === 'baja') {
-      storage.saveDecisionFijo({ tipo: 'baja', ...base });
+      guardar({ tipo: 'baja', ...base });
     } else if (respuesta === 'sigue') {
-      storage.saveDecisionFijo({ tipo: 'sigue', ...base });
+      guardar({ tipo: 'sigue', ...base });
     } else {
-      storage.saveDecisionFijo({ tipo: 'omitida', ...base });
+      guardar({ tipo: 'omitida', ...base });
     }
     if (respuesta !== 'omitir') storage.registrarMetrica('preguntas_respondidas');
+    await fetchData();
+    return ids.filter(Boolean);
+  };
+
+  // Deshacer una respuesta: se sacan sus decisiones y se recalculan las series.
+  const deshacerPreguntaFijo = async (ids = []) => {
+    ids.forEach(id => storage.removeDecisionFijo(id));
     await fetchData();
   };
 
@@ -1759,6 +1771,32 @@ const App = () => {
     { oscuro }
   );
 
+  // ===== Sección Mes (services/mes.js) =====
+  const [tope, setTope] = useState(() => storage.getConfig().tope_mensual ?? null);
+  const [tarjetaElegida, setTarjetaElegida] = useState(null); // la usa la sección Tarjetas (fase 3)
+  const guardarTope = (valor) => {
+    setTope(valor);
+    storage.saveConfig({ tope_mensual: valor });
+  };
+
+  const mes = useMemo(() => {
+    const desfase = desfasePorTarjeta(resumenes);
+    const ciclo = cicloDePago({ tarjetas, resumenes, ciclosLive, consumosLive });
+    const conDatos = ciclo.porTarjeta.filter(t => t.fuente !== 'sin_datos').map(t => t.tarjetaId);
+    const cuotas = cuotasDelMes(cuotasActivas, ciclo.mesKey, { desfase, cotizacionVenta, tarjetas: conDatos });
+    const fijosArs = gastosFijosDetalle?.ars || 0;
+    const fijosUsd = gastosFijosDetalle?.usd || 0;
+    const comp = componerMes({ porTarjeta: ciclo.porTarjeta, cuotasDelMes: cuotas.total, fijosArs, fijosUsd });
+
+    const mesSiguiente = sumarMeses(ciclo.mesKey, 1);
+    const siguiente = cicloDePago({ tarjetas, resumenes, ciclosLive, consumosLive, mesKey: mesSiguiente });
+    const cuotasProx = cuotasDelMes(cuotasActivas, mesSiguiente, { desfase, cotizacionVenta });
+    const cuotasPorTarjeta = {};
+    cuotasProx.items.forEach(i => { if (!i.es_estimado_usd) cuotasPorTarjeta[i.tarjeta] = (cuotasPorTarjeta[i.tarjeta] || 0) + i.monto; });
+    const prox = proximoMes({ cuotasDelMes: cuotasProx.total, fijosArs, fijosUsd, porTarjetaSiguiente: siguiente.porTarjeta, cuotasPorTarjeta });
+    return { ciclo, comp, cuotas, siguiente, cuotasProx, prox };
+  }, [tarjetas, resumenes, ciclosLive, consumosLive, cuotasActivas, cotizacionVenta, gastosFijosDetalle]);
+
   // Format currency (usa las funciones helper globales)
   const formatCurrency = (amount, currency = 'ARS') => {
     if (currency === 'USD') {
@@ -1784,11 +1822,15 @@ const App = () => {
         onSeccion={(id) => setActiveView(VISTA_DE_SECCION[id])}
         onImportar={() => setActiveView('importar')}
         busqueda={searchQuery}
-        onBuscar={setSearchQuery}
+        onBuscar={(q) => {
+          setSearchQuery(q);
+          // Mes y Tarjetas no filtran: la búsqueda global se ve en Movimientos.
+          if (q && (activeView === 'dashboard' || activeView === 'tarjetas')) setActiveView('movimientos');
+        }}
         menu={menuMas}
         manchas={manchas}
         railIzquierda={apariencia.railIzquierda}
-        titulo={TITULOS[activeView]}
+        titulo={activeView === 'dashboard' ? null : TITULOS[activeView]}
         subtitulo={(() => {
           const f = new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' }).replace(',', '');
           return f.charAt(0).toUpperCase() + f.slice(1);
@@ -1798,7 +1840,26 @@ const App = () => {
             <div className="flex items-center justify-center h-64">
               <div className="animate-spin rounded-full h-12 w-12 border-4 border-[var(--accent-1)] border-t-transparent" />
             </div>
-          ) : activeView === 'dashboard' || activeView === 'tarjetas' ? (
+          ) : activeView === 'dashboard' ? (
+            <MesView
+              ciclo={mes.ciclo}
+              composicion={mes.comp}
+              proximo={mes.prox}
+              planesDelMes={mes.cuotas.items}
+              planesProximo={mes.cuotasProx.items}
+              porTarjetaProximo={mes.siguiente.porTarjeta}
+              fijos={gastosFijosDetalle}
+              preguntas={preguntasFijos}
+              onResponderPregunta={responderPreguntaFijo}
+              onDeshacerPregunta={deshacerPreguntaFijo}
+              tope={tope}
+              onTope={guardarTope}
+              onAbrirTarjeta={(id) => { setTarjetaElegida(id); setActiveView('tarjetas'); }}
+              onImportar={() => setActiveView('importar')}
+              tarjetas={tarjetas}
+              oscuro={oscuro}
+            />
+          ) : activeView === 'tarjetas' ? (
             // Tarjetas: placeholder hasta la fase 3 (el dashboard, con foco en "Mis Tarjetas").
             <DashboardView
               foco={activeView === 'tarjetas' ? 'tarjetas' : null}
