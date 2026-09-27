@@ -106,6 +106,7 @@ Para otros bancos, el backend usa Claude Vision API como fallback automático (r
 Rama `feat/ultimos-consumos-supercard`. Diseño: `~/Claude/Projects/Tarjeteando/diseno/supercard-estratos.png`.
 
 **Glosario (usar siempre estas palabras):**
+- **Movimiento = gasto = consumo = compra** (sinónimos).
 - **Tarjeta**: cuenta de crédito que genera UN resumen (banco + red + últimos 4). Varios plásticos pueden compartir resumen.
 - **Resumen**: documento oficial del cierre. Datos cerrados.
 - **Últimos consumos**: export parcial del home banking (xlsx/xls/csv) con lo no facturado. Provisional.
