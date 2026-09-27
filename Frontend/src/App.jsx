@@ -1248,6 +1248,8 @@ const App = () => {
     const nuevosNombres = { ...nombresTarjetas, [tarjetaId]: nuevoNombre };
     setNombresTarjetas(nuevosNombres);
     localStorage.setItem('nombresTarjetas', JSON.stringify(nuevosNombres));
+    // Las tarjetas que solo existen por Últimos consumos no están en el backend.
+    if (String(tarjetaId).startsWith('live:')) return;
 
     // También guardar en el backend si está disponible
     try {

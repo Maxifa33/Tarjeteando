@@ -173,7 +173,10 @@ const TarjetasView = ({
 
   useEffect(() => { setEditando(false); }, [sel?.id]);
 
-  const nombreDe = (t) => (t.tarjeta && nombresTarjetas[t.tarjeta.id]) || t.nombre;
+  // Las tarjetas que solo llegaron por Últimos consumos no tienen entrada en `tarjetas`:
+  // su nombre se guarda por la clave del grupo, que no cambia al asignar el banco.
+  const claveNombre = (t) => (t.tarjeta ? t.tarjeta.id : `live:${(t.grupoKeys && t.grupoKeys[0]) || t.id}`);
+  const nombreDe = (t) => nombresTarjetas[claveNombre(t)] || t.nombre;
   const montoPlastico = (t) => (t.estado === 'sin_datos' ? '—' : pesos(t.total));
 
   const cartas = ordenadas.map((t) => ({
@@ -245,7 +248,7 @@ const TarjetasView = ({
             </span>
             {editando ? (
               <form
-                onSubmit={(e) => { e.preventDefault(); if (nombreNuevo.trim()) onGuardarNombre?.(t.tarjeta.id, nombreNuevo.trim()); setEditando(false); }}
+                onSubmit={(e) => { e.preventDefault(); if (nombreNuevo.trim()) onGuardarNombre?.(claveNombre(t), nombreNuevo.trim()); setEditando(false); }}
                 style={{ display: 'flex', gap: 8, alignItems: 'center' }}
               >
                 <input
@@ -262,11 +265,9 @@ const TarjetasView = ({
             ) : (
               <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                 <h2 className="titulo" style={{ fontSize: compacto ? 28 : 34, lineHeight: compacto ? '34px' : '41px' }}>{nombreDe(t)}</h2>
-                {t.tarjeta && (
-                  <button type="button" className="ico" aria-label="Cambiar el nombre de la tarjeta" onClick={() => { setNombreNuevo(nombreDe(t)); setEditando(true); }}>
-                    <Pencil size={16} aria-hidden="true" style={{ opacity: 0.6 }} />
-                  </button>
-                )}
+                <button type="button" className="ico" aria-label="Cambiar el nombre de la tarjeta" onClick={() => { setNombreNuevo(nombreDe(t)); setEditando(true); }}>
+                  <Pencil size={16} aria-hidden="true" style={{ opacity: 0.6 }} />
+                </button>
               </span>
             )}
           </div>
