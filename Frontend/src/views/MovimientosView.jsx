@@ -120,13 +120,39 @@ const MovimientosView = ({
   const dias = useMemo(() => agruparPorDia(resto), [resto]);
   const visibles = useMemo(() => [...(cuotasAbiertas ? cuotas : []), ...dias.flatMap((d) => d.filas)], [cuotas, cuotasAbiertas, dias]);
 
-  // Selección: la elegida si sigue visible; si no, la primera visible (web).
-  const sel = visibles.find((m) => m.id === selId) || (usarHoja ? null : visibles[0] || null);
+  // Selección: ninguna por defecto. Si el filtro deja afuera a la elegida, se limpia.
+  const sel = visibles.find((m) => m.id === selId) || null;
 
   const elegir = (m) => {
+    // En web, tocar otra vez la fila elegida la deselecciona.
+    if (!usarHoja && selId === m.id) { setSelId(null); return; }
     setSelId(m.id);
     if (usarHoja) setHoja(true);
   };
+
+  // Esc deselecciona en web (en celular lo maneja la Hoja).
+  useEffect(() => {
+    if (usarHoja || !selId) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') setSelId(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [usarHoja, selId]);
+
+  // Panel vacío: lo más gastado del período por comercio (sin cuotas ni reintegros).
+  const topComercios = useMemo(() => {
+    const acc = new Map();
+    resto.forEach((m) => {
+      const t = tipoDeFila(m, gastosFijos);
+      const ars = Number(m.monto_pesos) || 0;
+      if (t === 'reintegro' || t === 'cuota' || ars <= 0) return;
+      const nombre = m.referencia_limpia || m.referencia_original || 'Sin descripción';
+      const x = acc.get(nombre) || { nombre, total: 0, n: 0, primero: m, tarjeta: m.tarjeta };
+      x.total += ars; x.n += 1;
+      if (ars > (Number(x.primero.monto_pesos) || 0)) x.primero = m;
+      acc.set(nombre, x);
+    });
+    return [...acc.values()].sort((a, b) => b.total - a.total).slice(0, 5);
+  }, [resto, gastosFijos]);
   const cerrarHoja = () => {
     setHoja(false);
     const el = sel && filasRef.current.get(sel.id);
@@ -381,8 +407,31 @@ const MovimientosView = ({
   return (
     <section className="entra" style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 380px', gap: 36, alignItems: 'start' }}>
       {columna}
-      <aside aria-label="Detalle del movimiento" style={{ position: 'sticky', top: 0, borderRadius: 24, background: 'var(--fill2)', padding: 22 }}>
-        {detalle || <span className="cap">Elegí un movimiento para ver el detalle.</span>}
+      {/* El panel queda fijo mientras la lista scrollea y nunca es más alto que la ventana:
+          si no entra (pantallas bajas), scrollea por dentro, no con la lista. */}
+      <aside aria-label="Detalle del movimiento" className="panel-detalle" style={{ position: 'sticky', top: 0, borderRadius: 24, background: 'var(--fill2)', padding: 20, maxHeight: 'calc(100dvh - 96px - 40px - 70px)', overflowY: 'auto', overscrollBehavior: 'contain', scrollbarWidth: 'thin' }}>
+        {detalle || (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <span style={{ fontSize: 17, fontWeight: 600 }}>Ningún movimiento elegido</span>
+              <span className="cap" style={{ fontSize: 13 }}>Tocá uno de la lista para ver su detalle, cambiarle el nombre o marcarlo como fijo.</span>
+            </div>
+            {topComercios.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <h3 className="h3" style={{ margin: '0 0 6px', fontSize: 13, fontWeight: 600, letterSpacing: '.01em', color: 'var(--label2)', textTransform: 'uppercase' }}>Lo más gastado en este período</h3>
+                {topComercios.map((c) => (
+                  <button key={c.nombre} type="button" className="fila" onClick={() => elegir(c.primero)}
+                    style={{ display: 'flex', alignItems: 'center', gap: 10, minHeight: 44, width: '100%', padding: '0 8px', borderRadius: 10, textAlign: 'left' }}>
+                    <span aria-hidden="true" style={{ width: 22, height: 14, borderRadius: 3.5, background: idDe(c.tarjeta).plastico, flexShrink: 0 }} />
+                    <span style={{ flexGrow: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: 14 }}>{c.nombre}</span>
+                    <span className="cap" style={{ flexShrink: 0 }}>{c.n > 1 ? `${c.n} veces` : ''}</span>
+                    <span className="rnd" style={{ fontWeight: 600, fontSize: 14, flexShrink: 0 }}>{pesos(c.total)}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </aside>
       {avisoFlotante}
     </section>

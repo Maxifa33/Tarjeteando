@@ -61,7 +61,7 @@ const DetalleMovimiento = ({
   })();
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <span aria-hidden="true" style={{ width: 42, height: 28, borderRadius: 6, background: identidad.plastico, boxShadow: '0 4px 10px rgba(0,0,0,.25)', flexShrink: 0 }} />
         <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
@@ -71,15 +71,15 @@ const DetalleMovimiento = ({
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-        <span style={{ fontSize: 22, lineHeight: '28px', fontWeight: 700, letterSpacing: '-.01em', overflowWrap: 'anywhere' }}>{actual}</span>
-        {ars !== 0 && <span className="rnd" style={{ fontSize: 30, lineHeight: '36px', fontWeight: 700, color: esReint ? 'var(--ok)' : 'var(--label)' }}>{signo}{pesos(Math.abs(ars), { decimales: 2 })}</span>}
-        {usd !== 0 && <span className="rnd" style={{ fontSize: ars !== 0 ? 18 : 30, lineHeight: ars !== 0 ? '24px' : '36px', fontWeight: 700, color: esReint ? 'var(--ok)' : 'var(--label)' }}>{signo}{dolares(Math.abs(usd))}</span>}
+        <span style={{ fontSize: 20, lineHeight: '25px', fontWeight: 700, letterSpacing: '-.01em', overflowWrap: 'anywhere' }}>{actual}</span>
+        {ars !== 0 && <span className="rnd" style={{ fontSize: 26, lineHeight: '32px', fontWeight: 700, color: esReint ? 'var(--ok)' : 'var(--label)' }}>{signo}{pesos(Math.abs(ars), { decimales: 2 })}</span>}
+        {usd !== 0 && <span className="rnd" style={{ fontSize: ars !== 0 ? 17 : 26, lineHeight: ars !== 0 ? '22px' : '32px', fontWeight: 700, color: esReint ? 'var(--ok)' : 'var(--label)' }}>{signo}{dolares(Math.abs(usd))}</span>}
         <span className="cap" style={{ fontSize: 13 }}>{fechaCompleta(mov.fecha_compra || mov.fecha)}{esReint ? ' · Reintegro' : ''}</span>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         <span className="cap">Descripción en el resumen</span>
-        <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12, padding: '8px 10px', borderRadius: 8, background: 'var(--fill)', overflowWrap: 'anywhere' }}>
+        <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12, padding: '6px 10px', borderRadius: 8, background: 'var(--fill)', overflowWrap: 'anywhere' }}>
           {mov.referencia_original || '—'}
         </span>
       </div>
@@ -108,7 +108,7 @@ const DetalleMovimiento = ({
             onCambio={(t) => t !== tipo && onCambiarTipo?.(mov, t)}
             opciones={[{ id: 'variable', label: 'Variable' }, { id: 'fijo', label: 'Fijo' }]}
           />
-          <span className="cap">Vale desde este resumen en adelante. El detector automático no lo vuelve a tocar.</span>
+          <span className="cap">Desde este resumen en adelante.</span>
         </div>
       )}
 
@@ -119,21 +119,25 @@ const DetalleMovimiento = ({
             id={`nombre-${mov.id}`}
             value={borrador}
             onChange={(e) => setBorrador(e.target.value)}
-            style={{ flex: 1, minWidth: 0, height: 44, borderRadius: 10, border: 0, background: 'var(--fill)', padding: '0 12px', font: 'inherit', fontSize: 15, color: 'var(--label)' }}
+            style={{ flex: 1, minWidth: 0, height: 40, borderRadius: 10, border: 0, background: 'var(--fill)', padding: '0 12px', font: 'inherit', fontSize: 15, color: 'var(--label)' }}
           />
-          <button type="submit" className="btn btn-pri" disabled={!puedeGuardar} style={{ height: 44, borderRadius: 10, opacity: puedeGuardar ? 1 : 0.5 }}>Guardar</button>
+          <button type="submit" className="btn btn-pri" disabled={!puedeGuardar} style={{ height: 40, borderRadius: 10, opacity: puedeGuardar ? 1 : 0.5 }}>Guardar</button>
         </div>
-        <span className="cap">Crea una regla: se aplica a todos los meses de este comercio. El tipo no cambia.</span>
+        <span className="cap">Crea una regla para todos los meses de este comercio.</span>
       </form>
 
-      {historial.length > 0 && (
+      {historial.filter((h) => h.total > 0).length === 1 && (
+        <span className="cap">Es la primera vez que aparece en tus resúmenes.</span>
+      )}
+
+      {historial.filter((h) => h.total > 0).length > 1 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <span className="cap">Este comercio en los últimos {historial.length} resúmenes</span>
           <div role="img" aria-label={historial.map((h) => `${h.mesKey ? mesCorto(h.mesKey) : ''}: ${pesos(h.total)}`).join(', ')}
-            style={{ display: 'grid', gridTemplateColumns: `repeat(${historial.length},minmax(0,1fr))`, gap: 6, alignItems: 'end', height: 74 }}>
+            style={{ display: 'grid', gridTemplateColumns: `repeat(${historial.length},minmax(0,1fr))`, gap: 6, alignItems: 'end', height: 58 }}>
             {historial.map((h) => (
               <div key={h.resumenId} aria-hidden="true" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-                <span className="spr" style={{ width: 14, height: Math.max(h.total > 0 ? 2 : 0, (h.total / max) * 52), borderRadius: '4px 4px 0 0', background: color, opacity: h.actual ? 1 : 0.45 }} />
+                <span className="spr" style={{ width: 14, height: Math.max(h.total > 0 ? 2 : 0, (h.total / max) * 38), borderRadius: '4px 4px 0 0', background: color, opacity: h.actual ? 1 : 0.45 }} />
                 <span className="cap" style={{ fontSize: 10, fontWeight: h.actual ? 700 : 400 }}>{h.mesKey ? mesCorto(h.mesKey) : '—'}</span>
               </div>
             ))}
