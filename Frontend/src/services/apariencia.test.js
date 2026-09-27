@@ -5,7 +5,6 @@ import {
   normalizarApariencia,
   modoEfectivo,
   clasesApariencia,
-  temaLegacy,
   configConDefaults,
   APARIENCIA_DEFAULT
 } from './apariencia.js';
@@ -45,10 +44,6 @@ describe('modo efectivo y clases', () => {
     assert.deepEqual(clasesApariencia({ modo: 'claro', reducirTransparencia: true }, true), ['tj', 'claro', 'rt']);
   });
 
-  test('tema legacy para SettingsModal', () => {
-    assert.equal(temaLegacy('oscuro', false), 'dark');
-    assert.equal(temaLegacy('sistema', false), 'light');
-  });
 });
 
 describe('configConDefaults', () => {
@@ -63,6 +58,11 @@ describe('configConDefaults', () => {
     const c = configConDefaults(null, null);
     assert.equal(c.tope_mensual, null);
     assert.deepEqual(c.apariencia, APARIENCIA_DEFAULT);
+  });
+
+  test('backup viejo con config.theme: migra el modo', () => {
+    assert.equal(configConDefaults({ theme: 'liquid' }).apariencia.modo, 'oscuro');
+    assert.equal(configConDefaults({ theme: 'light' }).apariencia.modo, 'claro');
   });
 
   test('tope_mensual guardado se respeta', () => {

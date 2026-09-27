@@ -45,19 +45,15 @@ export function clasesApariencia(apariencia, sistemaOscuro) {
   return cls;
 }
 
-/** Tema que esperan las piezas viejas (SettingsModal, chartColors): 'dark' | 'light'. */
-export function temaLegacy(modo, sistemaOscuro) {
-  return modoEfectivo(modo, sistemaOscuro) === 'claro' ? 'light' : 'dark';
-}
-
 /** Config con defaults: agrega apariencia y tope_mensual sin romper configs viejas. */
 export function configConDefaults(guardada, temaViejo = null) {
-  const base = { theme: 'dark', apiKey: null, tope_mensual: null };
+  const base = { apiKey: null, tope_mensual: null };
   const cfg = guardada && typeof guardada === 'object' ? guardada : {};
   return {
     ...base,
     ...cfg,
     tope_mensual: cfg.tope_mensual ?? null,
-    apariencia: normalizarApariencia(cfg.apariencia, temaViejo)
+    // Un backup viejo trae el tema en config.theme: también sirve para migrar.
+    apariencia: normalizarApariencia(cfg.apariencia, temaViejo || cfg.theme || null)
   };
 }

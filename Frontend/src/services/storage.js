@@ -5,6 +5,7 @@
 
 import { asignarIds } from './series.js';
 import { configConDefaults } from './apariencia.js';
+import { migrarA140 } from './migraciones.js';
 
 const STORAGE_KEYS = {
   RESUMENES: 'tarjetas_resumenes',
@@ -34,7 +35,9 @@ const STORAGE_KEYS = {
 // 1.1.0: tarjeta en cada movimiento. 1.2.0: ID hash (SHA-256) por movimiento.
 // 1.3.0: ciclos de Últimos consumos (keys nuevas, sin migración destructiva: los
 // consumos viejos sin grupo se reemplazan la próxima vez que se sube su archivo).
-const CURRENT_VERSION = '1.3.0';
+// 1.4.0: rediseño B+C. El tema viejo pasa a config.apariencia y se borran
+// 'tarjetas_theme' y 'dashboard_card_order' (services/migraciones.js).
+const CURRENT_VERSION = '1.4.0';
 
 class StorageService {
   constructor() {
@@ -83,6 +86,10 @@ class StorageService {
     // SHA-256 del contenido. Así re-subir un resumen conserva los IDs y los cambios
     // manuales de tipo que apuntan a ellos.
     this.setItem(STORAGE_KEYS.MOVIMIENTOS, conIdsHash(movimientosActualizados));
+
+    // Migración 1.4.0: apariencia del rediseño (idempotente).
+    const { cambios } = migrarA140(localStorage);
+    if (cambios.length) console.log(`[Storage] 1.4.0: ${cambios.join(', ')}`);
   }
 
   /**
