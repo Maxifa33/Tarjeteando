@@ -4,6 +4,7 @@
  */
 
 import { asignarIds } from './series.js';
+import { configConDefaults } from './apariencia.js';
 
 const STORAGE_KEYS = {
   RESUMENES: 'tarjetas_resumenes',
@@ -290,10 +291,11 @@ class StorageService {
    * Obtiene configuración
    */
   getConfig() {
-    return this.getItem(STORAGE_KEYS.CONFIG, {
-      theme: 'dark',
-      apiKey: null // Para Vision API si el usuario quiere usar la suya
-    });
+    // apiKey: para Vision API si el usuario quiere usar la suya.
+    // apariencia: si falta, se migra desde el tema viejo ('tarjetas_theme').
+    let temaViejo = null;
+    try { temaViejo = localStorage.getItem('tarjetas_theme'); } catch {}
+    return configConDefaults(this.getItem(STORAGE_KEYS.CONFIG, null), temaViejo);
   }
 
   /**

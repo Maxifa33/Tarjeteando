@@ -7,6 +7,9 @@ import { parseUltimosConsumos, leerHojas, EXTENSIONES_CONSUMOS } from './service
 import { agruparBloques, aliasConocido, cardsEnCurso } from './services/consumos/ciclos.js';
 import { importarGrupos, conciliarResumen, getAlias, getPlantillas, guardarPlantilla, guardarBanco } from './services/consumos/live.js';
 import { LiveCardsSection } from './components/LiveCards.jsx';
+import AppShell from './ui/AppShell.jsx';
+import { manchasDeLuz } from './ui/identidad.js';
+import { clasesApariencia, modoEfectivo, temaLegacy } from './services/apariencia.js';
 import {
   construirCadenas,
   aplicarOverrides,
@@ -746,7 +749,6 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
   };
 
   const themeOptions = [
-    { id: 'liquid', label: 'Liquid Glass', icon: Sparkles, colors: ['#7c8cff', '#41e0c8'] },
     { id: 'light', label: 'Claro', icon: Sun, colors: ['#f8fafc', '#e2e8f0'] },
     { id: 'dark', label: 'Oscuro', icon: Moon, colors: ['#1e293b', '#0f172a'] },
   ];
@@ -1153,9 +1155,19 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
 
 // Main App Component
 const App = () => {
-  const [theme, setTheme] = useState(() => {
-    try { return localStorage.getItem('tarjetas_theme') || 'liquid'; } catch { return 'liquid'; }
-  });  const [activeView, setActiveView] = useState('dashboard');
+  // Apariencia (Sistema / Claro / Oscuro + Reducir transparencia + lado del riel).
+  // storage.getConfig() la migra desde el 'tarjetas_theme' viejo la primera vez.
+  const [apariencia, setApariencia] = useState(() => storage.getConfig().apariencia);
+  const [sistemaOscuro, setSistemaOscuro] = useState(() => {
+    try { return window.matchMedia('(prefers-color-scheme: dark)').matches; } catch { return true; }
+  });
+  const oscuro = modoEfectivo(apariencia.modo, sistemaOscuro) === 'oscuro';
+  // SettingsModal y los gráficos viejos esperan 'dark' | 'light'.
+  const theme = temaLegacy(apariencia.modo, sistemaOscuro);
+  const cambiarApariencia = (cambios) => setApariencia(prev => ({ ...prev, ...cambios }));
+  const setTheme = (id) => cambiarApariencia({ modo: id === 'light' ? 'claro' : 'oscuro' });
+  const [activeView, setActiveView] = useState('dashboard');
+  const [pendientesNombre, setPendientesNombre] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState('tarjetas');
@@ -1343,11 +1355,41 @@ const App = () => {
     await fetchData();
   };
 
-  // Theme toggle
+  // 'Sistema' sigue al sistema operativo en vivo.
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
-    try { localStorage.setItem('tarjetas_theme', theme); } catch {}
-  }, [theme]);
+    let mq;
+    try { mq = window.matchMedia('(prefers-color-scheme: dark)'); } catch { return undefined; }
+    const onChange = (e) => setSistemaOscuro(e.matches);
+    mq.addEventListener?.('change', onChange);
+    return () => mq.removeEventListener?.('change', onChange);
+  }, []);
+
+  // Las clases .tj/.claro/.rt van en <html> para que modales y portales las hereden.
+  useEffect(() => {
+    const raiz = document.documentElement;
+    raiz.classList.remove('tj', 'claro', 'rt');
+    raiz.classList.add(...clasesApariencia(apariencia, sistemaOscuro));
+    raiz.removeAttribute('data-theme');
+  }, [apariencia, sistemaOscuro]);
+
+  useEffect(() => {
+    storage.saveConfig({ apariencia });
+  }, [apariencia]);
+
+  // Reglas de nombres: los pendientes viven en el backend (RAM). Sin backend, lista vacía.
+  const cargarPendientesNombre = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/pendientes-nombre`);
+      const json = await res.json();
+      setPendientesNombre(json.data || []);
+    } catch {
+      setPendientesNombre([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeView === 'reglas') cargarPendientesNombre();
+  }, [activeView, cargarPendientesNombre]);
 
   // Limpiar filtro de tipo de gasto cuando se cambia de vista (excepto cuando vamos a movimientos)
   useEffect(() => {
@@ -1683,19 +1725,40 @@ const App = () => {
       .toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
   }, [ultimoPeriodoPorTarjeta]);
 
-  // Menu items
-  const menuItems = [
-    { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-    { id: 'movimientos', icon: Receipt, label: 'Movimientos' },
-    { id: 'consumos-live', icon: Zap, label: 'Últimos consumos', badge: consumosLive.length > 0 ? consumosLive.length : null },
-    // Los badges cuentan lo que está vivo HOY, no todo el histórico: cuotas con
-    // deuda por delante y reintegros del último resumen de cada tarjeta.
-    { id: 'cuotas', icon: Calendar, label: 'Cuotas', badge: cuotasActivas.filter(c => c.estado === 'vigente').length },
-    { id: 'reintegros', icon: RefreshCcw, label: 'Reintegros', badge: reintegrosRecientes.length > 0 ? reintegrosRecientes.length : null },
-    { id: 'importar', icon: Upload, label: 'Importar' },
-    { id: 'guia', icon: BookOpen, label: 'Guía' },
+  // Navegación del rediseño: 4 secciones principales + menú Más.
+  // activeView sigue siendo la fuente de verdad; solo cambia cómo se llega a cada vista.
+  const VISTA_DE_SECCION = { mes: 'dashboard', tarjetas: 'tarjetas', movimientos: 'movimientos', cuotas: 'cuotas' };
+  const SECCION_DE_VISTA = { dashboard: 'mes', tarjetas: 'tarjetas', movimientos: 'movimientos', cuotas: 'cuotas' };
+  const seccionActual = SECCION_DE_VISTA[activeView] || 'otra';
+  const TITULOS = {
+    dashboard: 'Mes', tarjetas: 'Tarjetas', movimientos: 'Movimientos', cuotas: 'Cuotas',
+    'consumos-live': 'Últimos consumos', reintegros: 'Reintegros', reglas: 'Reglas de nombres',
+    importar: 'Importar', guia: 'Guía y novedades'
+  };
+
+  const menuMas = [
+    { tipo: 'titulo', label: 'Apariencia' },
+    { tipo: 'radio', id: 'modo-sistema', label: 'Sistema', checked: apariencia.modo === 'sistema', onSelect: () => cambiarApariencia({ modo: 'sistema' }) },
+    { tipo: 'radio', id: 'modo-claro', label: 'Claro', checked: apariencia.modo === 'claro', onSelect: () => cambiarApariencia({ modo: 'claro' }) },
+    { tipo: 'radio', id: 'modo-oscuro', label: 'Oscuro', checked: apariencia.modo === 'oscuro', onSelect: () => cambiarApariencia({ modo: 'oscuro' }) },
+    { tipo: 'sep' },
+    { tipo: 'check', id: 'rt', label: 'Reducir transparencia', checked: apariencia.reducirTransparencia, onSelect: () => cambiarApariencia({ reducirTransparencia: !apariencia.reducirTransparencia }) },
+    { tipo: 'check', id: 'rail-izq', label: 'Menú a la izquierda', checked: apariencia.railIzquierda, onSelect: () => cambiarApariencia({ railIzquierda: !apariencia.railIzquierda }), soloCelular: true },
+    { tipo: 'sep' },
+    { tipo: 'item', id: 'ajustes', label: 'Ajustes', onSelect: () => setSettingsOpen(true) },
+    { tipo: 'item', id: 'reglas', label: 'Reglas de nombres', onSelect: () => setActiveView('reglas') },
+    // Reintegros pasa a ser un filtro de Movimientos en la fase 4.
+    { tipo: 'item', id: 'reintegros', label: `Reintegros${reintegrosRecientes.length ? ` (${reintegrosRecientes.length})` : ''}`, onSelect: () => setActiveView('reintegros') },
+    { tipo: 'item', id: 'consumos-live', label: 'Últimos consumos', onSelect: () => setActiveView('consumos-live') },
+    { tipo: 'item', id: 'guia', label: 'Guía y novedades', onSelect: () => setActiveView('guia') }
   ];
-  
+
+  // Campo de luz: una mancha por tarjeta (orden de alta), escala según su último total a pagar.
+  const manchas = manchasDeLuz(
+    tarjetas.map(t => ({ tarjeta: t, peso: t.ultimo_resumen?.total_a_pagar || 0 })),
+    { oscuro }
+  );
+
   // Format currency (usa las funciones helper globales)
   const formatCurrency = (amount, currency = 'ARS') => {
     if (currency === 'USD') {
@@ -1705,11 +1768,9 @@ const App = () => {
   };
   
   // Chart colors based on theme
-  const chartColors = theme === 'dark'
-    ? ['#D4AF37', '#FFD700', '#F59E0B', '#FBBF24']
-    : theme === 'liquid'
-    ? ['#7c8cff', '#41e0c8', '#c45bff', '#ffb454']
-    : ['#8B5CF6', '#EC4899', '#06B6D4', '#10B981'];
+  const chartColors = oscuro
+    ? ['#7D7AFF', '#B8B6FF', '#4C8FEA', '#D47A22']
+    : ['#4F4DD6', '#2B2A7A', '#1B5FAF', '#C2500A'];
 
   // Mostrar Onboarding si es la primera vez
   if (showOnboarding) {
@@ -1717,89 +1778,30 @@ const App = () => {
   }
 
   return (
-    <div className="min-h-screen">
-      {/* Animated Background */}
-      <div className="animated-bg" />
-
-      {/* Navegación flotante (pill) — fija, permanece visible en el scroll */}
-      <div className="fixed bottom-4 md:bottom-auto md:top-4 inset-x-0 z-50 flex justify-center px-3 pointer-events-none">
-        <nav className="nav-pill glass pointer-events-auto max-w-full overflow-x-auto">
-          {/* Marca */}
-          <div className="hidden md:flex items-center gap-2 pl-1 pr-1 shrink-0">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[var(--accent-1)] to-[var(--accent-2)]
-                            flex items-center justify-center shadow-lg shrink-0">
-              <Wallet className="w-5 h-5 text-white" />
-            </div>
-            <span className="hidden xl:block font-bold text-[var(--text-primary)] pr-1">Tarjeteando</span>
-          </div>
-
-          <div className="nav-pill-divider hidden md:block" />
-
-          {menuItems.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => setActiveView(item.id)}
-              className={`nav-pill-item ${activeView === item.id ? 'active' : ''}`}
-              title={item.label}
-            >
-              <item.icon className="w-5 h-5 shrink-0" />
-              <span className="hidden lg:inline">{item.label}</span>
-              {item.badge > 0 && <span className="nav-pill-badge">{item.badge}</span>}
-            </button>
-          ))}
-
-          <div className="nav-pill-divider hidden md:block" />
-
-          {/* Tema */}
-          <button
-            onClick={() => setTheme(theme === 'liquid' ? 'light' : theme === 'light' ? 'dark' : 'liquid')}
-            className="nav-pill-icon"
-            title="Cambiar tema (Liquid / Claro / Oscuro)"
-          >
-            {theme === 'light' ? <Sun className="w-5 h-5" /> : theme === 'dark' ? <Moon className="w-5 h-5" /> : <Sparkles className="w-5 h-5" />}
-          </button>
-
-          {/* Configuración */}
-          <button onClick={() => setSettingsOpen(true)} className="nav-pill-icon" title="Configuración">
-            <Settings className="w-5 h-5" />
-          </button>
-        </nav>
-      </div>
-
-      {/* Contenido principal — ancho completo */}
-      <main className="min-h-screen pt-6 md:pt-24">
-        <div className="max-w-7xl mx-auto px-4 pb-28 md:pb-10">
-          {/* Encabezado contextual */}
-          <header className="flex items-center justify-between gap-4 mb-6 flex-wrap">
-            <div>
-              <h2 className="text-2xl font-bold text-[var(--text-primary)]">
-                {menuItems.find(m => m.id === activeView)?.label || 'Dashboard'}
-              </h2>
-              <p className="text-sm text-[var(--text-muted)] capitalize">
-                {new Date().toLocaleDateString('es-AR', {
-                  weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
-                })}
-              </p>
-            </div>
-            <div className="flex items-center gap-2 px-4 py-2 rounded-xl
-                            bg-[var(--glass-bg)] border border-[var(--glass-border)]">
-              <Search className="w-4 h-4 text-[var(--text-muted)]" />
-              <input
-                type="text"
-                placeholder="Buscar..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="bg-transparent outline-none text-sm w-40 text-[var(--text-primary)]
-                           placeholder:text-[var(--text-muted)]"
-              />
-            </div>
-          </header>
+    <>
+      <AppShell
+        seccion={seccionActual}
+        onSeccion={(id) => setActiveView(VISTA_DE_SECCION[id])}
+        onImportar={() => setActiveView('importar')}
+        busqueda={searchQuery}
+        onBuscar={setSearchQuery}
+        menu={menuMas}
+        manchas={manchas}
+        railIzquierda={apariencia.railIzquierda}
+        titulo={TITULOS[activeView]}
+        subtitulo={(() => {
+          const f = new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' }).replace(',', '');
+          return f.charAt(0).toUpperCase() + f.slice(1);
+        })()}
+      >
           {loading ? (
             <div className="flex items-center justify-center h-64">
               <div className="animate-spin rounded-full h-12 w-12 border-4 border-[var(--accent-1)] border-t-transparent" />
             </div>
-          ) : activeView === 'dashboard' ? (
+          ) : activeView === 'dashboard' || activeView === 'tarjetas' ? (
+            // Tarjetas: placeholder hasta la fase 3 (el dashboard, con foco en "Mis Tarjetas").
             <DashboardView
+              foco={activeView === 'tarjetas' ? 'tarjetas' : null}
               dashboard={{...dashboard, total_reintegros: reintegrosRecientes.reduce((sum, r) => sum + Math.abs(r.monto_pesos || 0), 0)}}
               tarjetas={tarjetas}
               proyecciones={proyecciones}
@@ -1862,13 +1864,19 @@ const App = () => {
               formatCurrency={formatCurrency}
               searchQuery={searchQuery}
             />
+          ) : activeView === 'reglas' ? (
+            <ReglasView
+              reglas={reglas}
+              pendientes={pendientesNombre}
+              searchQuery={searchQuery}
+              onRefresh={() => { cargarPendientesNombre(); fetchData(); }}
+            />
           ) : activeView === 'guia' ? (
             <GuiaView onVerNovedades={() => setMostrarNovedades(true)} />
           ) : activeView === 'importar' ? (
             <ImportarView onSuccess={() => { refrescarLive(); fetchData(); }} preguntasFijos={preguntasFijos} onResponderPregunta={responderPreguntaFijo} />
           ) : null}
-        </div>
-      </main>
+      </AppShell>
 
       {mostrarNovedades && <NovedadesModal onCerrar={cerrarNovedades} />}
 
@@ -1889,7 +1897,7 @@ const App = () => {
         setTheme={setTheme}
         initialTab={settingsInitialTab}
       />
-    </div>
+    </>
   );
 };
 
@@ -2077,11 +2085,17 @@ const GuiaView = ({ onVerNovedades }) => (
 // Dashboard View
 const DEFAULT_CARD_ORDER = ['live', 'fijos', 'cuotasActivas', 'cuotasProx', 'totalPagar'];
 
-const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [], chartColors, formatCurrency, theme, resumenes = [], onDeleteResumen, setActiveView, searchQuery = '', movimientos = [], cuotasActivas = [], nombresTarjetas = {}, onGuardarNombre, gastosFijos = new Set(), gastosFijosDetalle = null, cotizacion = null, onFiltrarMovimientos, consumosLive = [], ciclosLive = {}, onAsignarBanco, preguntasFijos = [], onResponderPregunta }) => {
+const DashboardView = ({ foco = null, dashboard, tarjetas, proyecciones, proyeccionCuotas = [], chartColors, formatCurrency, theme, resumenes = [], onDeleteResumen, setActiveView, searchQuery = '', movimientos = [], cuotasActivas = [], nombresTarjetas = {}, onGuardarNombre, gastosFijos = new Set(), gastosFijosDetalle = null, cotizacion = null, onFiltrarMovimientos, consumosLive = [], ciclosLive = {}, onAsignarBanco, preguntasFijos = [], onResponderPregunta }) => {
   const liveCards = useMemo(() => cardsEnCurso(ciclosLive, consumosLive), [ciclosLive, consumosLive]);
   const [showResumenes, setShowResumenes] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
   const [mesDetalleIdx, setMesDetalleIdx] = useState(null);
+  // Sección Tarjetas (placeholder hasta la fase 3): lleva a "Mis Tarjetas".
+  useEffect(() => {
+    if (foco !== 'tarjetas') return;
+    const id = setTimeout(() => document.getElementById('mis-tarjetas')?.scrollIntoView({ block: 'start' }), 0);
+    return () => clearTimeout(id);
+  }, [foco]);
   const [resumenCombinado, setResumenCombinado] = useState(false);
 
   // Orden manual de las stat cards (persistido en localStorage)
@@ -2503,7 +2517,7 @@ const DashboardView = ({ dashboard, tarjetas, proyecciones, proyeccionCuotas = [
       <LiveCardsSection cards={liveCards} onVerDetalle={() => setActiveView?.('consumos-live')} onAsignarBanco={onAsignarBanco} bancos={BANCOS_COMUNES} />
 
       {/* Cards Grid */}
-      <div className="flex items-center justify-between mb-2">
+      <div id="mis-tarjetas" className="flex items-center justify-between mb-2" style={{ scrollMarginTop: 16 }}>
         <h3 className="text-lg font-semibold text-[var(--text-primary)]">Mis Tarjetas</h3>
         <button
           onClick={() => setShowResumenes(true)}

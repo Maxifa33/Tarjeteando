@@ -1,0 +1,333 @@
+/* ============================================================
+   Tokens del rediseño B+C (rediseno-2026/specs/README.md).
+   .tj = oscuro (default) · .tj.claro = claro · .tj.rt = reducir transparencia.
+   La clase .tj va en <html> para que los modales y portales también la hereden.
+   ============================================================ */
+
+.tj {
+  --base: #0B0B10;
+  --win: rgba(28, 28, 30, .72);
+  --win-border: rgba(255, 255, 255, .10);
+  --win-hi: inset 0 1px 0 rgba(255, 255, 255, .08);
+  --solid: #1C1C1E;
+  --label: #F5F5F7;
+  --label2: #AEAEB2;
+  --sep: rgba(84, 84, 88, .55);
+  --fill: rgba(120, 120, 128, .24);
+  --fill2: rgba(120, 120, 128, .14);
+  --track: rgba(120, 120, 128, .22);
+  --r1: #B8B6FF;
+  --r2: #7D7AFF;
+  --r3: #4B49B8;
+  --t1: #1D1D1F;
+  --t2: #1D1D1F;
+  --t3: #FFFFFF;
+  --inv: #F5F5F7;
+  --inv-text: #000000;
+  --ok: #30D158;
+  --warn: #FF9F0A;
+  --danger: #FF453A;
+  --blob-op: .55;
+
+  --spring: linear(0, .09 5.6%, .263 11.1%, .441 16.7%, .593 22.2%, .711 27.8%, .8 33.3%, .863 38.9%, .908 44.4%, .938 50%, .959 55.6%, .982 66.7%, .993 77.8%, .998 88.9%, 1);
+  --spring-dur: 600ms;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", sans-serif;
+  --font-rnd: ui-rounded, "SF Pro Rounded", -apple-system, system-ui, sans-serif;
+
+  color-scheme: dark;
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
+  background: var(--base);
+  color: var(--label);
+}
+
+.tj.claro {
+  --base: #E9EBF2;
+  --win: rgba(255, 255, 255, .72);
+  --win-border: rgba(255, 255, 255, .65);
+  --win-hi: inset 0 1px 0 rgba(255, 255, 255, .8);
+  --solid: #FFFFFF;
+  --label: #1D1D1F;
+  --label2: #56565B;
+  --sep: rgba(60, 60, 67, .18);
+  --fill: rgba(120, 120, 128, .14);
+  --fill2: rgba(120, 120, 128, .09);
+  --track: rgba(120, 120, 128, .14);
+  --r1: #2B2A7A;
+  --r2: #4F4DD6;
+  --r3: #8C8AE8;
+  --t1: #FFFFFF;
+  --t2: #FFFFFF;
+  --t3: #1D1D1F;
+  --inv: #1D1D1F;
+  --inv-text: #FFFFFF;
+  --ok: #1F7A35;
+  --warn: #B25000;
+  --danger: #D70015;
+  --blob-op: .5;
+  color-scheme: light;
+}
+
+.tj body {
+  background: var(--base);
+  color: var(--label);
+  font-family: var(--font);
+}
+
+/* ---------- Clases base ---------- */
+
+.tj .vidrio {
+  background: var(--win);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  backdrop-filter: blur(40px) saturate(180%);
+  border: 0.5px solid var(--win-border);
+  box-shadow: var(--win-hi), 0 18px 50px rgba(0, 0, 0, .16);
+  transition: background-color .4s;
+}
+
+.tj .vidrio-solido,
+.tj.rt .vidrio {
+  background: var(--solid);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.tj .rnd { font-family: var(--font-rnd); }
+.tj .num { font-variant-numeric: tabular-nums; }
+
+.tj .titulo {
+  margin: 0;
+  font-size: 34px;
+  line-height: 41px;
+  font-weight: 700;
+  letter-spacing: -.02em;
+}
+
+.tj .h3,
+.tj h3.h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .01em;
+  color: var(--label2);
+  text-transform: uppercase;
+}
+
+.tj .cap {
+  font-size: 12px;
+  color: var(--label2);
+  letter-spacing: .01em;
+}
+
+.tj .chip-plastico {
+  display: inline-block;
+  width: 22px;
+  height: 14px;
+  border-radius: 3.5px;
+  flex-shrink: 0;
+  box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, .25);
+}
+
+.tj .seg {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 12px;
+  background: var(--fill);
+}
+.tj .seg button {
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--label);
+}
+.tj .seg button.on {
+  background: var(--solid);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .14);
+}
+
+.tj .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 18px;
+  font-size: 14px;
+  font-weight: 600;
+  background: var(--fill);
+  color: var(--label);
+}
+.tj .btn-pri {
+  background: var(--inv);
+  color: var(--inv-text);
+}
+
+.tj .fila {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  border-radius: 12px;
+  font-size: 14px;
+}
+.tj .fila:hover { background: var(--fill2); }
+.tj .fila.on { background: var(--fill); }
+
+.tj .ico {
+  width: 44px;
+  height: 44px;
+  border-radius: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--label);
+}
+
+.tj .tab {
+  height: 40px;
+  padding: 0 18px;
+  border-radius: 20px;
+  font-size: 15px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  color: var(--label);
+  transition: background-color .2s;
+}
+.tj .tab:hover { background: var(--fill2); }
+.tj .tab.on { background: var(--fill); font-weight: 600; }
+
+.tj .menu-mas button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 12px;
+  border-radius: 10px;
+  font-size: 14px;
+  color: var(--label);
+  text-align: left;
+}
+.tj .menu-mas button:hover { background: var(--fill2); }
+.tj .menu-mas .sep {
+  height: 0.5px;
+  background: var(--sep);
+  margin: 4px 8px;
+}
+
+.tj .spr {
+  transition:
+    transform var(--spring-dur) var(--spring),
+    height var(--spring-dur) var(--spring),
+    width var(--spring-dur) var(--spring),
+    opacity .3s;
+}
+
+.tj .entra { animation: tjEntra .5s var(--spring) both; }
+@keyframes tjEntra {
+  from { opacity: 0; transform: translateY(10px) scale(.995); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Foco visible en todo lo interactivo */
+.tj button:focus-visible,
+.tj a:focus-visible,
+.tj input:focus-visible,
+.tj select:focus-visible,
+.tj textarea:focus-visible,
+.tj [tabindex]:focus-visible {
+  outline: 2px solid var(--label);
+  outline-offset: 3px;
+}
+
+/* ---------- Campo de luz ---------- */
+
+.tj .campo-luz {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+.tj .mancha {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 600px;
+  height: 600px;
+  border-radius: 50%;
+  filter: blur(80px);
+  transition: transform 1.1s var(--spring), opacity .9s;
+}
+.tj.rt .campo-luz { display: none; }
+
+/* ---------- Shell ---------- */
+
+.tj .shell-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--fill) transparent;
+}
+
+/* Barra web angosta (768–1100 px): se pliegan los textos de la marca e Importar */
+@media (min-width: 768px) and (max-width: 1100px) {
+  .tj .marca-nombre { display: none; }
+}
+@media (min-width: 768px) and (max-width: 900px) {
+  .tj .importar-label { display: none; }
+}
+
+/* ---------- Preferencias del sistema ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .tj .spr,
+  .tj .mancha { transition: opacity .2s; }
+  .tj .entra { animation: none; }
+  .tj .hoja-panel { transition: none; }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .tj .vidrio {
+    background: var(--solid);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .tj .campo-luz { display: none; }
+}
+
+@media (prefers-contrast: more) {
+  .tj .vidrio {
+    background: var(--solid);
+    border: 1px solid var(--label2);
+  }
+}
+
+/* ============================================================
+   Compatibilidad: las vistas viejas (hasta que se migren en sus
+   fases) leen estas variables. Apuntan a los tokens nuevos.
+   ============================================================ */
+
+.tj {
+  --bg-primary: var(--base);
+  --bg-secondary: var(--solid);
+  --glass-bg: var(--fill2);
+  --glass-border: var(--sep);
+  --glass-shadow: none;
+  --text-primary: var(--label);
+  --text-secondary: var(--label2);
+  --text-muted: var(--label2);
+  --accent-1: var(--r2);
+  --accent-2: var(--r1);
+  --accent-3: var(--r3);
+  --card-glow: transparent;
+  --chart-line-1: var(--r2);
+  --chart-line-2: var(--r1);
+  --positive: var(--ok);
+  --negative: var(--danger);
+  --settings-bg: var(--solid);
+}
