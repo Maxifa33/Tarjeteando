@@ -130,8 +130,14 @@ export function cuotasDelPlan(plan, { hoyMesKey, desfase = {} } = {}) {
   const rango = rangoDePlan(plan, { desfase });
   if (!rango) return [];
   const hoy = indiceMesKey(hoyMesKey);
+  // Interrumpido o terminado por decisión: pagadas son las que el banco facturó, no
+  // las que tocaban por calendario.
+  const facturadas = noSeProyecta(plan) ? actualDe(plan) : null;
   return Array.from({ length: plan.total_cuotas }, (_, k) => {
     const mes = rango.inicio + k;
-    return { numero: k + 1, mesKey: mesKeyDeIndice(mes), estado: mes < hoy ? 'pagada' : mes === hoy ? 'este_mes' : 'falta' };
+    const estado = facturadas !== null
+      ? (k + 1 <= facturadas ? 'pagada' : 'falta')
+      : mes < hoy ? 'pagada' : mes === hoy ? 'este_mes' : 'falta';
+    return { numero: k + 1, mesKey: mesKeyDeIndice(mes), estado };
   });
 }

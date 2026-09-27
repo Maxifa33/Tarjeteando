@@ -121,6 +121,10 @@ describe('detalle de un plan', () => {
     const todopampa = planes.find((p) => p.descripcion === 'Todopampa');
     assert.deepEqual(cuotasDelPlan(todopampa, opts).map((c) => c.estado), ['pagada', 'pagada', 'este_mes', 'falta']);
   });
+  test('interrumpido: pagadas son las facturadas, no las del calendario', () => {
+    const easy = planes.find((p) => p.descripcion === 'Easy'); // 1/3 en julio, el banco no lo facturó más
+    assert.deepEqual(cuotasDelPlan(easy, opts).map((c) => c.estado), ['pagada', 'falta', 'falta']);
+  });
   test('un plan interrumpido no tiene próximas cuotas', () => {
     assert.deepEqual(proximasCuotas(planes.find((p) => p.descripcion === 'Easy'), opts), []);
   });
