@@ -173,12 +173,14 @@ export function cuotasDelMes(planes = [], mesKey, { desfase = {}, cotizacionVent
   const pago = indiceMesKey(mesKey);
   const items = [];
   planes.forEach((p) => {
-    if (!p || p.interrumpida) return;
+    // Interrumpido por el banco o terminado por decisión del usuario: no se paga.
+    if (!p || p.interrumpida || p.motivo === 'decision_usuario') return;
     if (tarjetas && !tarjetas.includes(p.tarjeta)) return;
     if (!p.periodo_anio || !p.periodo_mes) return;
     const actual = p.cuota_actual ?? p.cuotas_pagadas;
     const total = p.total_cuotas;
-    if (!actual || !total) return;
+    // Una "cuota" 1/1 es una compra común: va en variables, no en cuotas.
+    if (!actual || !total || total <= 1) return;
     const periodoFacturado = pago - (desfase[p.tarjeta] ?? 1);
     const diff = periodoFacturado - (p.periodo_anio * 12 + (p.periodo_mes - 1));
     const numero = actual + diff;

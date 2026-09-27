@@ -55,10 +55,15 @@ export function claveDePlan(mov, total, montoPesos, montoDolares) {
  *
  * @param {Array} movimientos - movimientos de localStorage (con resumen_id o anio/mes_resumen)
  * @param {Array} resumenes   - resúmenes de localStorage ({id, tarjeta, anio, mes})
+ * @param {Array} decisiones  - lo que decidió el usuario sobre planes interrumpidos:
+ *   [{ claveDePlan, decision: 'terminado'|'vigente', fecha }]. Gana la más reciente.
+ *   'terminado' → el plan pasa a 'terminada' (motivo 'decision_usuario') y no se proyecta.
+ *   'vigente'   → deja de estar interrumpido y se proyecta hasta su última cuota.
+ *   Sin decisiones, la salida es idéntica a la de antes.
  * @returns {Array} planes, cada uno con cuota_actual, total_cuotas, monto_pesos,
  *   monto_dolares, periodo_anio, periodo_mes e `interrumpida`.
  */
-export function construirPlanes(movimientos = [], resumenes = []) {
+export function construirPlanes(movimientos = [], resumenes = [], decisiones = []) {
   const resumenPorId = {};
   const ultimoPeriodoPorTarjeta = {};
   resumenes.forEach(r => {
@@ -102,11 +107,26 @@ export function construirPlanes(movimientos = [], resumenes = []) {
     });
   });
 
+  // Decisión vigente por plan (la más reciente). Las de planes que ya no existen se ignoran.
+  const decisionPorClave = {};
+  (decisiones || []).forEach(d => {
+    if (!d || !d.claveDePlan || (d.decision !== 'terminado' && d.decision !== 'vigente')) return;
+    const previa = decisionPorClave[d.claveDePlan];
+    if (!previa || String(d.fecha || '') >= String(previa.fecha || '')) decisionPorClave[d.claveDePlan] = d;
+  });
+
   return [...planes.values()].map(plan => {
     const ultimoPeriodo = ultimoPeriodoPorTarjeta[plan.tarjeta] ?? plan.periodo;
     const quedanCuotas = plan.cuota_actual < plan.total_cuotas;
     // Un plan ya terminado (N/N) no está interrumpido, simplemente se acabó.
     const interrumpida = quedanCuotas && ultimoPeriodo > plan.periodo;
+    const decision = interrumpida ? decisionPorClave[plan.clave] : null;
+    if (decision?.decision === 'terminado') {
+      return { ...plan, interrumpida: false, estado: 'terminada', motivo: 'decision_usuario', decision: 'terminado' };
+    }
+    if (decision?.decision === 'vigente') {
+      return { ...plan, interrumpida: false, estado: 'vigente', decision: 'vigente' };
+    }
     return { ...plan, interrumpida, estado: estadoDePlan({ quedanCuotas, interrumpida, esUltimoPeriodo: plan.periodo === ultimoPeriodo }) };
   });
 }
@@ -131,6 +151,9 @@ export const ESTADOS_EN_CURSO = ['vigente', 'ultima_cuota', 'interrumpida'];
 
 /** true si el plan todavía tiene algo que decirte este mes. */
 export const estaEnCurso = (plan) => ESTADOS_EN_CURSO.includes(plan?.estado);
+
+/** true si el plan no se proyecta: el banco dejó de facturarlo o el usuario lo dio por terminado. */
+export const noSeProyecta = (plan) => !!plan?.interrumpida || plan?.motivo === 'decision_usuario';
 
 /** Planes con deuda real por delante (los que cuenta la StatCard "Cuotas activas"). */
 export const estaVigente = (plan) => plan?.estado === 'vigente';
@@ -187,8 +210,9 @@ export function proyectarCuotas(planes = [], opciones = {}) {
     const detalles = [];
 
     ordenados.forEach(plan => {
-      // Plan que el banco dejó de facturar: no se proyecta (se sigue viendo en Cuotas).
-      if (plan.interrumpida) return;
+      // Plan que el banco dejó de facturar (o que el usuario dio por terminado): no se
+      // proyecta (se sigue viendo en Cuotas).
+      if (noSeProyecta(plan)) return;
       if (!plan.periodo_anio || !plan.periodo_mes) return;
 
       const diff = (fecha.getFullYear() - plan.periodo_anio) * 12
@@ -252,14 +276,17 @@ export function formatearParaVista(planes = []) {
     estado: plan.estado,
     interrumpida: !!plan.interrumpida,
     periodo_anio: plan.periodo_anio,
-    periodo_mes: plan.periodo_mes
+    periodo_mes: plan.periodo_mes,
+    clave: plan.clave,
+    motivo: plan.motivo || null,
+    decision: plan.decision || null
   }));
 }
 
 /** Cuánto falta pagar de los planes vigentes, en pesos (las cuotas USD se pesifican). */
 export function totalPendiente(planes = [], cotizacionVenta = 0) {
   return planes.reduce((suma, plan) => {
-    if (plan.interrumpida) return suma;
+    if (noSeProyecta(plan)) return suma;
     const restantes = plan.total_cuotas - plan.cuota_actual;
     const cuotaARS = (plan.monto_pesos || 0) || (plan.monto_dolares || 0) * cotizacionVenta;
     return suma + cuotaARS * restantes;

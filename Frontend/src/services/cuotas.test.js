@@ -297,6 +297,18 @@ describe('Independencia del orden de subida (PDFs reales)', { skip: !HAY_PDFS &&
     }
   });
 
+  test('sin decisiones, la salida es idéntica a la de antes (fase 5)', async () => {
+    const { movimientos, resumenes } = await parsearTodo();
+    const antes = construirPlanes(movimientos, resumenes);
+    assert.deepEqual(construirPlanes(movimientos, resumenes, []), antes);
+    // Una decisión sobre un plan que no existe (resumen borrado) se ignora sin error.
+    assert.deepEqual(construirPlanes(movimientos, resumenes, [{ claveDePlan: 'no|existe|3|1', decision: 'terminado', fecha: '2026-01-01' }]), antes);
+    assert.equal(
+      JSON.stringify(proyectarCuotas(construirPlanes(movimientos, resumenes, []), { meses: 6, resumenes })),
+      JSON.stringify(proyectarCuotas(antes, { meses: 6, resumenes }))
+    );
+  });
+
   test('cada cuota proyectada lleva el número correcto respecto de su período', async () => {
     const { movimientos, resumenes } = await parsearTodo();
     const planes = construirPlanes(movimientos, resumenes);
@@ -366,5 +378,50 @@ describe('Caso Easy Warnes contra "Cuotas a vencer" del resumen', () => {
     const enOrden = proyectarCuotas(construirPlanes([...movsJulio, ...movsAgosto], [JUL, AGO]), { meses: 3, resumenes: [JUL, AGO] });
     const invertido = proyectarCuotas(construirPlanes([...movsAgosto, ...movsJulio], [AGO, JUL]), { meses: 3, resumenes: [AGO, JUL] });
     assert.equal(JSON.stringify(invertido), JSON.stringify(enOrden));
+  });
+});
+
+// ───────────── 4. decisiones del usuario sobre planes interrumpidos (fase 5) ─────────────
+describe('Decisiones sobre planes a revisar', () => {
+  const JUL = resumen('VISA Galicia', 2026, 7);
+  const AGO = resumen('VISA Galicia', 2026, 8);
+  const movs = [mov(JUL, 'Easy', '01/03', 53745), mov(AGO, 'Puma', '01/03', 53333)];
+  const easyClave = construirPlanes(movs, [JUL, AGO]).find(p => p.referencia_limpia === 'Easy').clave;
+
+  test('"terminado": pasa a terminada por decisión del usuario y no se proyecta', () => {
+    const planes = construirPlanes(movs, [JUL, AGO], [{ claveDePlan: easyClave, decision: 'terminado', fecha: '2026-09-01' }]);
+    const easy = planes.find(p => p.referencia_limpia === 'Easy');
+    assert.equal(easy.estado, 'terminada');
+    assert.equal(easy.motivo, 'decision_usuario');
+    assert.equal(easy.interrumpida, false);
+    const proy = proyectarCuotas(planes, { meses: 3, resumenes: [JUL, AGO] });
+    assert.ok(proy.every(m => !m.detalles.some(d => d.descripcion === 'Easy')));
+    assert.equal(totalPendiente(planes), 53333 * 2);
+    assert.equal(formatearParaVista(planes).find(v => v.descripcion === 'Easy').motivo, 'decision_usuario');
+  });
+
+  test('"vigente": deja de estar interrumpido y se proyecta hasta su última cuota', () => {
+    const planes = construirPlanes(movs, [JUL, AGO], [{ claveDePlan: easyClave, decision: 'vigente', fecha: '2026-09-01' }]);
+    const easy = planes.find(p => p.referencia_limpia === 'Easy');
+    assert.equal(easy.estado, 'vigente');
+    assert.equal(easy.interrumpida, false);
+    // Anclado a julio (1/3): la 3/3 cae en septiembre.
+    const proy = proyectarCuotas(planes, { meses: 2, resumenes: [JUL, AGO] });
+    assert.ok(proy[0].detalles.some(d => d.descripcion === 'Easy' && d.cuota_numero === 3));
+  });
+
+  test('"vigente" y el banco lo vuelve a facturar: no queda duplicado', () => {
+    const SEP = resumen('VISA Galicia', 2026, 9);
+    const planes = construirPlanes([...movs, mov(SEP, 'Easy', '03/03', 53745)], [JUL, AGO, SEP],
+      [{ claveDePlan: easyClave, decision: 'vigente', fecha: '2026-09-01' }]);
+    assert.equal(planes.filter(p => p.referencia_limpia === 'Easy').length, 1);
+  });
+
+  test('gana la decisión más reciente', () => {
+    const planes = construirPlanes(movs, [JUL, AGO], [
+      { claveDePlan: easyClave, decision: 'terminado', fecha: '2026-09-01' },
+      { claveDePlan: easyClave, decision: 'vigente', fecha: '2026-09-02' }
+    ]);
+    assert.equal(planes.find(p => p.referencia_limpia === 'Easy').estado, 'vigente');
   });
 });

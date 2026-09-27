@@ -25,6 +25,9 @@ const STORAGE_KEYS = {
   DECISIONES_FIJOS: 'tarjetas_decisiones_fijos',
   // Cuántas veces el usuario corrigió al detector (tasa de error real)
   METRICAS_DETECTOR: 'tarjetas_metricas_detector',
+  // Qué hacer con los planes en cuotas que el banco dejó de facturar:
+  // [{ id, claveDePlan, decision: 'terminado'|'vigente', fecha }]
+  DECISIONES_PLANES: 'tarjetas_decisiones_planes',
   VERSION: 'tarjetas_version'
 };
 
@@ -281,6 +284,23 @@ class StorageService {
     return this.setItem(STORAGE_KEYS.DECISIONES_FIJOS, this.getDecisionesFijos().filter(d => d.id !== id));
   }
 
+  getDecisionesPlanes() {
+    return this.getItem(STORAGE_KEYS.DECISIONES_PLANES, []);
+  }
+
+  /** Guarda una decisión sobre un plan y devuelve su id (para Deshacer). */
+  addDecisionPlan({ claveDePlan, decision }) {
+    const id = `dp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    const lista = this.getDecisionesPlanes();
+    lista.push({ id, claveDePlan, decision, fecha: new Date().toISOString() });
+    return this.setItem(STORAGE_KEYS.DECISIONES_PLANES, lista) ? id : null;
+  }
+
+  removeDecisionPlan(id) {
+    if (!id) return false;
+    return this.setItem(STORAGE_KEYS.DECISIONES_PLANES, this.getDecisionesPlanes().filter(d => d.id !== id));
+  }
+
   getMetricasDetector() {
     return this.getItem(STORAGE_KEYS.METRICAS_DETECTOR,
       { correcciones: 0, a_fijo: 0, a_variable: 0, preguntas_respondidas: 0 });
@@ -385,6 +405,7 @@ class StorageService {
         tipoOverrides: this.getTipoOverrides(),
         decisionesFijos: this.getDecisionesFijos(),
         metricasDetector: this.getMetricasDetector(),
+        decisionesPlanes: this.getDecisionesPlanes(),
         config: this.getConfig()
       }
     };
@@ -401,7 +422,7 @@ class StorageService {
 
       const { resumenes, tarjetas, reglas, consumosLive, config,
               tipoOverrides, decisionesFijos, metricasDetector,
-              ciclosLive, aliasUlt4, plantillasConsumos } = data.data;
+              ciclosLive, aliasUlt4, plantillasConsumos, decisionesPlanes } = data.data;
       // Backups viejos traen IDs posicionales: se normalizan al ID hash.
       const movimientos = data.data.movimientos ? conIdsHash(data.data.movimientos) : data.data.movimientos;
 
@@ -451,6 +472,11 @@ class StorageService {
           const ids = new Set(existentes.map(o => o.mov_id));
           this.setItem(STORAGE_KEYS.TIPO_OVERRIDES, [...existentes, ...tipoOverrides.filter(o => !ids.has(o.mov_id))]);
         }
+        if (decisionesPlanes) {
+          const existentes = this.getDecisionesPlanes();
+          const ids = new Set(existentes.map(d => d.id));
+          this.setItem(STORAGE_KEYS.DECISIONES_PLANES, [...existentes, ...decisionesPlanes.filter(d => !ids.has(d.id))]);
+        }
         if (decisionesFijos) {
           const existentes = this.getDecisionesFijos();
           const clave = d => `${d.tipo}|${d.mov_id}|${d.periodo || ''}`;
@@ -471,6 +497,7 @@ class StorageService {
         if (tipoOverrides) this.setItem(STORAGE_KEYS.TIPO_OVERRIDES, tipoOverrides);
         if (decisionesFijos) this.setItem(STORAGE_KEYS.DECISIONES_FIJOS, decisionesFijos);
         if (metricasDetector) this.setItem(STORAGE_KEYS.METRICAS_DETECTOR, metricasDetector);
+        if (decisionesPlanes) this.setItem(STORAGE_KEYS.DECISIONES_PLANES, decisionesPlanes);
         if (config) this.setItem(STORAGE_KEYS.CONFIG, config);
       }
 

@@ -12,6 +12,7 @@ import { manchasDeLuz, manchasElegida } from './ui/identidad.js';
 import MesView from './views/MesView.jsx';
 import TarjetasView from './views/TarjetasView.jsx';
 import MovimientosView from './views/MovimientosView.jsx';
+import CuotasView from './views/CuotasView.jsx';
 import { armarTarjetas, buscarTarjeta } from './services/tarjetas.js';
 import { serieEvolucion, detalleMes } from './services/evolucion.js';
 import { cicloDePago, cuotasDelMes, desfasePorTarjeta, proximoMes, sumarMeses, composicionPorTarjeta, composicionDesdeTarjetas, fijosPorTarjeta } from './services/mes.js';
@@ -1540,7 +1541,9 @@ const App = () => {
       // con `npm test` en Frontend). Un plan se arma con TODOS los resúmenes y queda
       // anclado al período donde se lo vio por última vez; si un resumen posterior de
       // esa tarjeta no lo factura, viene marcado como `interrumpida`.
-      const cuotasActivasData = construirPlanes(movimientosData, resumenesData);
+      // Las decisiones del usuario sobre planes 'a revisar' (fase 5) entran acá: así
+      // cambian Cuotas, la proyección, Mes y el gráfico a la vez.
+      const cuotasActivasData = construirPlanes(movimientosData, resumenesData, storage.getDecisionesPlanes());
 
       // Enriquecer tarjetas con último resumen y estadísticas
       const tarjetasEnriquecidas = tarjetasData.map((t, idx) => {
@@ -1827,6 +1830,19 @@ const App = () => {
   const [movimientosFiltro, setMovimientosFiltro] = useState(null);
   // Plan elegido al entrar a Cuotas desde un movimiento ("Ver plan en Cuotas"); lo usa la fase 5.
   const [planElegido, setPlanElegido] = useState(null);
+  useEffect(() => { if (activeView !== 'cuotas') setPlanElegido(null); }, [activeView]);
+  const [decisionesPlanes, setDecisionesPlanes] = useState(() => storage.getDecisionesPlanes());
+  const decidirPlan = async (plan, decision) => {
+    const id = storage.addDecisionPlan({ claveDePlan: plan.clave, decision });
+    setDecisionesPlanes(storage.getDecisionesPlanes());
+    await fetchData();
+    return id;
+  };
+  const deshacerDecisionPlan = async (id) => {
+    storage.removeDecisionPlan(id);
+    setDecisionesPlanes(storage.getDecisionesPlanes());
+    await fetchData();
+  };
   // Reintegros ya no es una vista: es un filtro de Movimientos.
   useEffect(() => {
     if (activeView === 'reintegros') {
@@ -1871,7 +1887,7 @@ const App = () => {
         menu={menuMas}
         manchas={manchasVista}
         railIzquierda={apariencia.railIzquierda}
-        titulo={activeView === 'dashboard' || activeView === 'movimientos' ? null : TITULOS[activeView]}
+        titulo={['dashboard', 'movimientos', 'cuotas'].includes(activeView) ? null : TITULOS[activeView]}
         subtitulo={(() => {
           const f = new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' }).replace(',', '');
           return f.charAt(0).toUpperCase() + f.slice(1);
@@ -1963,9 +1979,18 @@ const App = () => {
             />
           ) : activeView === 'cuotas' ? (
             <CuotasView
-              cuotas={cuotasActivas}
-              formatCurrency={formatCurrency}
-              searchQuery={searchQuery}
+              planes={cuotasActivas}
+              hoyMesKey={mes.ciclo.mesKey}
+              desfase={mes.desfase}
+              cotizacionVenta={cotizacionVenta}
+              tarjetas={tarjetas}
+              nombresTarjetas={nombresTarjetas}
+              busqueda={searchQuery}
+              planElegido={planElegido}
+              decisiones={decisionesPlanes}
+              onDecidir={decidirPlan}
+              onDeshacer={deshacerDecisionPlan}
+              oscuro={oscuro}
             />
           ) : activeView === 'reglas' ? (
             <ReglasView
@@ -2940,161 +2965,9 @@ const DashboardView = ({ foco = null, dashboard, tarjetas, proyecciones, proyecc
 
 // MovimientosView se mudó a views/MovimientosView.jsx (fase 4).
 
-// Cuotas View con última cuota destacada
-const CuotasView = ({ cuotas = [], formatCurrency, searchQuery = '' }) => {
-  const cuotasArray = Array.isArray(cuotas) ? cuotas : [];
-  // Por defecto solo lo que sigue en curso. Los planes terminados en resúmenes
-  // anteriores son historial y tapaban la vista (eran ~60% de las tarjetas).
-  const [verTerminadas, setVerTerminadas] = useState(false);
+// CuotasView se mudó a views/CuotasView.jsx (fase 5).
 
-  const terminadas = cuotasArray.filter(c => c.estado === 'terminada');
-  const visibles = verTerminadas ? cuotasArray : cuotasArray.filter(c => c.estado !== 'terminada');
-
-  // Filtrar por búsqueda global
-  const filtered = visibles.filter(c => {
-    if (!searchQuery) return true;
-    const query = searchQuery.toLowerCase();
-    return c.descripcion?.toLowerCase().includes(query) ||
-           c.tarjeta?.toLowerCase().includes(query);
-  });
-
-  const enCurso = cuotasArray.filter(c => c.estado === 'vigente').length;
-  const porRevisar = cuotasArray.filter(c => c.estado === 'interrumpida').length;
-
-  return (
-    <div className="grid gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3 px-1">
-        <p className="text-sm text-[var(--text-muted)]">
-          <span className="text-[var(--text-primary)] font-semibold">{enCurso}</span> en curso
-          {porRevisar > 0 && <span> · {porRevisar} a revisar</span>}
-        </p>
-        {terminadas.length > 0 && (
-          <button
-            onClick={() => setVerTerminadas(v => !v)}
-            className="text-xs px-3 py-1.5 rounded-lg border border-[var(--glass-border)]
-                       text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-          >
-            {verTerminadas
-              ? `Ocultar ${terminadas.length} terminadas`
-              : `Ver ${terminadas.length} terminadas`}
-          </button>
-        )}
-      </div>
-        {filtered.map((cuota, idx) => {
-        // El trofeo es solo para la que se terminó en el último resumen: ahí es
-        // plata que se libera. Las viejas van atenuadas, como historial.
-        const esUltimaCuota = cuota.estado === 'ultima_cuota';
-        const yaTerminada = cuota.estado === 'terminada';
-        // El banco dejo de facturar este plan en un resumen posterior: se muestra,
-        // pero no cuenta como deuda futura ni entra en la proyeccion.
-        const interrumpida = !!cuota.interrumpida && !esUltimaCuota;
-        const periodoTexto = cuota.periodo_anio && cuota.periodo_mes
-          ? new Date(cuota.periodo_anio, cuota.periodo_mes - 1)
-              .toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })
-          : null;
-
-        return (
-          <div
-            key={cuota.id || idx}
-            className={`glass-card p-5 opacity-0 animate-fade-in-up transition-all
-                       ${esUltimaCuota
-                         ? 'ring-2 ring-emerald-400 shadow-[0_0_25px_rgba(52,211,153,0.3)] bg-gradient-to-r from-emerald-500/10 to-teal-500/10'
-                         : interrumpida
-                           ? 'ring-1 ring-amber-400/60 bg-amber-500/5'
-                           : yaTerminada
-                             ? 'opacity-60'
-                             : ''}`}
-            style={{ animationDelay: `${idx * 50}ms`, animationFillMode: 'forwards' }}
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex-1 flex items-center gap-3">
-                {esUltimaCuota && (
-                  <div className="p-2 rounded-full bg-emerald-500/20 animate-pulse">
-                    <Trophy className="w-5 h-5 text-emerald-400" />
-                  </div>
-                )}
-                <div>
-                  <h4 className="font-semibold text-[var(--text-primary)] flex items-center gap-2">
-                    {cuota.descripcion}
-                    {esUltimaCuota && (
-                      <span className="text-xs bg-emerald-500 text-white px-2 py-0.5 rounded-full animate-pulse">
-                        ¡Última cuota!
-                      </span>
-                    )}
-                    {interrumpida && (
-                      <span className="text-xs bg-amber-500/20 text-amber-400 border border-amber-400/40 px-2 py-0.5 rounded-full">
-                        Sin facturar en el último resumen
-                      </span>
-                    )}
-                    {yaTerminada && (
-                      <span className="text-xs bg-[var(--glass-bg)] text-[var(--text-muted)] px-2 py-0.5 rounded-full">
-                        Terminada
-                      </span>
-                    )}
-                    {cuota.monto_cuota_dolares > 0 && (
-                      <span className="text-xs bg-[var(--glass-bg)] text-[var(--text-secondary)] px-2 py-0.5 rounded-full">
-                        USD
-                      </span>
-                    )}
-                  </h4>
-                  <p className="text-sm text-[var(--text-muted)]">
-                    {cuota.tarjeta}
-                    {periodoTexto && <span className="opacity-70"> · última cuota vista en {periodoTexto}</span>}
-                  </p>
-                  {interrumpida && (
-                    <p className="text-xs text-amber-400/90 mt-1">
-                      El banco no facturó esta cuota en el resumen más reciente. No se proyecta hasta que vuelva a aparecer.
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex items-center gap-6">
-                <div className="text-center">
-                  <p className="text-xs text-[var(--text-muted)]">Progreso</p>
-                  <p className={`font-semibold ${esUltimaCuota ? 'text-emerald-400' : 'text-[var(--text-primary)]'}`}>
-                    {cuota.cuotas_pagadas}/{cuota.total_cuotas}
-                  </p>
-                </div>
-
-                <div className="w-32 h-2 bg-[var(--glass-bg)] rounded-full overflow-hidden">
-                  <div
-                    className={`h-full transition-all duration-500
-                               ${esUltimaCuota
-                                 ? 'bg-gradient-to-r from-emerald-400 to-teal-400'
-                                 : 'bg-gradient-to-r from-[var(--accent-1)] to-[var(--accent-2)]'}`}
-                    style={{ width: `${(cuota.cuotas_pagadas / cuota.total_cuotas) * 100}%` }}
-                  />
-                </div>
-
-                <div className="text-right">
-                  <p className="text-xs text-[var(--text-muted)]">Por cuota</p>
-                  <p className={`font-bold ${esUltimaCuota ? 'text-emerald-400' : 'text-[var(--text-primary)]'}`}>
-                    {cuota.monto_cuota_dolares > 0 && !cuota.monto_cuota_pesos
-                      ? `USD ${cuota.monto_cuota_dolares.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`
-                      : formatCurrency(cuota.monto_cuota)}
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-      })}
-
-        {filtered.length === 0 && (
-        <div className="text-center py-12 text-[var(--text-muted)]">
-          <Calendar className="w-12 h-12 mx-auto mb-4 opacity-50" />
-          <p>{searchQuery ? 'No se encontraron cuotas' : 'No tenés compras en cuotas en curso'}</p>
-          {!searchQuery && terminadas.length > 0 && !verTerminadas && (
-            <p className="text-sm mt-2">Hay {terminadas.length} ya terminadas.</p>
-          )}
-        </div>
-      )}
-    </div>
-  );
-};
-
-// Reintegros View - Devoluciones y créditos
+// Reintegros View - Devoluciones y créditos (sin uso desde la fase 4; se borra en la fase 6)
 const ReintegrosView = ({ reintegros = [], periodoRecienteLabel = null, formatCurrency, searchQuery = '' }) => {
   // Por defecto solo los del último resumen de cada tarjeta: el histórico completo
   // mezclaba reintegros de hace un año con los que hay que revisar ahora.

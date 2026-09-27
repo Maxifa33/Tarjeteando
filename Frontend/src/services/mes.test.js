@@ -243,6 +243,13 @@ describe('cuotas en dólares', () => {
   });
 });
 
+describe('compras en 1 cuota', () => {
+  test('una cuota 1/1 es compra común: no entra en cuotas', () => {
+    const r = cuotasDelMes([{ tarjeta: 'X', descripcion: 'Uno', cuota_actual: 1, total_cuotas: 1, monto_pesos: 999, periodo_anio: 2026, periodo_mes: 9 }], '2026-10');
+    assert.equal(r.total, 0);
+  });
+});
+
 describe('proximoMes', () => {
   test('sin ciclos abiertos: solo cuotas y fijos', () => {
     const p = proximoMes({ cuotasDelMes: 300000, fijosArs: 70997, porTarjetaSiguiente: [{ tarjetaId: 'a', fuente: 'sin_datos' }] });
