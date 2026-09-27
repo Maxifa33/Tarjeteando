@@ -502,28 +502,3 @@
     border: 1px solid var(--label2);
   }
 }
-
-/* ============================================================
-   Compatibilidad: las vistas viejas (hasta que se migren en sus
-   fases) leen estas variables. Apuntan a los tokens nuevos.
-   ============================================================ */
-
-.tj {
-  --bg-primary: var(--base);
-  --bg-secondary: var(--solid);
-  --glass-bg: var(--fill2);
-  --glass-border: var(--sep);
-  --glass-shadow: none;
-  --text-primary: var(--label);
-  --text-secondary: var(--label2);
-  --text-muted: var(--label2);
-  --accent-1: var(--r2);
-  --accent-2: var(--r1);
-  --accent-3: var(--r3);
-  --card-glow: transparent;
-  --chart-line-1: var(--r2);
-  --chart-line-2: var(--r1);
-  --positive: var(--ok);
-  --negative: var(--danger);
-  --settings-bg: var(--solid);
-}

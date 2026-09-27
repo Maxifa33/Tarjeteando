@@ -1,5 +1,4 @@
-/* Tokens del rediseño B+C (incluye la capa de compatibilidad para las vistas viejas).
-   Va primero: CSS exige que @import preceda al resto. */
+/* Tokens del rediseño B+C. Va primero: CSS exige que @import preceda al resto. */
 @import './ui/tokens.css';
 
 @tailwind base;
@@ -18,130 +17,28 @@ body {
   transition: background-color .4s, color .4s;
 }
 
-/* ============================================================
-   Clases viejas → tokens nuevos. Viven dentro de la ventana de
-   vidrio: sin blur propio (un solo blur grande), sin glow y sin
-   hover que levante la card. Se reemplazan fase por fase.
-   ============================================================ */
-
-.glass,
-.glass-card,
-.stat-card {
+/* Paneles de las vistas secundarias (Ajustes, Importar, Reglas). Viven dentro de la
+   ventana de vidrio: sin blur propio, sin glow y sin hover que levante. */
+.glass-card {
   background: var(--fill2);
   border: 0.5px solid var(--sep);
+  border-radius: 20px;
   box-shadow: none;
   transition: background-color .3s;
 }
 
-.glass { border-radius: 24px; }
-.glass-card { border-radius: 20px; }
-
-.stat-card {
-  border-radius: 20px;
-  padding: 1.5rem;
-  position: relative;
-  overflow: hidden;
-}
-
-/* Variante compacta: cards más chicas para que entren todas en una fila */
-.stat-card-sm {
-  padding: 0.85rem 1rem;
-  border-radius: 16px;
-}
-
-/* Credit Card Visual */
-.credit-card {
-  border-radius: 16px;
-  padding: 1.5rem;
-  color: white;
-  position: relative;
-  overflow: hidden;
-  min-height: 180px;
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.credit-card::before {
-  content: '';
-  position: absolute;
-  top: -50%;
-  right: -50%;
-  width: 100%;
-  height: 100%;
-  background: radial-gradient(circle, rgba(255,255,255,0.2) 0%, transparent 60%);
-  animation: cardShine 3s ease-in-out infinite;
-}
-
-@keyframes cardShine {
-  0%, 100% { transform: translate(0, 0); opacity: 0.5; }
-  50% { transform: translate(-20%, 20%); opacity: 0.8; }
-}
-
-.credit-card:hover {
-  transform: scale(1.02) rotateY(-5deg);
-  box-shadow: 0 20px 40px rgba(0,0,0,0.3);
-}
-
-/* Animations */
+/* Entrada escalonada de listas (Importar, Reglas) */
 @keyframes fadeInUp {
-  from {
-    opacity: 0;
-    transform: translateY(30px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes fadeInLeft {
-  from {
-    opacity: 0;
-    transform: translateX(-30px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
-}
-
-@keyframes countUp {
-  from { opacity: 0; transform: translateY(10px); }
+  from { opacity: 0; transform: translateY(12px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
 .animate-fade-in-up {
-  animation: fadeInUp 0.6s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  animation: fadeInUp .5s var(--spring) forwards;
 }
 
-.animate-fade-in-left {
-  animation: fadeInLeft 0.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-}
-
-.animate-pulse-slow {
-  animation: pulse 3s ease-in-out infinite;
-}
-
-/* Staggered animations */
-.stagger-1 { animation-delay: 0.1s; }
-.stagger-2 { animation-delay: 0.2s; }
-.stagger-3 { animation-delay: 0.3s; }
-.stagger-4 { animation-delay: 0.4s; }
-.stagger-5 { animation-delay: 0.5s; }
-
-/* Charts */
-.recharts-cartesian-grid-horizontal line,
-.recharts-cartesian-grid-vertical line {
-  stroke: var(--glass-border);
-  stroke-opacity: 0.5;
-}
-
-.recharts-text {
-  fill: var(--text-secondary);
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in-up { animation: none; opacity: 1 !important; }
 }
 
 /* Scrollbar */
@@ -157,27 +54,4 @@ body {
 ::-webkit-scrollbar-thumb {
   background: var(--fill);
   border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: var(--fill);
-}
-
-/* Badge */
-.badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.25rem 0.75rem;
-  border-radius: 9999px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  background: var(--r2);
-  color: var(--t2);
-}
-
-/* Number counter animation */
-.number-animate {
-  display: inline-block;
-  animation: countUp 0.5s ease-out forwards;
 }

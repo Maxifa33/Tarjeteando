@@ -1,22 +1,23 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { createPortal } from 'react-dom';
 import storage from './services/storage';
-import { categorizarConsumo } from './services/consumos-parser';
-import { APP_VERSION, NOVEDADES, GUIA } from './novedades';
+import { APP_VERSION } from './novedades';
 import { parseUltimosConsumos, leerHojas, EXTENSIONES_CONSUMOS } from './services/consumos/index.js';
-import { agruparBloques, aliasConocido, cardsEnCurso } from './services/consumos/ciclos.js';
+import { agruparBloques, aliasConocido } from './services/consumos/ciclos.js';
 import { importarGrupos, conciliarResumen, getAlias, getPlantillas, guardarPlantilla, guardarBanco } from './services/consumos/live.js';
-import { LiveCardsSection } from './components/LiveCards.jsx';
 import AppShell from './ui/AppShell.jsx';
+import Seg from './ui/Seg.jsx';
 import { manchasDeLuz, manchasElegida } from './ui/identidad.js';
 import MesView from './views/MesView.jsx';
 import TarjetasView from './views/TarjetasView.jsx';
 import MovimientosView from './views/MovimientosView.jsx';
 import CuotasView from './views/CuotasView.jsx';
+import ConsumosLiveView from './views/ConsumosLiveView.jsx';
+import OnboardingWizard from './views/Onboarding.jsx';
+import { NovedadesModal, GuiaView } from './views/Guia.jsx';
 import { armarTarjetas, buscarTarjeta, nombreVisible, migrarNombresLive } from './services/tarjetas.js';
 import { serieEvolucion, detalleMes } from './services/evolucion.js';
 import { cicloDePago, cuotasDelMes, desfasePorTarjeta, proximoMes, sumarMeses, composicionPorTarjeta, composicionDesdeTarjetas, fijosPorTarjeta } from './services/mes.js';
-import { clasesApariencia, modoEfectivo, temaLegacy } from './services/apariencia.js';
+import { clasesApariencia, modoEfectivo } from './services/apariencia.js';
 import {
   construirCadenas,
   aplicarOverrides,
@@ -27,265 +28,16 @@ import {
   periodoDeMovimiento
 } from './services/series';
 import {
-  construirPlanes,
-  proyectarCuotas,
-  formatearParaVista,
-  totalPendiente,
-  estaVigente
+  construirPlanes, formatearParaVista
 } from './services/cuotas';
 import {
-  LayoutDashboard, Receipt, CreditCard, Tag, Upload,
-  TrendingUp, TrendingDown, Calendar, AlertCircle, ChevronRight,
-  Sun, Moon, Bell, Settings, Search, X, DollarSign,
-  PieChart, BarChart3, Wallet, ArrowUpRight, ArrowDownRight,
-  FileText, Clock, CheckCircle, XCircle, Sparkles, Trophy, Filter,
-  RefreshCcw, Trash2, Download, Edit3, Plus, Repeat, Shuffle, Zap, Eye, EyeOff, GripVertical,
-  ChevronDown, BookOpen, HelpCircle
+  Receipt, CreditCard, Tag, Upload, Calendar, AlertCircle, Sun, Bell, Settings, X, FileText, CheckCircle, XCircle, Sparkles, RefreshCcw, Download, Edit3, Plus, HelpCircle
 } from 'lucide-react';
-import {
-  LineChart, Line, AreaChart, Area, BarChart, Bar, PieChart as RechartsPie, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
-} from 'recharts';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 const API_BASE = `${API_URL}/api/v1`;
 
-// Las fechas que devuelve el parser son 'YYYY-MM-DD': una fecha de calendario del
-// resumen, sin hora ni zona. `new Date('2026-08-10')` la interpreta como medianoche
-// UTC y en Argentina (UTC-3) retrocede al 09/08. Ademas un consumo del dia 1 caia en
-// el mes anterior al agrupar. Siempre construir la fecha en horario local.
-const parseFechaLocal = (valor) => {
-  if (!valor) return null;
-  if (valor instanceof Date) return valor;
-  const m = String(valor).match(/^(\d{4})-(\d{2})-(\d{2})/);
-  return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(valor);
-};
-
-// Clave 'YYYY-MM' del mes calendario de una fecha del parser.
-const mesKeyDeFecha = (valor) => {
-  const f = parseFechaLocal(valor);
-  if (!f || isNaN(f)) return null;
-  return `${f.getFullYear()}-${String(f.getMonth() + 1).padStart(2, '0')}`;
-};
-
-// Componente de Onboarding para nuevos usuarios
-const OnboardingWizard = ({ onComplete }) => {
-  const [step, setStep] = useState(1);
-
-  const steps = [
-    {
-      title: "Bienvenido a Tarjeteando",
-      description: "Tu asistente inteligente para gestionar los resumenes de tus tarjetas de credito. Vamos a configurar todo en 3 simples pasos.",
-      icon: Wallet,
-      content: (
-        <div className="text-center">
-          <div className="w-24 h-24 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-[var(--accent-1)] to-[var(--accent-2)] flex items-center justify-center shadow-2xl">
-            <Wallet className="w-12 h-12 text-white" />
-          </div>
-          <h2 className="text-3xl font-bold bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent mb-3">Bienvenido a Tarjeteando</h2>
-          <p className="text-gray-600 max-w-md mx-auto text-lg">
-            Tu asistente inteligente para gestionar los resumenes de tus tarjetas de credito.
-            Te ayudamos a entender tus gastos, trackear cuotas y proyectar pagos futuros.
-          </p>
-        </div>
-      )
-    },
-    {
-      title: "Subi tu primer resumen",
-      description: "Simplemente arrastra o selecciona el PDF de tu resumen de tarjeta.",
-      icon: Upload,
-      content: (
-        <div className="text-center">
-          <div className="w-24 h-24 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-2xl">
-            <Upload className="w-12 h-12 text-white" />
-          </div>
-          <h2 className="text-3xl font-bold bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent mb-3">Subi tu primer resumen</h2>
-          <p className="text-gray-600 max-w-md mx-auto mb-4 text-lg">
-            Arrastra el PDF de tu resumen de tarjeta o hace click para seleccionarlo.
-            Soportamos VISA, Mastercard y American Express de los principales bancos argentinos.
-          </p>
-          <div className="flex flex-wrap justify-center gap-2 mb-4">
-            {['Galicia', 'Macro', 'Santander', 'BBVA', 'HSBC', 'ICBC'].map((banco, idx) => (
-              <span key={banco} className="px-4 py-2 rounded-full bg-gradient-to-r from-violet-100 to-indigo-100 text-sm font-medium text-violet-700 border border-violet-200 shadow-sm">
-                {banco}
-              </span>
-            ))}
-          </div>
-          <div className="flex items-center justify-center gap-2 text-amber-700 bg-gradient-to-r from-amber-50 to-orange-50 rounded-xl px-4 py-3 max-w-md mx-auto border border-amber-200">
-            <Clock className="w-5 h-5 flex-shrink-0 text-amber-500" />
-            <p className="text-sm font-medium">La primera carga puede tardar unos segundos mientras procesamos el PDF</p>
-          </div>
-        </div>
-      )
-    },
-    {
-      title: "Tips y funcionalidades",
-      description: "Aprovecha al maximo Tarjeteando.",
-      icon: Sparkles,
-      content: (
-        <div className="text-center">
-          <div className="w-24 h-24 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-2xl">
-            <Sparkles className="w-12 h-12 text-white" />
-          </div>
-          <h2 className="text-3xl font-bold bg-gradient-to-r from-violet-600 to-purple-600 bg-clip-text text-transparent mb-4">Tips y funcionalidades</h2>
-          <div className="space-y-3 max-w-md mx-auto text-left">
-            <div className="flex items-start gap-3 p-4 rounded-xl bg-gradient-to-r from-violet-50 to-indigo-50 border border-violet-200 shadow-sm hover:shadow-md transition-shadow">
-              <div className="p-2 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-500">
-                <FileText className="w-4 h-4 text-white" />
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-gray-800">Subi todos tus resumenes</p>
-                <p className="text-xs text-gray-600">Carga varios meses para ver el historial completo y mejores proyecciones</p>
-              </div>
-            </div>
-            <div className="flex items-start gap-3 p-4 rounded-xl bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 shadow-sm hover:shadow-md transition-shadow">
-              <div className="p-2 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500">
-                <Edit3 className="w-4 h-4 text-white" />
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-gray-800">Renombra comercios</p>
-                <p className="text-xs text-gray-600">Podes asignar nombres claros a comercios con nombres confusos desde Configuracion</p>
-              </div>
-            </div>
-            <div className="flex items-start gap-3 p-4 rounded-xl bg-gradient-to-r from-blue-50 to-cyan-50 border border-blue-200 shadow-sm hover:shadow-md transition-shadow">
-              <div className="p-2 rounded-lg bg-gradient-to-br from-blue-500 to-cyan-500">
-                <CheckCircle className="w-4 h-4 text-white" />
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-gray-800">Tus datos son privados</p>
-                <p className="text-xs text-gray-600">Todo se guarda en tu navegador. No almacenamos tus resumenes en ningun servidor</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )
-    }
-  ];
-
-  const currentStep = steps[step - 1];
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gradient-to-br from-violet-600 via-purple-600 to-indigo-700">
-      {/* Animated Background with particles effect */}
-      <div className="absolute inset-0 overflow-hidden">
-        <div className="absolute -top-40 -right-40 w-80 h-80 bg-pink-500 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-pulse" />
-        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-yellow-500 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-pulse" style={{animationDelay: '1s'}} />
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-80 h-80 bg-cyan-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-pulse" style={{animationDelay: '2s'}} />
-      </div>
-
-      {/* Modal */}
-      <div className="relative w-full max-w-2xl bg-white/95 backdrop-blur-xl rounded-3xl shadow-2xl p-8 animate-fade-in-up border border-white/20">
-        {/* Progress Bar */}
-        <div className="flex items-center justify-center gap-3 mb-8">
-          {steps.map((_, idx) => (
-            <div
-              key={idx}
-              className={`h-2.5 rounded-full transition-all duration-500 ${
-                idx + 1 === step
-                  ? 'w-12 bg-gradient-to-r from-violet-500 via-purple-500 to-indigo-500 shadow-lg shadow-violet-500/30'
-                  : idx + 1 < step
-                    ? 'w-12 bg-gradient-to-r from-emerald-400 to-teal-400'
-                    : 'w-3 bg-gray-200'
-              }`}
-            />
-          ))}
-        </div>
-
-        {/* Step Content */}
-        <div className="min-h-[300px] flex items-center justify-center">
-          {currentStep.content}
-        </div>
-
-        {/* Navigation */}
-        <div className="flex items-center justify-between mt-8 pt-6 border-t border-gray-100">
-          <button
-            onClick={() => setStep(s => Math.max(1, s - 1))}
-            className={`px-6 py-2.5 rounded-xl font-medium transition-all ${
-              step === 1
-                ? 'opacity-0 pointer-events-none'
-                : 'text-gray-500 hover:text-gray-800 hover:bg-gray-100'
-            }`}
-          >
-            Anterior
-          </button>
-
-          <span className="text-sm font-medium text-gray-400">
-            Paso {step} de {steps.length}
-          </span>
-
-          {step < steps.length ? (
-            <button
-              onClick={() => setStep(s => s + 1)}
-              className="px-8 py-3 rounded-xl font-semibold bg-gradient-to-r from-violet-500 via-purple-500 to-indigo-500 text-white shadow-lg shadow-violet-500/30 hover:shadow-xl hover:shadow-violet-500/40 transition-all hover:scale-105"
-            >
-              Siguiente
-            </button>
-          ) : (
-            <button
-              onClick={onComplete}
-              className="px-8 py-3 rounded-xl font-semibold bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-lg shadow-emerald-500/30 hover:shadow-xl hover:shadow-emerald-500/40 transition-all hover:scale-105"
-            >
-              Comenzar
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// Colores consistentes por tarjeta para todos los gráficos
-const TARJETA_COLORS = {
-  'VISA Santander': '#DC2626',       // Rojo
-  'Mastercard Santander': '#EF4444', // Rojo claro
-  'VISA Galicia': '#F97316',         // Naranja
-  'Mastercard Galicia': '#FBBF24',   // Amarillo
-  'VISA Macro': '#06B6D4',           // Celeste
-  'Mastercard Macro': '#22D3EE',     // Celeste claro
-  'VISA BBVA': '#2563EB',            // Azul
-  'Mastercard BBVA': '#6366F1',      // Indigo
-};
-
-// Función para obtener color de tarjeta (con fallback)
-const getTarjetaColor = (nombre) => {
-  // Buscar coincidencia exacta
-  if (TARJETA_COLORS[nombre]) return TARJETA_COLORS[nombre];
-
-  // Buscar coincidencia parcial
-  const nombreLower = nombre.toLowerCase();
-  if (nombreLower.includes('santander')) return '#DC2626';
-  if (nombreLower.includes('galicia') && nombreLower.includes('master')) return '#FBBF24';
-  if (nombreLower.includes('galicia')) return '#F97316';
-  if (nombreLower.includes('macro')) return '#06B6D4';
-  if (nombreLower.includes('bbva')) return '#2563EB';
-
-  // Fallback con colores por índice
-  const fallbackColors = ['#8B5CF6', '#EC4899', '#10B981', '#F59E0B'];
-  const hash = nombre.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  return fallbackColors[hash % fallbackColors.length];
-};
-
-// Theme colors por banco
-const BANK_THEMES = {
-  'VISA Galicia': { gradient: 'from-orange-500 via-orange-600 to-orange-700', color: '#F97316', icon: '🍊' },
-  'Mastercard Galicia': { gradient: 'from-orange-400 via-red-500 to-pink-600', color: '#EC4899', icon: '💳' },
-  'VISA BBVA': { gradient: 'from-blue-500 via-blue-600 to-blue-800', color: '#2563EB', icon: '🔵' },
-  'Mastercard BBVA': { gradient: 'from-blue-400 via-indigo-500 to-purple-600', color: '#6366F1', icon: '💠' },
-  'VISA Santander': { gradient: 'from-red-500 via-red-600 to-red-800', color: '#DC2626', icon: '🔴' },
-  'VISA Macro': { gradient: 'from-slate-100 via-sky-200 to-blue-400', color: '#1e3a5f', icon: '🏦', textDark: true, textColor: 'text-blue-900' },
-  'Mastercard Macro': { gradient: 'from-slate-100 via-sky-200 to-blue-400', color: '#1e3a5f', icon: '🏦', textDark: true, textColor: 'text-blue-900' },
-};
-
-// Obtener tema por banco (match flexible para nombres personalizados)
-const getCardTheme = (nombre) => {
-  if (BANK_THEMES[nombre]) return BANK_THEMES[nombre];
-  const n = nombre.toUpperCase();
-  if (n.includes('MACRO')) return n.includes('MASTER') ? BANK_THEMES['Mastercard Macro'] : BANK_THEMES['VISA Macro'];
-  if (n.includes('GALICIA')) return n.includes('MASTER') ? BANK_THEMES['Mastercard Galicia'] : BANK_THEMES['VISA Galicia'];
-  if (n.includes('BBVA')) return n.includes('MASTER') ? BANK_THEMES['Mastercard BBVA'] : BANK_THEMES['VISA BBVA'];
-  if (n.includes('SANTANDER')) return BANK_THEMES['VISA Santander'];
-  return BANK_THEMES['VISA Galicia'];
-};
+// OnboardingWizard → views/Onboarding.jsx (fase 6).
 
 // Función helper para formatear montos en pesos argentinos (siempre con 2 decimales)
 const formatMonto = (value, prefix = '$') => {
@@ -299,243 +51,8 @@ const formatMontoDolares = (value) => {
   return `USD ${num.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
-// ==================== GASTOS FIJOS/VARIABLES ====================
-// La detección vive en services/series.js (testeada con `npm test`): cada movimiento
-// tiene un ID hash y cada gasto recurrente es una CADENA de cargos (serie). El tipo
-// de cada movimiento se calcula por ID, así que renombrar un comercio no lo cambia.
-// `gastosFijos` es un Set con los IDs de los movimientos fijos (automáticos o manuales).
-const esGastoFijo = (mov, gastosFijos) => {
-  if (!gastosFijos || gastosFijos.size === 0 || !mov?.id) return false;
-  return gastosFijos.has(mov.id);
-};
-
-// Calcular totales de gastos fijos y variables
-const calcularTotalesGastos = (movimientos, gastosFijos, cotizacionVenta = 0) => {
-  let totalFijos = 0;
-  let totalVariables = 0;
-  let countFijos = 0;
-  let countVariables = 0;
-
-  movimientos.forEach(mov => {
-    // Los consumos en dolares no tienen monto en pesos en el resumen: se pesifican
-    // al dolar tarjeta vigente. Sin esto quedaban fuera del total por completo.
-    const monto = (mov.monto_pesos || 0) || (mov.monto_dolares || 0) * cotizacionVenta;
-    if (monto <= 0) return; // Ignorar devoluciones
-
-    if (esGastoFijo(mov, gastosFijos)) {
-      totalFijos += monto;
-      countFijos++;
-    } else {
-      totalVariables += monto;
-      countVariables++;
-    }
-  });
-
-  return { totalFijos, totalVariables, countFijos, countVariables };
-};
-
-// Animated Number Component
-const AnimatedNumber = ({ value, prefix = '', suffix = '', decimals = 2 }) => {
-  const [displayValue, setDisplayValue] = useState(0);
-  
-  useEffect(() => {
-    const duration = 1000;
-    const steps = 30;
-    const stepValue = value / steps;
-    let current = 0;
-    
-    const timer = setInterval(() => {
-      current += stepValue;
-      if (current >= value) {
-        setDisplayValue(value);
-        clearInterval(timer);
-      } else {
-        setDisplayValue(current);
-      }
-    }, duration / steps);
-    
-    return () => clearInterval(timer);
-  }, [value]);
-  
-  return (
-    <span className="number-animate">
-      {prefix}{displayValue.toLocaleString('es-AR', { 
-        minimumFractionDigits: decimals, 
-        maximumFractionDigits: decimals 
-      })}{suffix}
-    </span>
-  );
-};
-
-// Stat Card Component
-const StatCard = ({ icon: Icon, label, value, trend, trendValue, delay = 0, onClick }) => {
-  const isPositive = trend === 'up';
-
-  return (
-    <div
-      onClick={onClick}
-      className={`stat-card opacity-0 animate-fade-in-up ${onClick ? 'cursor-pointer hover:scale-105 transition-transform' : ''}`}
-      style={{ animationDelay: `${delay}ms`, animationFillMode: 'forwards' }}
-    >
-      <div className="flex items-start justify-between mb-3">
-        <div className="p-2.5 rounded-xl bg-gradient-to-br from-[var(--accent-1)] to-[var(--accent-2)] bg-opacity-20">
-          <Icon className="w-5 h-5 text-white" />
-        </div>
-        {trend && (
-          <div className={`flex items-center gap-1 text-sm ${isPositive ? 'text-emerald-500' : 'text-red-500'}`}>
-            {isPositive ? <ArrowUpRight className="w-4 h-4" /> : <ArrowDownRight className="w-4 h-4" />}
-            <span>{trendValue}</span>
-          </div>
-        )}
-      </div>
-      <p className="text-[var(--text-muted)] text-sm mb-1">{label}</p>
-      <p className="text-2xl font-bold text-[var(--text-primary)]">{value}</p>
-    </div>
-  );
-};
-
-// Credit Card Component
-const CreditCardVisual = ({ tarjeta, stats, onClick, nombrePersonalizado, onEditarNombre, cotizacion = null }) => {
-  const theme = getCardTheme(tarjeta.nombre);
-  const ultimoResumen = stats?.ultimo_resumen;
-  const [editando, setEditando] = useState(false);
-  const [nuevoNombre, setNuevoNombre] = useState('');
-
-  // Detectar banco desde nombre si es Desconocido
-  const getBanco = () => {
-    if (tarjeta.banco && tarjeta.banco !== 'Desconocido') return tarjeta.banco;
-    const n = (tarjeta.nombre || '').toUpperCase();
-    if (n.includes('GALICIA')) return 'Galicia';
-    if (n.includes('MACRO')) return 'Macro';
-    if (n.includes('SANTANDER')) return 'Santander';
-    if (n.includes('BBVA')) return 'BBVA';
-    if (n.includes('HSBC')) return 'HSBC';
-    return tarjeta.banco || '';
-  };
-
-  // Nombre por defecto: TIPO Banco (ej: VISA Galicia)
-  const banco = getBanco();
-  const nombreDefault = banco ? `${tarjeta.tipo || 'VISA'} ${banco}` : tarjeta.nombre;
-  const nombreMostrar = nombrePersonalizado || nombreDefault;
-
-  // Colores de texto según si la tarjeta es clara u oscura
-  const textPrimary = theme.textColor || (theme.textDark ? 'text-slate-800' : 'text-white');
-  const textSecondary = theme.textColor ? 'text-blue-800' : (theme.textDark ? 'text-slate-600' : 'text-white/70');
-  const textMuted = theme.textColor ? 'text-blue-700' : (theme.textDark ? 'text-slate-500' : 'text-white/60');
-
-  const handleGuardar = () => {
-    if (nuevoNombre.trim()) {
-      onEditarNombre?.(tarjeta.id, nuevoNombre.trim());
-    }
-    setEditando(false);
-  };
-
-  return (
-    <div
-      className={`credit-card bg-gradient-to-br ${theme.gradient} cursor-pointer group`}
-    >
-      {/* Card shine effect */}
-      <div className={`absolute inset-0 bg-gradient-to-tr ${theme.textDark ? 'from-blue-500/0 via-blue-500/10 to-blue-500/0' : 'from-white/0 via-white/20 to-white/0'}
-                      opacity-0 group-hover:opacity-100 transition-opacity duration-500`} />
-
-      {/* Card content */}
-      <div className="relative z-10">
-        <div className="flex justify-between items-start mb-8">
-          <div className="flex-1">
-            {editando ? (
-              <input
-                type="text"
-                value={nuevoNombre}
-                onChange={(e) => setNuevoNombre(e.target.value)}
-                onBlur={handleGuardar}
-                onKeyDown={(e) => e.key === 'Enter' && handleGuardar()}
-                autoFocus
-                placeholder={nombreDefault}
-                className={`${theme.textDark ? 'bg-slate-800/20 text-slate-800 placeholder:text-slate-500' : 'bg-white/20 text-white placeholder:text-white/50'} px-2 py-1 rounded text-sm w-full outline-none`}
-              />
-            ) : (
-              <div className="flex items-center gap-2">
-                <p className={`${textPrimary} font-semibold text-lg`}>{nombreMostrar}</p>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setNuevoNombre(nombreMostrar);
-                    setEditando(true);
-                  }}
-                  className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-lg hover:bg-white/20"
-                  title="Editar nombre"
-                >
-                  <Edit3 className={`w-4 h-4 ${textSecondary}`} />
-                </button>
-              </div>
-            )}
-            <p className={`${textSecondary} text-xs uppercase tracking-wider`}>{tarjeta.banco}</p>
-          </div>
-          <div className="text-right space-y-1">
-            <div>
-              <p className={`${textMuted} text-[10px] uppercase tracking-wider`}>Cierre</p>
-              <p className={`${textPrimary} font-medium text-sm`}>
-                {ultimoResumen?.fecha_cierre
-                  ? new Date(ultimoResumen.fecha_cierre + 'T12:00:00').toLocaleDateString('es-AR', { day: '2-digit', month: 'short' }).replace('.', '')
-                  : '-'}
-              </p>
-            </div>
-            <div>
-              <p className={`${textMuted} text-[10px] uppercase tracking-wider`}>Vto.</p>
-              <p className={`${textPrimary} font-medium text-sm`}>
-                {ultimoResumen?.fecha_vencimiento
-                  ? new Date(ultimoResumen.fecha_vencimiento + 'T12:00:00').toLocaleDateString('es-AR', { day: '2-digit', month: 'short' }).replace('.', '')
-                  : '-'}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="mb-6">
-          <p className={`${textMuted} text-xs mb-1`}>Último resumen</p>
-          {ultimoResumen ? (
-            <>
-              <p className={`${textPrimary} text-2xl font-bold`}>
-                {formatMonto(ultimoResumen.total_a_pagar || 0)}
-              </p>
-              {ultimoResumen.total_a_pagar_dolares > 0 && (
-                <div>
-                  <p className="text-emerald-500 text-sm font-medium">
-                    {formatMontoDolares(ultimoResumen.total_a_pagar_dolares)}
-                  </p>
-                  {cotizacion?.venta && (
-                    <p className={`${textMuted} text-xs`}>
-                      ≈ {formatMonto(ultimoResumen.total_a_pagar_dolares * cotizacion.venta)} ARS
-                    </p>
-                  )}
-                </div>
-              )}
-            </>
-          ) : (
-            <p className={`${textMuted} text-lg`}>Sin datos</p>
-          )}
-        </div>
-        
-        <div className="flex justify-between items-end">
-          <div className="flex gap-4">
-            <div>
-              <p className={`${textMuted} text-xs`}>Movimientos</p>
-              <p className={`${textPrimary} font-semibold`}>{stats?.estadisticas?.total_movimientos || 0}</p>
-            </div>
-            <div>
-              <p className={`${textMuted} text-xs`}>En cuotas</p>
-              <p className={`${textPrimary} font-semibold`}>{stats?.estadisticas?.compras_en_cuotas || 0}</p>
-            </div>
-          </div>
-          <div className="text-3xl opacity-80">{theme.icon}</div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
 // Settings Modal Component - Fondo sólido y cierre al clickear fuera
-const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumenes, cuotasActivas, onRefreshData, theme, setTheme, initialTab = 'tarjetas' }) => {
+const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumenes, cuotasActivas, onRefreshData, apariencia, onApariencia, initialTab = 'tarjetas' }) => {
   const [activeTab, setActiveTab] = useState(initialTab);
 
   // Actualizar tab cuando cambia initialTab
@@ -570,7 +87,7 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
     { id: 'preferencias', label: 'Preferencias', icon: Settings },
     { id: 'alertas', label: 'Alertas', icon: Bell },
     { id: 'datos', label: 'Datos', icon: Download },
-    { id: 'temas', label: 'Temas', icon: Sun },
+    { id: 'temas', label: 'Apariencia', icon: Sun },
   ];
 
   // Función para exportar CSV
@@ -755,10 +272,6 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
     reader.readAsText(file);
   };
 
-  const themeOptions = [
-    { id: 'light', label: 'Claro', icon: Sun, colors: ['#f8fafc', '#e2e8f0'] },
-    { id: 'dark', label: 'Oscuro', icon: Moon, colors: ['#1e293b', '#0f172a'] },
-  ];
 
   return (
     <div
@@ -768,37 +281,37 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
     >
       <div
         className="rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden mx-4"
-        style={{ backgroundColor: (theme === 'dark' || theme === 'liquid') ? '#1e293b' : '#ffffff' }}
+        style={{ backgroundColor: 'var(--solid)' }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: (theme === 'dark' || theme === 'liquid') ? '#374151' : '#e5e7eb' }}>
-          <h2 className="text-lg font-semibold" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937' }}>Configuración</h2>
+        <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: 'var(--sep)' }}>
+          <h2 className="text-lg font-semibold" style={{ color: 'var(--label)' }}>Configuración</h2>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+            className="p-1.5 rounded-lg hover:bg-[var(--fill2)] transition-colors"
             style={{ backgroundColor: 'transparent' }}
           >
-            <X className="w-5 h-5" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#9ca3af' : '#6b7280' }} />
+            <X className="w-5 h-5" style={{ color: 'var(--label2)' }} />
           </button>
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b overflow-x-auto" style={{ borderColor: (theme === 'dark' || theme === 'liquid') ? '#374151' : '#e5e7eb' }}>
+        <div className="flex border-b overflow-x-auto" style={{ borderColor: 'var(--sep)' }}>
           {tabs.map(tab => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={`flex items-center gap-2 px-4 py-3 text-sm font-medium whitespace-nowrap transition-colors
                          ${activeTab === tab.id
-                           ? 'border-b-2 border-violet-500 text-violet-600'
-                           : 'hover:bg-gray-50'}`}
-              style={activeTab !== tab.id ? { color: (theme === 'dark' || theme === 'liquid') ? '#9ca3af' : '#6b7280' } : {}}
+                           ? 'border-b-2 border-[var(--label)] text-[var(--label)]'
+                           : 'hover:bg-[var(--fill2)]'}`}
+              style={activeTab !== tab.id ? { color: 'var(--label2)' } : {}}
             >
               <tab.icon className="w-4 h-4" />
               {tab.label}
               {tab.badge > 0 && (
-                <span className="ml-1 px-1.5 py-0.5 text-xs rounded-full bg-amber-500 text-white">
+                <span className="ml-1 px-1.5 py-0.5 text-xs rounded-full bg-[var(--fill)] text-[var(--label)]">
                   {tab.badge}
                 </span>
               )}
@@ -811,11 +324,11 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
           {/* Gestión de Tarjetas */}
             {activeTab === 'tarjetas' && (
               <div className="space-y-6">
-                <h3 className="text-lg font-semibold" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937' }}>Gestión de Tarjetas</h3>
+                <h3 className="text-lg font-semibold" style={{ color: 'var(--label)' }}>Gestión de Tarjetas</h3>
 
                 {/* Nueva tarjeta */}
-                <div className="p-4 rounded-xl space-y-3" style={{ backgroundColor: (theme === 'dark' || theme === 'liquid') ? '#374151' : '#f3f4f6' }}>
-                  <p className="text-sm font-medium" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#d1d5db' : '#374151' }}>Agregar nueva tarjeta</p>
+                <div className="p-4 rounded-xl space-y-3" style={{ backgroundColor: 'var(--fill2)' }}>
+                  <p className="text-sm font-medium" style={{ color: 'var(--label)' }}>Agregar nueva tarjeta</p>
                   <div className="grid grid-cols-3 gap-3">
                     <input
                       type="text"
@@ -824,9 +337,9 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
                       onChange={(e) => setNewTarjeta({...newTarjeta, nombre: e.target.value})}
                       className="px-3 py-2 rounded-lg border text-sm"
                       style={{
-                        backgroundColor: (theme === 'dark' || theme === 'liquid') ? '#1f2937' : '#ffffff',
-                        borderColor: (theme === 'dark' || theme === 'liquid') ? '#4b5563' : '#d1d5db',
-                        color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937'
+                        backgroundColor: 'var(--fill)',
+                        borderColor: 'var(--sep)',
+                        color: 'var(--label)'
                       }}
                     />
                     <select
@@ -834,9 +347,9 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
                       onChange={(e) => setNewTarjeta({...newTarjeta, tipo: e.target.value})}
                       className="px-3 py-2 rounded-lg border text-sm"
                       style={{
-                        backgroundColor: (theme === 'dark' || theme === 'liquid') ? '#1f2937' : '#ffffff',
-                        borderColor: (theme === 'dark' || theme === 'liquid') ? '#4b5563' : '#d1d5db',
-                        color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937'
+                        backgroundColor: 'var(--fill)',
+                        borderColor: 'var(--sep)',
+                        color: 'var(--label)'
                       }}
                     >
                       <option value="VISA">VISA</option>
@@ -850,17 +363,17 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
                       onChange={(e) => setNewTarjeta({...newTarjeta, banco: e.target.value})}
                       className="px-3 py-2 rounded-lg border text-sm"
                       style={{
-                        backgroundColor: (theme === 'dark' || theme === 'liquid') ? '#1f2937' : '#ffffff',
-                        borderColor: (theme === 'dark' || theme === 'liquid') ? '#4b5563' : '#d1d5db',
-                        color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937'
+                        backgroundColor: 'var(--fill)',
+                        borderColor: 'var(--sep)',
+                        color: 'var(--label)'
                       }}
                     />
                   </div>
                   <button
                     onClick={handleAddTarjeta}
                     disabled={!newTarjeta.nombre || !newTarjeta.banco}
-                    className="px-4 py-2 rounded-lg bg-violet-500 text-white text-sm font-medium
-                               hover:bg-violet-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    className="px-4 py-2 rounded-lg bg-[var(--inv)] text-[var(--inv-text)] text-sm font-medium
+                               hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     <Plus className="w-4 h-4 inline mr-2" />
                     Agregar Tarjeta
@@ -870,7 +383,7 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
                 {/* Lista de tarjetas */}
                 <div className="space-y-3">
                   {tarjetas.map(t => (
-                    <div key={t.id} className="flex items-center justify-between p-4 rounded-xl" style={{ backgroundColor: (theme === 'dark' || theme === 'liquid') ? '#374151' : '#f3f4f6' }}>
+                    <div key={t.id} className="flex items-center justify-between p-4 rounded-xl" style={{ backgroundColor: 'var(--fill2)' }}>
                       {editingTarjeta === t.id ? (
                         <div className="flex-1 flex items-center gap-3">
                           <input
@@ -879,23 +392,23 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
                             id={`edit-nombre-${t.id}`}
                             className="px-3 py-1.5 rounded-lg border text-sm flex-1"
                             style={{
-                              backgroundColor: (theme === 'dark' || theme === 'liquid') ? '#1f2937' : '#ffffff',
-                              borderColor: (theme === 'dark' || theme === 'liquid') ? '#4b5563' : '#d1d5db',
-                              color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937'
+                              backgroundColor: 'var(--fill)',
+                              borderColor: 'var(--sep)',
+                              color: 'var(--label)'
                             }}
                           />
                           <button
                             onClick={() => handleUpdateTarjeta(t.id, {
                               nombre: document.getElementById(`edit-nombre-${t.id}`).value
                             })}
-                            className="px-3 py-1.5 rounded-lg bg-emerald-500 text-white text-sm"
+                            className="px-3 py-1.5 rounded-lg bg-[var(--inv)] text-[var(--inv-text)] text-sm"
                           >
                             Guardar
                           </button>
                           <button
                             onClick={() => setEditingTarjeta(null)}
                             className="px-3 py-1.5 rounded-lg text-sm"
-                            style={{ backgroundColor: (theme === 'dark' || theme === 'liquid') ? '#4b5563' : '#d1d5db', color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#374151' }}
+                            style={{ backgroundColor: 'var(--fill)', color: 'var(--label)' }}
                           >
                             Cancelar
                           </button>
@@ -903,21 +416,21 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
                       ) : (
                         <>
                           <div>
-                            <p className="font-medium" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937' }}>{t.nombre}</p>
-                            <p className="text-sm" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#9ca3af' : '#6b7280' }}>{t.tipo} - {t.banco}</p>
+                            <p className="font-medium" style={{ color: 'var(--label)' }}>{t.nombre}</p>
+                            <p className="text-sm" style={{ color: 'var(--label2)' }}>{t.tipo} - {t.banco}</p>
                           </div>
                           <div className="flex gap-2">
                             <button
                               onClick={() => setEditingTarjeta(t.id)}
-                              className="p-2 rounded-lg hover:bg-gray-200 transition-colors"
+                              className="p-2 rounded-lg hover:bg-[var(--fill2)] transition-colors"
                             >
-                              <Edit3 className="w-4 h-4" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#9ca3af' : '#6b7280' }} />
+                              <Edit3 className="w-4 h-4" style={{ color: 'var(--label2)' }} />
                             </button>
                             <button
                               onClick={() => handleDeleteTarjeta(t.nombre)}
-                              className="p-2 rounded-lg hover:bg-red-100 transition-colors"
+                              className="p-2 rounded-lg hover:bg-[var(--fill2)] transition-colors"
                             >
-                              <XCircle className="w-4 h-4 text-red-500" />
+                              <XCircle className="w-4 h-4 text-[var(--danger)]" />
                             </button>
                           </div>
                         </>
@@ -925,7 +438,7 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
                     </div>
                   ))}
                   {tarjetas.length === 0 && (
-                    <p className="text-center py-8" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#9ca3af' : '#6b7280' }}>No hay tarjetas registradas</p>
+                    <p className="text-center py-8" style={{ color: 'var(--label2)' }}>No hay tarjetas registradas</p>
                   )}
                 </div>
               </div>
@@ -934,11 +447,11 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
             {/* Preferencias */}
             {activeTab === 'preferencias' && (
               <div className="space-y-6">
-                <h3 className="text-lg font-semibold" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937' }}>Preferencias de Usuario</h3>
+                <h3 className="text-lg font-semibold" style={{ color: 'var(--label)' }}>Preferencias de Usuario</h3>
 
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium mb-2" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#d1d5db' : '#374151' }}>
+                    <label className="block text-sm font-medium mb-2" style={{ color: 'var(--label)' }}>
                       Moneda por defecto
                     </label>
                     <select
@@ -946,9 +459,9 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
                       onChange={(e) => setPreferencias({...preferencias, monedaDefault: e.target.value})}
                       className="w-full px-4 py-2.5 rounded-xl border"
                       style={{
-                        backgroundColor: (theme === 'dark' || theme === 'liquid') ? '#1f2937' : '#ffffff',
-                        borderColor: (theme === 'dark' || theme === 'liquid') ? '#4b5563' : '#d1d5db',
-                        color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937'
+                        backgroundColor: 'var(--fill)',
+                        borderColor: 'var(--sep)',
+                        color: 'var(--label)'
                       }}
                     >
                       <option value="ARS">Pesos Argentinos (ARS)</option>
@@ -957,7 +470,7 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium mb-2" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#d1d5db' : '#374151' }}>
+                    <label className="block text-sm font-medium mb-2" style={{ color: 'var(--label)' }}>
                       Formato de fechas
                     </label>
                     <select
@@ -965,9 +478,9 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
                       onChange={(e) => setPreferencias({...preferencias, formatoFecha: e.target.value})}
                       className="w-full px-4 py-2.5 rounded-xl border"
                       style={{
-                        backgroundColor: (theme === 'dark' || theme === 'liquid') ? '#1f2937' : '#ffffff',
-                        borderColor: (theme === 'dark' || theme === 'liquid') ? '#4b5563' : '#d1d5db',
-                        color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937'
+                        backgroundColor: 'var(--fill)',
+                        borderColor: 'var(--sep)',
+                        color: 'var(--label)'
                       }}
                     >
                       <option value="dd/mm/yyyy">DD/MM/YYYY</option>
@@ -982,41 +495,41 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
             {/* Alertas */}
             {activeTab === 'alertas' && (
               <div className="space-y-6">
-                <h3 className="text-lg font-semibold" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937' }}>Configuración de Alertas</h3>
+                <h3 className="text-lg font-semibold" style={{ color: 'var(--label)' }}>Configuración de Alertas</h3>
 
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between p-4 rounded-xl" style={{ backgroundColor: (theme === 'dark' || theme === 'liquid') ? '#374151' : '#f3f4f6' }}>
+                  <div className="flex items-center justify-between p-4 rounded-xl" style={{ backgroundColor: 'var(--fill2)' }}>
                     <div>
-                      <p className="font-medium" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937' }}>Alerta de vencimiento</p>
-                      <p className="text-sm" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#9ca3af' : '#6b7280' }}>Notificar antes del vencimiento de pago</p>
+                      <p className="font-medium" style={{ color: 'var(--label)' }}>Alerta de vencimiento</p>
+                      <p className="text-sm" style={{ color: 'var(--label2)' }}>Notificar antes del vencimiento de pago</p>
                     </div>
                     <button
                       onClick={() => setAlertas({...alertas, vencimiento: !alertas.vencimiento})}
                       className={`w-12 h-6 rounded-full transition-colors relative
-                                 ${alertas.vencimiento ? 'bg-violet-500' : 'bg-gray-300'}`}
+                                 ${alertas.vencimiento ? 'bg-[var(--r2)]' : 'bg-[var(--fill)]'}`}
                     >
                       <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform
                                       ${alertas.vencimiento ? 'translate-x-7' : 'translate-x-1'}`} />
                     </button>
                   </div>
 
-                  <div className="flex items-center justify-between p-4 rounded-xl" style={{ backgroundColor: (theme === 'dark' || theme === 'liquid') ? '#374151' : '#f3f4f6' }}>
+                  <div className="flex items-center justify-between p-4 rounded-xl" style={{ backgroundColor: 'var(--fill2)' }}>
                     <div>
-                      <p className="font-medium" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937' }}>Alerta de última cuota</p>
-                      <p className="text-sm" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#9ca3af' : '#6b7280' }}>Notificar cuando una compra llega a su última cuota</p>
+                      <p className="font-medium" style={{ color: 'var(--label)' }}>Alerta de última cuota</p>
+                      <p className="text-sm" style={{ color: 'var(--label2)' }}>Notificar cuando una compra llega a su última cuota</p>
                     </div>
                     <button
                       onClick={() => setAlertas({...alertas, cuotaFinal: !alertas.cuotaFinal})}
                       className={`w-12 h-6 rounded-full transition-colors relative
-                                 ${alertas.cuotaFinal ? 'bg-violet-500' : 'bg-gray-300'}`}
+                                 ${alertas.cuotaFinal ? 'bg-[var(--r2)]' : 'bg-[var(--fill)]'}`}
                     >
                       <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform
                                       ${alertas.cuotaFinal ? 'translate-x-7' : 'translate-x-1'}`} />
                     </button>
                   </div>
 
-                  <div className="p-4 rounded-xl" style={{ backgroundColor: (theme === 'dark' || theme === 'liquid') ? '#374151' : '#f3f4f6' }}>
-                    <label className="block font-medium mb-2" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937' }}>
+                  <div className="p-4 rounded-xl" style={{ backgroundColor: 'var(--fill2)' }}>
+                    <label className="block font-medium mb-2" style={{ color: 'var(--label)' }}>
                       Días de anticipación
                     </label>
                     <select
@@ -1024,9 +537,9 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
                       onChange={(e) => setAlertas({...alertas, diasAntes: parseInt(e.target.value)})}
                       className="w-full px-4 py-2.5 rounded-xl border"
                       style={{
-                        backgroundColor: (theme === 'dark' || theme === 'liquid') ? '#1f2937' : '#ffffff',
-                        borderColor: (theme === 'dark' || theme === 'liquid') ? '#4b5563' : '#d1d5db',
-                        color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937'
+                        backgroundColor: 'var(--fill)',
+                        borderColor: 'var(--sep)',
+                        color: 'var(--label)'
                       }}
                     >
                       <option value={1}>1 día antes</option>
@@ -1042,32 +555,32 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
             {/* Importar/Exportar Datos */}
             {activeTab === 'datos' && (
               <div className="space-y-6">
-                <h3 className="text-lg font-semibold" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937' }}>Importar / Exportar Datos</h3>
+                <h3 className="text-lg font-semibold" style={{ color: 'var(--label)' }}>Importar / Exportar Datos</h3>
 
                 {/* Exportar CSV */}
-                <div className="p-4 rounded-xl space-y-4" style={{ backgroundColor: (theme === 'dark' || theme === 'liquid') ? '#374151' : '#f3f4f6' }}>
-                  <p className="font-medium" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937' }}>Exportar a CSV</p>
+                <div className="p-4 rounded-xl space-y-4" style={{ backgroundColor: 'var(--fill2)' }}>
+                  <p className="font-medium" style={{ color: 'var(--label)' }}>Exportar a CSV</p>
                   <div className="grid grid-cols-3 gap-3">
                     <button
                       onClick={() => exportarCSV('movimientos')}
-                      className="px-4 py-3 rounded-xl border text-center transition-colors hover:bg-gray-100"
-                      style={{ borderColor: (theme === 'dark' || theme === 'liquid') ? '#4b5563' : '#d1d5db', color: (theme === 'dark' || theme === 'liquid') ? '#d1d5db' : '#374151' }}
+                      className="px-4 py-3 rounded-xl border text-center transition-colors hover:bg-[var(--fill2)]"
+                      style={{ borderColor: 'var(--sep)', color: 'var(--label)' }}
                     >
                       <FileText className="w-5 h-5 mx-auto mb-1" />
                       <span className="text-sm">Movimientos</span>
                     </button>
                     <button
                       onClick={() => exportarCSV('cuotas')}
-                      className="px-4 py-3 rounded-xl border text-center transition-colors hover:bg-gray-100"
-                      style={{ borderColor: (theme === 'dark' || theme === 'liquid') ? '#4b5563' : '#d1d5db', color: (theme === 'dark' || theme === 'liquid') ? '#d1d5db' : '#374151' }}
+                      className="px-4 py-3 rounded-xl border text-center transition-colors hover:bg-[var(--fill2)]"
+                      style={{ borderColor: 'var(--sep)', color: 'var(--label)' }}
                     >
                       <Calendar className="w-5 h-5 mx-auto mb-1" />
                       <span className="text-sm">Cuotas</span>
                     </button>
                     <button
                       onClick={() => exportarCSV('resumenes')}
-                      className="px-4 py-3 rounded-xl border text-center transition-colors hover:bg-gray-100"
-                      style={{ borderColor: (theme === 'dark' || theme === 'liquid') ? '#4b5563' : '#d1d5db', color: (theme === 'dark' || theme === 'liquid') ? '#d1d5db' : '#374151' }}
+                      className="px-4 py-3 rounded-xl border text-center transition-colors hover:bg-[var(--fill2)]"
+                      style={{ borderColor: 'var(--sep)', color: 'var(--label)' }}
                     >
                       <Receipt className="w-5 h-5 mx-auto mb-1" />
                       <span className="text-sm">Resúmenes</span>
@@ -1076,18 +589,18 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
                 </div>
 
                 {/* Backup completo */}
-                <div className="p-4 rounded-xl space-y-4" style={{ backgroundColor: (theme === 'dark' || theme === 'liquid') ? '#374151' : '#f3f4f6' }}>
-                  <p className="font-medium" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937' }}>Backup de Configuración</p>
+                <div className="p-4 rounded-xl space-y-4" style={{ backgroundColor: 'var(--fill2)' }}>
+                  <p className="font-medium" style={{ color: 'var(--label)' }}>Backup de Configuración</p>
                   <div className="flex gap-3">
                     <button
                       onClick={handleExportAll}
-                      className="flex-1 px-4 py-3 rounded-xl bg-violet-500 text-white hover:bg-violet-600 transition-colors text-center"
+                      className="flex-1 px-4 py-3 rounded-xl bg-[var(--inv)] text-[var(--inv-text)] hover:opacity-90 transition-colors text-center"
                     >
                       <Download className="w-5 h-5 mx-auto mb-1" />
                       <span className="text-sm">Exportar Todo</span>
                     </button>
-                    <label className="flex-1 px-4 py-3 rounded-xl border-2 border-dashed cursor-pointer transition-colors text-center hover:border-violet-500"
-                           style={{ borderColor: (theme === 'dark' || theme === 'liquid') ? '#4b5563' : '#d1d5db', color: (theme === 'dark' || theme === 'liquid') ? '#d1d5db' : '#374151' }}>
+                    <label className="flex-1 px-4 py-3 rounded-xl border-2 border-dashed cursor-pointer transition-colors text-center hover:border-[var(--label)]"
+                           style={{ borderColor: 'var(--sep)', color: 'var(--label)' }}>
                       <Upload className="w-5 h-5 mx-auto mb-1" />
                       <span className="text-sm">Importar</span>
                       <input type="file" accept=".json" onChange={handleImportData} className="hidden" />
@@ -1096,15 +609,15 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
                 </div>
 
                 {/* Refrescar datos */}
-                <div className="p-4 rounded-xl" style={{ backgroundColor: (theme === 'dark' || theme === 'liquid') ? '#374151' : '#f3f4f6' }}>
+                <div className="p-4 rounded-xl" style={{ backgroundColor: 'var(--fill2)' }}>
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="font-medium" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937' }}>Refrescar datos</p>
-                      <p className="text-sm" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#9ca3af' : '#6b7280' }}>Recargar todos los datos desde el servidor</p>
+                      <p className="font-medium" style={{ color: 'var(--label)' }}>Refrescar datos</p>
+                      <p className="text-sm" style={{ color: 'var(--label2)' }}>Recargar todos los datos desde el servidor</p>
                     </div>
                     <button
                       onClick={() => { onRefreshData(); onClose(); }}
-                      className="px-4 py-2 rounded-lg bg-emerald-500 text-white text-sm font-medium hover:bg-emerald-600"
+                      className="px-4 py-2 rounded-lg bg-[var(--inv)] text-[var(--inv-text)] text-sm font-medium hover:opacity-90"
                     >
                       <RefreshCcw className="w-4 h-4 inline mr-2" />
                       Refrescar
@@ -1114,44 +627,31 @@ const SettingsModal = ({ isOpen, onClose, tarjetas, reglas, movimientos, resumen
               </div>
             )}
 
-            {/* Temas */}
+            {/* Apariencia (la misma que el menú Más) */}
             {activeTab === 'temas' && (
               <div className="space-y-6">
-                <h3 className="text-lg font-semibold" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#f5f5f5' : '#1f2937' }}>Temas Personalizados</h3>
-
-                <div className="grid grid-cols-2 gap-4">
-                  {themeOptions.map(t => (
-                    <button
-                      key={t.id}
-                      onClick={() => setTheme(t.id)}
-                      className={`p-6 rounded-xl border-2 transition-all
-                                 ${theme === t.id
-                                   ? 'border-violet-500 ring-2 ring-violet-500/30'
-                                   : ''}`}
-                      style={{ borderColor: theme === t.id ? '#8b5cf6' : ((theme === 'dark' || theme === 'liquid') ? '#374151' : '#e5e7eb') }}
-                    >
-                      <div
-                        className="w-full h-20 rounded-lg mb-3 flex items-center justify-center"
-                        style={{ background: `linear-gradient(135deg, ${t.colors[0]}, ${t.colors[1]})` }}
-                      >
-                        <t.icon className={`w-8 h-8 ${t.id === 'dark' ? 'text-white' : 'text-gray-800'}`} />
-                      </div>
-                      <p className="font-medium" style={{ color: theme === t.id ? '#8b5cf6' : ((theme === 'dark' || theme === 'liquid') ? '#d1d5db' : '#374151') }}>
-                        {t.label}
-                      </p>
-                    </button>
-                  ))}
+                <h3 className="text-lg font-semibold" style={{ color: 'var(--label)' }}>Apariencia</h3>
+                <div className="space-y-2">
+                  <p className="text-sm" style={{ color: 'var(--label2)' }}>Modo de color</p>
+                  <Seg
+                    ariaLabel="Modo de color"
+                    valor={apariencia?.modo}
+                    onCambio={(modo) => onApariencia?.({ modo })}
+                    opciones={[{ id: 'sistema', label: 'Sistema' }, { id: 'claro', label: 'Claro' }, { id: 'oscuro', label: 'Oscuro' }]}
+                  />
                 </div>
-
-                <div className="p-4 rounded-xl border" style={{
-                  backgroundColor: (theme === 'dark' || theme === 'liquid') ? 'rgba(251, 191, 36, 0.1)' : 'rgba(251, 191, 36, 0.1)',
-                  borderColor: (theme === 'dark' || theme === 'liquid') ? 'rgba(251, 191, 36, 0.3)' : 'rgba(251, 191, 36, 0.3)'
-                }}>
-                  <p className="text-sm" style={{ color: (theme === 'dark' || theme === 'liquid') ? '#fbbf24' : '#b45309' }}>
-                    <Sparkles className="w-4 h-4 inline mr-2" />
-                    Próximamente: más temas y colores personalizados
-                  </p>
-                </div>
+                <label className="flex items-center justify-between gap-4 p-4 rounded-xl" style={{ backgroundColor: 'var(--fill2)' }}>
+                  <span>
+                    <span className="block font-medium" style={{ color: 'var(--label)' }}>Reducir transparencia</span>
+                    <span className="block text-sm" style={{ color: 'var(--label2)' }}>Ventana, barra y menús opacos, sin el fondo de colores.</span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={!!apariencia?.reducirTransparencia}
+                    onChange={(e) => onApariencia?.({ reducirTransparencia: e.target.checked })}
+                    style={{ width: 22, height: 22, accentColor: 'var(--r2)' }}
+                  />
+                </label>
               </div>
             )}
         </div>
@@ -1169,16 +669,12 @@ const App = () => {
     try { return window.matchMedia('(prefers-color-scheme: dark)').matches; } catch { return true; }
   });
   const oscuro = modoEfectivo(apariencia.modo, sistemaOscuro) === 'oscuro';
-  // SettingsModal y los gráficos viejos esperan 'dark' | 'light'.
-  const theme = temaLegacy(apariencia.modo, sistemaOscuro);
   const cambiarApariencia = (cambios) => setApariencia(prev => ({ ...prev, ...cambios }));
-  const setTheme = (id) => cambiarApariencia({ modo: id === 'light' ? 'claro' : 'oscuro' });
   const [activeView, setActiveView] = useState('dashboard');
   const [pendientesNombre, setPendientesNombre] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState('tarjetas');
-  const [filtroTipoGastoInicial, setFiltroTipoGastoInicial] = useState('');
 
   // Onboarding state - mostrar solo si es la primera vez
   const [showOnboarding, setShowOnboarding] = useState(() => {
@@ -1212,9 +708,6 @@ const App = () => {
   const [movimientos, setMovimientos] = useState([]);
   const [resumenes, setResumenes] = useState([]);
   const [cuotasActivas, setCuotasActivas] = useState([]);
-  const [proyeccionCuotas, setProyeccionCuotas] = useState([]);
-  const [dashboard, setDashboard] = useState(null);
-  const [proyecciones, setProyecciones] = useState(null);
   const [reglas, setReglas] = useState([]);
   const [consumosLive, setConsumosLive] = useState(() => storage.getConsumosLive());
   const [ciclosLive, setCiclosLive] = useState(() => storage.getCiclosLive());
@@ -1410,13 +903,6 @@ const App = () => {
     if (activeView === 'reglas') cargarPendientesNombre();
   }, [activeView, cargarPendientesNombre]);
 
-  // Limpiar filtro de tipo de gasto cuando se cambia de vista (excepto cuando vamos a movimientos)
-  useEffect(() => {
-    if (activeView !== 'movimientos') {
-      setFiltroTipoGastoInicial('');
-    }
-  }, [activeView]);
-  
   // Fetch all data from localStorage
   // Cotizacion usada para pesificar cuotas en dolares. Es una dependencia real de
   // fetchData: cuando llega la cotizacion, la proyeccion se recalcula una vez.
@@ -1522,19 +1008,6 @@ const App = () => {
       if (tarjetasActualizadas) {
         localStorage.setItem('tarjetas_lista', JSON.stringify(tarjetasData));
       }
-      const estadisticas = storage.getEstadisticas();
-      const evolucion = storage.getEvolucionMensual(6);
-
-      // Obtener el último resumen de cada tarjeta
-      const ultimoResumenPorTarjeta = {};
-      resumenesData.forEach(r => {
-        const key = r.tarjeta;
-        if (!ultimoResumenPorTarjeta[key] ||
-            r.anio > ultimoResumenPorTarjeta[key].anio ||
-            (r.anio === ultimoResumenPorTarjeta[key].anio && r.mes > ultimoResumenPorTarjeta[key].mes)) {
-          ultimoResumenPorTarjeta[key] = r;
-        }
-      });
 
       // ── Planes de cuotas ────────────────────────────────────────────────────
       // Toda la lógica vive en services/cuotas.js (única fuente de verdad, testeada
@@ -1545,54 +1018,22 @@ const App = () => {
       // cambian Cuotas, la proyección, Mes y el gráfico a la vez.
       const cuotasActivasData = construirPlanes(movimientosData, resumenesData, storage.getDecisionesPlanes());
 
-      // Enriquecer tarjetas con último resumen y estadísticas
+      // Tarjetas con su último resumen (lo usa el campo de luz para el peso de cada mancha).
       const tarjetasEnriquecidas = tarjetasData.map((t, idx) => {
-        // Buscar último resumen de esta tarjeta
-        const resumenesOrdenados = resumenesData
+        const ultimoResumen = resumenesData
           .filter(r => r.tarjeta === t.nombre)
-          .sort((a, b) => {
-            if (a.anio !== b.anio) return b.anio - a.anio;
-            return b.mes - a.mes;
-          });
-        const ultimoResumen = resumenesOrdenados[0] || null;
-
-        // Calcular estadísticas de movimientos para esta tarjeta
-        const movimientosTarjeta = movimientosData.filter(m => m.tarjeta === t.nombre);
-
-        // Calcular estadísticas de cuotas para esta tarjeta
-        // Solo los planes con deuda por delante: los terminados son historial.
-        const cuotasTarjeta = cuotasActivasData.filter(c => c.tarjeta === t.nombre && estaVigente(c));
-        // Los planes interrumpidos ya no los factura el banco: no suman deuda futura.
-        const montoCuotasPendientes = cuotasTarjeta.reduce((sum, c) => {
-          if (c.interrumpida) return sum;
-          const restantes = c.total_cuotas - c.cuota_actual;
-          const cuotaARS = (c.monto_pesos || 0) || (c.monto_dolares || 0) * cotizacionVenta;
-          return sum + cuotaARS * restantes;
-        }, 0);
-
-        // Cantidad de cuotas activas de esta tarjeta (sin agrupar por referencia)
-        const comprasEnCuotasUnicas = cuotasTarjeta.length;
-
+          .sort((a, b) => (b.anio - a.anio) || (b.mes - a.mes))[0] || null;
         return {
           ...t,
           id: t.id || idx + 1, // Asegurar que tenga ID
           ultimo_resumen: ultimoResumen ? {
             total_a_pagar: ultimoResumen.total_a_pagar_pesos,
             total_a_pagar_dolares: ultimoResumen.total_a_pagar_dolares || 0,
-            total_consumos_pesos: ultimoResumen.total_consumos_pesos,
-            total_consumos_dolares: ultimoResumen.total_consumos_dolares || 0,
             fecha_cierre: ultimoResumen.fecha_cierre,
             fecha_vencimiento: ultimoResumen.fecha_vencimiento,
             mes: ultimoResumen.mes,
-            anio: ultimoResumen.anio,
-            cantidad_movimientos: ultimoResumen.cantidad_movimientos
-          } : null,
-          estadisticas: {
-            total_movimientos: movimientosTarjeta.length,
-            compras_en_cuotas: comprasEnCuotasUnicas,
-            monto_cuotas_pendientes: montoCuotasPendientes,
-            cantidad_cuotas: cuotasTarjeta.length
-          }
+            anio: ultimoResumen.anio
+          } : null
         };
       });
 
@@ -1613,45 +1054,8 @@ const App = () => {
       setTiposGasto(tipos);
       setGastosFijosDetalle(resumenFijos(series, tipos));
       setPreguntasFijos(preguntasPendientes(series, tipos, resumenesData, decisionesFijos));
-      // Calcular totales de cuotas pendientes
-      const totalPendienteCuotas = totalPendiente(cuotasActivasData, cotizacionVenta);
-
-      setDashboard({
-        // Propiedades en el nivel raíz para las cards
-        total_resumenes: estadisticas.total_resumenes || resumenesData.length,
-        total_a_pagar: estadisticas.total_a_pagar,
-        total_a_pagar_dolares: estadisticas.total_a_pagar_dolares,
-        total_tarjetas: estadisticas.total_tarjetas || tarjetasData.length,
-        total_movimientos: estadisticas.total_movimientos || movimientosData.length,
-        // "Activas" = con deuda por delante. Antes contaba también los planes ya
-        // terminados, así que mostraba 50 donde había 18.
-        cuotas_activas: cuotasActivasData.filter(estaVigente).length,
-        cuotas_interrumpidas: cuotasActivasData.filter(m => m.interrumpida).length,
-        pagos_pendientes: cuotasActivasData
-          .filter(estaVigente)
-          .reduce((sum, m) => sum + (m.total_cuotas - m.cuota_actual), 0),
-        total_pendiente_cuotas: totalPendienteCuotas,
-        ultimo_resumen: estadisticas.ultimo_resumen,
-        // También mantener estadisticas para compatibilidad
-        estadisticas: {
-          total_a_pagar: estadisticas.total_a_pagar,
-          total_a_pagar_dolares: estadisticas.total_a_pagar_dolares,
-          total_tarjetas: estadisticas.total_tarjetas,
-          total_movimientos: estadisticas.total_movimientos,
-          cuotas_activas: estadisticas.cuotas_activas
-        }
-      });
-      setProyecciones({ evolucion_mensual: evolucion });
       setReglas(reglasLocales);
 
-      // Proyección de cuotas: ancla = período del resumen más reciente entre todas
-      // las tarjetas; el bucket 0 es el mes siguiente. Ver services/cuotas.js.
-      const proyeccionCalculada = proyectarCuotas(cuotasActivasData, {
-        meses: 6,
-        resumenes: resumenesData,
-        cotizacionVenta
-      });
-      setProyeccionCuotas(proyeccionCalculada);
     } catch (error) {
       console.error('[App] Error loading data:', error);
     }
@@ -1735,8 +1139,6 @@ const App = () => {
       // Sin período no se puede ubicar: se trata como reciente para no esconderlo.
       return { ...m, es_reciente: periodo === null || ultimo === undefined || periodo === ultimo };
     }), [movimientos, periodoPorResumenId, ultimoPeriodoPorTarjeta]);
-
-  const reintegrosRecientes = reintegros.filter(r => r.es_reciente);
 
   // Período más reciente cargado, para rotular la vista de Reintegros.
   const periodoRecienteLabel = useMemo(() => {
@@ -1866,19 +1268,6 @@ const App = () => {
   const elegidaLuz = activeView === 'tarjetas' ? buscarTarjeta(listaTarjetas, tarjetaElegida)?.id : null;
   const manchasVista = manchasElegida(manchas, elegidaLuz);
 
-  // Format currency (usa las funciones helper globales)
-  const formatCurrency = (amount, currency = 'ARS') => {
-    if (currency === 'USD') {
-      return formatMontoDolares(amount);
-    }
-    return formatMonto(amount);
-  };
-  
-  // Chart colors based on theme
-  const chartColors = oscuro
-    ? ['#7D7AFF', '#B8B6FF', '#4C8FEA', '#D47A22']
-    : ['#4F4DD6', '#2B2A7A', '#1B5FAF', '#C2500A'];
-
   // Mostrar Onboarding si es la primera vez
   if (showOnboarding) {
     return <OnboardingWizard onComplete={handleOnboardingComplete} />;
@@ -1907,7 +1296,7 @@ const App = () => {
       >
           {loading ? (
             <div className="flex items-center justify-center h-64">
-              <div className="animate-spin rounded-full h-12 w-12 border-4 border-[var(--accent-1)] border-t-transparent" />
+              <div className="animate-spin rounded-full h-12 w-12 border-4 border-[var(--r2)] border-t-transparent" />
             </div>
           ) : activeView === 'dashboard' ? (
             <MesView
@@ -1977,7 +1366,6 @@ const App = () => {
               onCambiarTipo={cambiarTipoGasto}
               onVerPlan={(plan) => { setPlanElegido(plan.id); setActiveView('cuotas'); }}
               filtro={movimientosFiltro}
-              filtroTipoGastoInicial={filtroTipoGastoInicial}
               nombresTarjetas={nombresTarjetas}
               oscuro={oscuro}
             />
@@ -1986,7 +1374,6 @@ const App = () => {
               consumosLive={consumosLive}
               tarjetas={tarjetas}
               resumenes={resumenes}
-              formatCurrency={formatCurrency}
               onDeleteConsumos={handleDeleteConsumosLive}
               onIrAImportar={() => setActiveView('importar')}
             />
@@ -2034,8 +1421,8 @@ const App = () => {
         resumenes={resumenes}
         cuotasActivas={cuotasActivas}
         onRefreshData={fetchData}
-        theme={theme}
-        setTheme={setTheme}
+        apariencia={apariencia}
+        onApariencia={cambiarApariencia}
         initialTab={settingsInitialTab}
       />
     </>
@@ -2066,34 +1453,34 @@ const PreguntasFijosCard = ({ preguntas = [], onResponder }) => {
       disabled={enviando === p.id}
       onClick={() => responder(p, respuesta)}
       className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${primario
-        ? 'bg-gradient-to-r from-[var(--accent-1)] to-[var(--accent-2)] text-white'
-        : 'bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--text-primary)] hover:border-[var(--accent-1)]'}`}
+        ? 'bg-[var(--inv)] text-[var(--inv-text)]'
+        : 'bg-[var(--fill2)] border border-[var(--sep)] text-[var(--label)] hover:border-[var(--label)]'}`}
     >
       {label}
     </button>
   );
 
   return (
-    <div className="glass-card p-5 border-l-4 border-l-[var(--accent-1)]">
+    <div className="glass-card p-5 border-l-4 border-l-[var(--r2)]">
       <div className="flex items-center gap-2 mb-3">
-        <HelpCircle className="w-5 h-5 text-[var(--accent-1)]" />
-        <h3 className="font-semibold text-[var(--text-primary)]">
+        <HelpCircle className="w-5 h-5 text-[var(--r2)]" />
+        <h3 className="font-semibold text-[var(--label)]">
           Revisá {preguntas.length === 1 ? 'un gasto fijo' : `${preguntas.length} gastos fijos`}
         </h3>
       </div>
       <div className="space-y-3">
         {preguntas.map(p => (
-          <div key={p.id} className="flex flex-col md:flex-row md:items-center gap-3 p-3 rounded-xl bg-[var(--glass-bg)]">
-            <p className="flex-1 text-sm text-[var(--text-secondary)]">
+          <div key={p.id} className="flex flex-col md:flex-row md:items-center gap-3 p-3 rounded-xl bg-[var(--fill2)]">
+            <p className="flex-1 text-sm text-[var(--label2)]">
               {p.tipo === 'cambio_monto' ? (
                 <>
-                  <span className="font-semibold text-[var(--text-primary)]">{p.nombre}</span> pasó de{' '}
-                  {monto(p.ultimo.monto, p.moneda)} a <span className="font-semibold text-[var(--text-primary)]">
+                  <span className="font-semibold text-[var(--label)]">{p.nombre}</span> pasó de{' '}
+                  {monto(p.ultimo.monto, p.moneda)} a <span className="font-semibold text-[var(--label)]">
                   {monto(p.candidato.monto, p.moneda)}</span> ({p.tarjeta}, {mesLabel(p.periodo)}). ¿Es el mismo gasto?
                 </>
               ) : (
                 <>
-                  No encontramos <span className="font-semibold text-[var(--text-primary)]">{p.nombre}</span> en
+                  No encontramos <span className="font-semibold text-[var(--label)]">{p.nombre}</span> en
                   el resumen de {mesLabel(p.periodo)} ({p.tarjeta}). ¿Lo diste de baja?
                 </>
               )}
@@ -2113,7 +1500,7 @@ const PreguntasFijosCard = ({ preguntas = [], onResponder }) => {
               <button
                 type="button"
                 onClick={() => responder(p, 'omitir')}
-                className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                className="p-1.5 rounded-lg text-[var(--label2)] hover:text-[var(--label)]"
                 title="Omitir: la app decide sola"
               >
                 <X className="w-4 h-4" />
@@ -2127,1030 +1514,11 @@ const PreguntasFijosCard = ({ preguntas = [], onResponder }) => {
 };
 
 // ==================== Novedades y Guía ====================
-const ICONOS_GUIA = { Upload, LayoutDashboard, Receipt, Repeat, Calendar, Zap, RefreshCcw, Settings };
-
-/** Modal que aparece una vez por versión con lo nuevo. Contenido en novedades.js. */
-const NovedadesModal = ({ onCerrar }) => {
-  const actual = NOVEDADES[0];
-  if (!actual) return null;
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[90] p-4" onClick={() => onCerrar(false)}>
-      <div className="glass-card w-full max-w-lg max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-        <div className="p-6 border-b border-[var(--glass-border)] flex items-start justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-gradient-to-br from-[var(--accent-1)] to-[var(--accent-2)]">
-              <Sparkles className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <p className="text-xs uppercase tracking-wide text-[var(--text-muted)]">Novedades · {actual.fecha}</p>
-              <h3 className="text-lg font-semibold text-[var(--text-primary)]">{actual.titulo}</h3>
-            </div>
-          </div>
-          <button onClick={() => onCerrar(false)} className="p-2 rounded-lg hover:bg-[var(--glass-bg)]" title="Cerrar">
-            <X className="w-5 h-5 text-[var(--text-muted)]" />
-          </button>
-        </div>
-        <ul className="p-6 space-y-4">
-          {actual.puntos.map((p, i) => (
-            <li key={i} className="flex gap-3">
-              <CheckCircle className="w-5 h-5 shrink-0 mt-0.5 text-emerald-500" />
-              <div>
-                <p className="font-medium text-[var(--text-primary)]">{p.titulo}</p>
-                <p className="text-sm text-[var(--text-secondary)] mt-0.5">{p.texto}</p>
-              </div>
-            </li>
-          ))}
-        </ul>
-        <div className="p-6 pt-0 flex flex-col sm:flex-row gap-2 sm:justify-end">
-          <button
-            onClick={() => onCerrar(true)}
-            className="px-4 py-2 rounded-lg text-sm font-medium bg-[var(--glass-bg)] border border-[var(--glass-border)]
-                       text-[var(--text-primary)] hover:border-[var(--accent-1)] inline-flex items-center justify-center gap-2"
-          >
-            <BookOpen className="w-4 h-4" /> Ver guía completa
-          </button>
-          <button
-            onClick={() => onCerrar(false)}
-            className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-gradient-to-r from-[var(--accent-1)] to-[var(--accent-2)]"
-          >
-            Entendido
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-/** Mini manual de todas las funciones. Siempre disponible desde el menú. */
-const GuiaView = ({ onVerNovedades }) => (
-  <div className="space-y-6">
-    <div className="glass-card p-6 flex flex-col md:flex-row md:items-center gap-4 justify-between">
-      <div>
-        <h3 className="text-lg font-semibold text-[var(--text-primary)]">Cómo usar Tarjeteando</h3>
-        <p className="text-sm text-[var(--text-muted)]">Todas las funciones, en pocas líneas. Versión {APP_VERSION}.</p>
-      </div>
-      <button
-        onClick={onVerNovedades}
-        className="px-4 py-2 rounded-lg text-sm font-medium bg-[var(--glass-bg)] border border-[var(--glass-border)]
-                   text-[var(--text-primary)] hover:border-[var(--accent-1)] inline-flex items-center gap-2 self-start"
-      >
-        <Sparkles className="w-4 h-4" /> Ver novedades
-      </button>
-    </div>
-    <div className="grid gap-4 md:grid-cols-2">
-      {GUIA.map(seccion => {
-        const Icono = ICONOS_GUIA[seccion.icono] || BookOpen;
-        return (
-          <section key={seccion.id} className="glass-card p-5">
-            <div className="flex items-center gap-2 mb-3">
-              <div className="p-2 rounded-lg bg-gradient-to-br from-[var(--accent-1)] to-[var(--accent-2)]">
-                <Icono className="w-4 h-4 text-white" />
-              </div>
-              <h4 className="font-semibold text-[var(--text-primary)]">{seccion.titulo}</h4>
-            </div>
-            <ul className="space-y-2">
-              {seccion.items.map((t, i) => (
-                <li key={i} className="flex gap-2 text-sm text-[var(--text-secondary)]">
-                  <ChevronRight className="w-4 h-4 shrink-0 mt-0.5 text-[var(--accent-1)]" />
-                  <span>{t}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
-        );
-      })}
-    </div>
-  </div>
-);
-
-// Dashboard View
-const DEFAULT_CARD_ORDER = ['live', 'fijos', 'cuotasActivas', 'cuotasProx', 'totalPagar'];
-
-const DashboardView = ({ foco = null, dashboard, tarjetas, proyecciones, proyeccionCuotas = [], chartColors, formatCurrency, theme, resumenes = [], onDeleteResumen, setActiveView, searchQuery = '', movimientos = [], cuotasActivas = [], nombresTarjetas = {}, onGuardarNombre, gastosFijos = new Set(), gastosFijosDetalle = null, cotizacion = null, onFiltrarMovimientos, consumosLive = [], ciclosLive = {}, onAsignarBanco, preguntasFijos = [], onResponderPregunta }) => {
-  const liveCards = useMemo(() => cardsEnCurso(ciclosLive, consumosLive), [ciclosLive, consumosLive]);
-  const [showResumenes, setShowResumenes] = useState(false);
-  const [deletingId, setDeletingId] = useState(null);
-  const [mesDetalleIdx, setMesDetalleIdx] = useState(null);
-  // Sección Tarjetas (placeholder hasta la fase 3): lleva a "Mis Tarjetas".
-  useEffect(() => {
-    if (foco !== 'tarjetas') return;
-    const id = setTimeout(() => document.getElementById('mis-tarjetas')?.scrollIntoView({ block: 'start' }), 0);
-    return () => clearTimeout(id);
-  }, [foco]);
-  const [resumenCombinado, setResumenCombinado] = useState(false);
-
-  // Orden manual de las stat cards (persistido en localStorage)
-  const [cardOrder, setCardOrder] = useState(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem('dashboard_card_order') || 'null');
-      if (Array.isArray(saved)) {
-        return [
-          ...saved.filter((id) => DEFAULT_CARD_ORDER.includes(id)),
-          ...DEFAULT_CARD_ORDER.filter((id) => !saved.includes(id)),
-        ];
-      }
-    } catch {}
-    return DEFAULT_CARD_ORDER;
-  });
-  const [dragCardId, setDragCardId] = useState(null);
-
-  const moveCard = (dragId, targetId) => {
-    if (!dragId || dragId === targetId) return;
-    setCardOrder((prev) => {
-      const next = [...prev];
-      const from = next.indexOf(dragId);
-      const to = next.indexOf(targetId);
-      if (from < 0 || to < 0) return prev;
-      next.splice(from, 1);
-      next.splice(to, 0, dragId);
-      localStorage.setItem('dashboard_card_order', JSON.stringify(next));
-      return next;
-    });
-  };
-
-  const handleDeleteResumen = async (resumenId) => {
-    if (!confirm('¿Eliminar este resumen y todos sus movimientos?')) return;
-    setDeletingId(resumenId);
-    try {
-      storage.deleteResumen(resumenId);
-      onDeleteResumen?.();
-    } catch (error) {
-      console.error('Error eliminando resumen:', error);
-    }
-    setDeletingId(null);
-  };
-
-  // Búsqueda global
-  const query = searchQuery.toLowerCase();
-  const searchResults = query ? {
-    movimientos: movimientos.filter(m =>
-      m.referencia_limpia?.toLowerCase().includes(query) ||
-      m.referencia_original?.toLowerCase().includes(query) ||
-      m.tarjeta?.toLowerCase().includes(query)
-    ).slice(0, 5),
-    cuotas: cuotasActivas.filter(c =>
-      c.descripcion?.toLowerCase().includes(query) ||
-      c.tarjeta?.toLowerCase().includes(query)
-    ).slice(0, 5),
-    tarjetas: tarjetas.filter(t =>
-      t.nombre?.toLowerCase().includes(query) ||
-      t.banco?.toLowerCase().includes(query)
-    )
-  } : null;
-
-  if (!dashboard) return <div className="text-center py-12 text-[var(--text-muted)]">No hay datos</div>;
-
-  return (
-    <div className="space-y-6">
-      <PreguntasFijosCard preguntas={preguntasFijos} onResponder={onResponderPregunta} />
-
-      {/* Modal de Resúmenes */}
-      {showResumenes && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="glass-card w-full max-w-2xl max-h-[80vh] overflow-hidden">
-            <div className="p-6 border-b border-[var(--glass-border)] flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-[var(--text-primary)]">
-                Resúmenes Cargados ({resumenes.length})
-              </h3>
-              <button
-                onClick={() => setShowResumenes(false)}
-                className="p-2 rounded-lg hover:bg-[var(--glass-bg)] transition-colors"
-              >
-                <X className="w-5 h-5 text-[var(--text-muted)]" />
-              </button>
-            </div>
-            <div className="p-6 overflow-y-auto max-h-[60vh]">
-              {resumenes.length === 0 ? (
-                <p className="text-center text-[var(--text-muted)] py-8">No hay resúmenes cargados</p>
-              ) : (
-                <div className="space-y-3">
-                  {resumenes.map((r) => (
-                    <div
-                      key={r.id}
-                      className="flex items-center justify-between p-4 rounded-xl bg-[var(--glass-bg)]"
-                    >
-                      <div className="flex-1">
-                        <p className="font-medium text-[var(--text-primary)]">{r.tarjeta}</p>
-                        <p className="text-sm text-[var(--text-muted)]">
-                          {new Date(r.anio, r.mes - 1).toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })}
-                          {' • '}{r.cantidad_movimientos} movimientos
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="text-sm font-semibold text-[var(--text-primary)]">
-                          {formatMonto(r.total_a_pagar_pesos || 0)}
-                        </span>
-                        <button
-                          onClick={() => handleDeleteResumen(r.id)}
-                          disabled={deletingId === r.id}
-                          className="p-2 rounded-lg bg-red-500/20 text-red-500 hover:bg-red-500/30
-                                     transition-all disabled:opacity-50"
-                          title="Eliminar resumen"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Resultados de búsqueda */}
-      {searchResults && (
-        <div className="glass-card p-6">
-          <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-4">
-            Resultados para "{searchQuery}"
-          </h3>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {/* Tarjetas encontradas */}
-            {searchResults.tarjetas.length > 0 && (
-              <div>
-                <h4 className="text-sm font-medium text-[var(--text-muted)] mb-2">Tarjetas ({searchResults.tarjetas.length})</h4>
-                <div className="space-y-2">
-                  {searchResults.tarjetas.map(t => (
-                    <div key={t.id} className="p-3 rounded-lg bg-[var(--glass-bg)]">
-                      <p className="font-medium text-[var(--text-primary)]">{t.nombre}</p>
-                      <p className="text-xs text-[var(--text-muted)]">{t.banco}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Movimientos encontrados */}
-            {searchResults.movimientos.length > 0 && (
-              <div>
-                <h4 className="text-sm font-medium text-[var(--text-muted)] mb-2">
-                  Movimientos ({searchResults.movimientos.length > 5 ? '5+' : searchResults.movimientos.length})
-                </h4>
-                <div className="space-y-2">
-                  {searchResults.movimientos.map((m, i) => (
-                    <div key={m.id || i} className="p-3 rounded-lg bg-[var(--glass-bg)]">
-                      <p className="font-medium text-[var(--text-primary)] text-sm truncate">
-                        {m.referencia_limpia || m.referencia_original}
-                      </p>
-                      <p className="text-xs text-[var(--text-muted)]">
-                        {m.tarjeta} • {formatCurrency(m.monto_pesos)}
-                      </p>
-                    </div>
-                  ))}
-                  {searchResults.movimientos.length >= 5 && (
-                    <button
-                      onClick={() => setActiveView?.('movimientos')}
-                      className="text-sm text-[var(--accent-1)] hover:underline"
-                    >
-                      Ver más en Movimientos →
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Cuotas encontradas */}
-            {searchResults.cuotas.length > 0 && (
-              <div>
-                <h4 className="text-sm font-medium text-[var(--text-muted)] mb-2">
-                  Cuotas ({searchResults.cuotas.length > 5 ? '5+' : searchResults.cuotas.length})
-                </h4>
-                <div className="space-y-2">
-                  {searchResults.cuotas.map((c, i) => (
-                    <div key={c.id || i} className="p-3 rounded-lg bg-[var(--glass-bg)]">
-                      <p className="font-medium text-[var(--text-primary)] text-sm truncate">{c.descripcion}</p>
-                      <p className="text-xs text-[var(--text-muted)]">
-                        {c.tarjeta} • {c.cuotas_pagadas}/{c.total_cuotas}
-                      </p>
-                    </div>
-                  ))}
-                  {searchResults.cuotas.length >= 5 && (
-                    <button
-                      onClick={() => setActiveView?.('cuotas')}
-                      className="text-sm text-[var(--accent-1)] hover:underline"
-                    >
-                      Ver más en Cuotas →
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {searchResults.tarjetas.length === 0 && searchResults.movimientos.length === 0 && searchResults.cuotas.length === 0 && (
-            <p className="text-center text-[var(--text-muted)] py-4">No se encontraron resultados</p>
-          )}
-        </div>
-      )}
-
-      {/* Badge cotización dólar */}
-      {cotizacion && (
-        <div className="flex items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
-            <DollarSign className="w-3.5 h-3.5" />
-            Dólar tarjeta: {formatMonto(cotizacion.venta || 0)}
-            <span className="text-emerald-500/60 ml-1">
-              · {new Date(cotizacion.cachedAt).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
-            </span>
-          </span>
-        </div>
-      )}
-
-      {/* Stats Row */}
-      {(() => {
-        // Calcular gastos fijos del último resumen de CADA tarjeta
-        // Agrupar movimientos por tarjeta y obtener el último período de cada una
-        const ultimosPeriodosPorTarjeta = {};
-        movimientos.forEach(m => {
-          const tarjeta = m.tarjeta;
-          const periodo = `${m.anio_resumen}-${String(m.mes_resumen).padStart(2, '0')}`;
-          if (!ultimosPeriodosPorTarjeta[tarjeta] || periodo > ultimosPeriodosPorTarjeta[tarjeta]) {
-            ultimosPeriodosPorTarjeta[tarjeta] = periodo;
-          }
-        });
-
-        // Filtrar movimientos que pertenecen al último período de su tarjeta
-        const movsUltimosPeriodos = movimientos.filter(m => {
-          const periodo = `${m.anio_resumen}-${String(m.mes_resumen).padStart(2, '0')}`;
-          return periodo === ultimosPeriodosPorTarjeta[m.tarjeta];
-        });
-
-        const { totalFijos } = calcularTotalesGastos(movsUltimosPeriodos, gastosFijos, cotizacion?.venta || 0);
-
-        // Total a pagar del MES DE VENCIMIENTO más reciente (lo que hay que reservar del
-        // sueldo este mes). Se agrupa por mes de fecha_vencimiento, NO por el último resumen
-        // cargado de cada tarjeta: así no se mezclan vencimientos de meses distintos.
-        // Mes (YYYY-MM) de vencimiento de un resumen, con fallback a cierre y luego al período.
-        const mesVencimiento = (r) => {
-          const f = r.fecha_vencimiento || r.fecha_cierre;
-          if (f && typeof f === 'string' && f.length >= 7) return f.slice(0, 7);
-          if (r.anio && r.mes) return `${r.anio}-${String(r.mes).padStart(2, '0')}`;
-          return null;
-        };
-        // mesRef = vencimiento más reciente entre TODOS los resúmenes cargados (opción A).
-        const mesRef = resumenes.reduce((max, r) => {
-          const m = mesVencimiento(r);
-          return m && (!max || m > max) ? m : max;
-        }, null);
-        // Solo resúmenes cuyo vencimiento cae en mesRef; los meses previos se desestiman.
-        const resumenesMesRef = resumenes.filter(r => mesVencimiento(r) === mesRef);
-        const totalUltimoResumenARS = resumenesMesRef.reduce((s, r) => s + (r.total_a_pagar_pesos || 0), 0);
-        const totalUltimoResumenUSD = resumenesMesRef.reduce((s, r) => s + (r.total_a_pagar_dolares || 0), 0);
-        const mesRefLabel = mesRef
-          ? new Date(mesRef + '-01T12:00:00').toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })
-          : null;
-
-        // Total gastado en "Últimos consumos" (pre-resumen), excluye pagos/devoluciones
-        // Suma de las Cards de ciclo en curso (lo conciliado con un resumen ya no cuenta).
-        const liveTotalPesos = liveCards.reduce((s, x) => s + x.datos.total_ars, 0);
-        const liveTotalUSD = liveCards.reduce((s, x) => s + x.datos.total_usd, 0);
-
-        // Card compacta simple (icono + label + valor)
-        const simpleCard = (Icon, label, value, onClick, sub = null, tooltip = null) => (
-          <div
-            className={`stat-card stat-card-sm h-full ${onClick ? 'cursor-pointer' : ''}`}
-            onClick={onClick}
-            title={tooltip || undefined}
-          >
-            <div className="flex items-center gap-2 mb-2">
-              <div className="p-2 rounded-lg bg-gradient-to-br from-[var(--accent-1)] to-[var(--accent-2)] bg-opacity-20">
-                <Icon className="w-4 h-4 text-white" />
-              </div>
-              <p className="text-[var(--text-muted)] text-xs leading-tight">{label}</p>
-            </div>
-            <p className="text-xl font-bold text-[var(--text-primary)] leading-tight whitespace-nowrap">{value}</p>
-            {sub && <p className="text-[11px] text-[var(--text-muted)] mt-1 leading-tight">{sub}</p>}
-          </div>
-        );
-
-        // Definición de cada card: weight controla el ancho relativo en la fila
-        const cardDefs = {
-          live: {
-            weight: 1.3,
-            node: (
-              <div className="stat-card stat-card-sm h-full cursor-pointer" onClick={() => setActiveView?.('consumos-live')}>
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="p-2 rounded-lg bg-gradient-to-br from-[var(--accent-1)] to-[var(--accent-2)] bg-opacity-20">
-                    <Zap className="w-4 h-4 text-white" />
-                  </div>
-                  <p className="text-[var(--text-muted)] text-xs leading-tight">Últimos consumos</p>
-                </div>
-                <p className="text-xl font-bold text-[var(--text-primary)] leading-tight whitespace-nowrap">{formatCurrency(liveTotalPesos)}</p>
-                {liveTotalUSD > 0 && (
-                  <p className="text-sm font-semibold text-emerald-500 mt-0.5 whitespace-nowrap">+ {formatMontoDolares(liveTotalUSD)}</p>
-                )}
-              </div>
-            ),
-          },
-          fijos: {
-            weight: 1.1,
-            node: simpleCard(
-              Repeat,
-              'Gastos Fijos',
-              formatCurrency(totalFijos),
-              () => onFiltrarMovimientos?.('fijo'),
-              gastosFijosDetalle?.items?.length
-                ? `${gastosFijosDetalle.items.length} gastos fijos${
-                    gastosFijosDetalle.usd > 0
-                      ? ` · USD ${gastosFijosDetalle.usd.toLocaleString('es-AR', { maximumFractionDigits: 2 })}/mes`
-                      : ''}`
-                : 'sin gastos fijos',
-              gastosFijosDetalle?.items?.length
-                ? gastosFijosDetalle.items
-                    .map(i => `${i.nombre} — ${i.moneda === 'USD' ? 'USD ' : '$'}${
-                      i.montoTipico.toLocaleString('es-AR', { maximumFractionDigits: 2 })} (${i.meses} meses, ${i.tarjeta})`)
-                    .join('\n')
-                : null
-            ),
-          },
-          cuotasActivas: {
-            weight: 0.7,
-            node: simpleCard(Calendar, 'Cuotas Activas', dashboard.cuotas_activas || 0, () => setActiveView?.('cuotas')),
-          },
-          cuotasProx: {
-            weight: 1.1,
-            node: simpleCard(DollarSign, 'Cuotas Próximo Mes', formatCurrency(proyeccionCuotas[0]?.total || 0)),
-          },
-          totalPagar: {
-            weight: 1.5,
-            node: (
-              <div className="stat-card stat-card-sm h-full">
-                <div className="flex items-start justify-between mb-2 gap-2">
-                  <div className="flex items-center gap-2">
-                    <div className="p-2 rounded-lg bg-gradient-to-br from-[var(--accent-1)] to-[var(--accent-2)] bg-opacity-20">
-                      <CreditCard className="w-4 h-4 text-white" />
-                    </div>
-                    <p className="text-[var(--text-muted)] text-xs leading-tight">
-                      Total a pagar{mesRefLabel ? ` · ${mesRefLabel}` : ''}
-                    </p>
-                  </div>
-                  {totalUltimoResumenUSD > 0 && cotizacion?.venta && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setResumenCombinado(v => !v); }}
-                      title={resumenCombinado ? 'Ver separado' : 'Ver total en ARS'}
-                      className={`text-[10px] px-1.5 py-0.5 rounded-md border transition-colors font-medium shrink-0 ${
-                        resumenCombinado
-                          ? 'bg-[var(--accent-1)] text-white border-[var(--accent-1)]'
-                          : 'text-[var(--text-muted)] border-[var(--glass-border)] hover:border-[var(--accent-1)] hover:text-[var(--accent-1)]'
-                      }`}
-                    >
-                      {resumenCombinado ? '= ARS' : '+ USD→ARS'}
-                    </button>
-                  )}
-                </div>
-                {resumenCombinado && cotizacion?.venta ? (
-                  <>
-                    <p className="text-xl font-bold text-[var(--text-primary)] leading-tight whitespace-nowrap">
-                      {formatCurrency(totalUltimoResumenARS + totalUltimoResumenUSD * cotizacion.venta)}
-                    </p>
-                    <p className="text-[10px] text-[var(--text-muted)] mt-0.5">
-                      {formatCurrency(totalUltimoResumenARS)} + {formatMontoDolares(totalUltimoResumenUSD)} × {formatMonto(cotizacion.venta)}
-                    </p>
-                  </>
-                ) : (
-                  <>
-                    <p className="text-xl font-bold text-[var(--text-primary)] leading-tight whitespace-nowrap">
-                      {formatCurrency(totalUltimoResumenARS)}
-                    </p>
-                    {totalUltimoResumenUSD > 0 && (
-                      <p className="text-sm font-semibold text-emerald-500 mt-0.5 whitespace-nowrap">
-                        + {formatMontoDolares(totalUltimoResumenUSD)}
-                      </p>
-                    )}
-                  </>
-                )}
-              </div>
-            ),
-          },
-        };
-
-        const orderedIds = cardOrder.filter((id) => cardDefs[id]);
-
-        return (
-          <div className="flex flex-wrap lg:flex-nowrap gap-3 items-stretch">
-            {orderedIds.map((id) => (
-              <div
-                key={id}
-                draggable
-                onDragStart={() => setDragCardId(id)}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={() => { moveCard(dragCardId, id); setDragCardId(null); }}
-                onDragEnd={() => setDragCardId(null)}
-                style={{ flexGrow: cardDefs[id].weight, flexBasis: 0 }}
-                className={`relative group min-w-[150px] transition-opacity ${dragCardId === id ? 'opacity-40' : ''}`}
-              >
-                <span
-                  className="absolute top-1.5 right-1.5 z-10 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing text-[var(--text-muted)]"
-                  title="Arrastrá para reordenar"
-                >
-                  <GripVertical className="w-3.5 h-3.5" />
-                </span>
-                {cardDefs[id].node}
-              </div>
-            ))}
-          </div>
-        );
-      })()}
-
-      {/* Últimos consumos: una Card por tarjeta, o SuperCard si comparten cierre y vto */}
-      <LiveCardsSection cards={liveCards} onVerDetalle={() => setActiveView?.('consumos-live')} onAsignarBanco={onAsignarBanco} bancos={BANCOS_COMUNES} />
-
-      {/* Cards Grid */}
-      <div id="mis-tarjetas" className="flex items-center justify-between mb-2" style={{ scrollMarginTop: 16 }}>
-        <h3 className="text-lg font-semibold text-[var(--text-primary)]">Mis Tarjetas</h3>
-        <button
-          onClick={() => setShowResumenes(true)}
-          className="text-sm text-[var(--text-muted)] hover:text-[var(--accent-1)] transition-colors flex items-center gap-1"
-        >
-          <FileText className="w-4 h-4" />
-          {dashboard.total_resumenes || 0} resúmenes cargados
-        </button>
-      </div>
-      <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-        {tarjetas.map((tarjeta, idx) => (
-          <div 
-            key={tarjeta.id}
-            className="opacity-0 animate-fade-in-up"
-            style={{ animationDelay: `${500 + idx * 100}ms`, animationFillMode: 'forwards' }}
-          >
-            <CreditCardVisual
-              tarjeta={tarjeta}
-              stats={tarjeta}
-              nombrePersonalizado={nombresTarjetas[tarjeta.id]}
-              onEditarNombre={onGuardarNombre}
-              cotizacion={cotizacion}
-            />
-          </div>
-        ))}
-      </div>
-      
-      {/* Charts Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Evolution Chart - Una línea por tarjeta */}
-        <div className="glass-card p-6 opacity-0 animate-fade-in-up"
-             style={{ animationDelay: '700ms', animationFillMode: 'forwards' }}>
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h3 className="text-lg font-semibold text-[var(--text-primary)]">Evolución Mensual</h3>
-              <p className="text-sm text-[var(--text-muted)]">Por tarjeta</p>
-            </div>
-            <BarChart3 className="w-5 h-5 text-[var(--accent-1)]" />
-          </div>
-
-          {(() => {
-            const evolucionData = proyecciones?.evolucion_mensual || proyecciones?.evolucion || [];
-            // Obtener TODAS las tarjetas de TODOS los meses, excluyendo 'mes', 'anio' y 'total'
-            const allKeys = new Set();
-            evolucionData.forEach(item => {
-              Object.keys(item).forEach(k => {
-                if (k !== 'mes' && k !== 'anio' && k !== 'total') allKeys.add(k);
-              });
-            });
-            const tarjetasEnGrafico = Array.from(allKeys);
-
-            return (
-              <ResponsiveContainer width="100%" height={250}>
-                <LineChart data={evolucionData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" />
-                  <XAxis
-                    dataKey="mes"
-                    tick={{ fill: 'var(--text-muted)', fontSize: 11 }}
-                    axisLine={{ stroke: 'var(--glass-border)' }}
-                  />
-                  <YAxis
-                    tick={{ fill: 'var(--text-muted)', fontSize: 11 }}
-                    axisLine={{ stroke: 'var(--glass-border)' }}
-                    tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      background: 'var(--glass-bg)',
-                      border: '1px solid var(--glass-border)',
-                      borderRadius: '12px'
-                    }}
-                    formatter={(v, name) => [formatMonto(v || 0), name]}
-                  />
-                  <Legend
-                    verticalAlign="bottom"
-                    wrapperStyle={{ fontSize: '11px' }}
-                  />
-                  {tarjetasEnGrafico.map((tarjeta) => {
-                    const color = getTarjetaColor(tarjeta);
-                    return (
-                      <Line
-                        key={tarjeta}
-                        type="monotone"
-                        dataKey={tarjeta}
-                        name={tarjeta}
-                        stroke={color}
-                        strokeWidth={2}
-                        dot={{ fill: color, r: 3 }}
-                        activeDot={{ r: 5 }}
-                      />
-                    );
-                  })}
-                </LineChart>
-              </ResponsiveContainer>
-            );
-          })()}
-        </div>
-        
-        {/* By Card Chart */}
-        <div className="glass-card p-6 opacity-0 animate-fade-in-up"
-             style={{ animationDelay: '800ms', animationFillMode: 'forwards' }}>
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h3 className="text-lg font-semibold text-[var(--text-primary)]">Por Tarjeta</h3>
-              <p className="text-sm text-[var(--text-muted)]">Distribución de gastos</p>
-            </div>
-            <PieChart className="w-5 h-5 text-[var(--accent-2)]" />
-          </div>
-          
-          {(() => {
-            const pieData = tarjetas.map((t) => ({
-              name: t.nombre,
-              value: t.ultimo_resumen?.total_a_pagar ||
-                     t.ultimo_resumen?.total_consumos_pesos ||
-                     t.estadisticas?.monto_cuotas_pendientes || 0
-            })).filter(d => d.value > 0);
-
-            return (
-              <ResponsiveContainer width="100%" height={250}>
-                <RechartsPie>
-                  <Pie
-                    data={pieData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={90}
-                    paddingAngle={5}
-                    dataKey="value"
-                  >
-                    {pieData.map((entry) => (
-                      <Cell key={entry.name} fill={getTarjetaColor(entry.name)} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{
-                      background: 'var(--glass-bg)',
-                      border: '1px solid var(--glass-border)',
-                      borderRadius: '12px'
-                    }}
-                    formatter={(v) => [formatMonto(v), '']}
-                  />
-                  <Legend
-                    verticalAlign="bottom"
-                    formatter={(value) => <span style={{ color: 'var(--text-secondary)' }}>{value}</span>}
-                  />
-                </RechartsPie>
-              </ResponsiveContainer>
-            );
-          })()}
-        </div>
-      </div>
-
-      {/* Proyección de Cuotas - Gastos Comprometidos */}
-      {proyeccionCuotas && proyeccionCuotas.length > 0 && proyeccionCuotas.some(m => m.total > 0) && (
-        <div className="glass-card p-6 opacity-0 animate-fade-in-up"
-             style={{ animationDelay: '900ms', animationFillMode: 'forwards' }}>
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h3 className="text-lg font-semibold text-[var(--text-primary)]">Proyección de Cuotas</h3>
-              <p className="text-sm text-[var(--text-muted)]">Gastos comprometidos próximos 6 meses</p>
-            </div>
-            <Calendar className="w-5 h-5 text-[var(--accent-1)]" />
-          </div>
-
-          {/* Resumen rápido */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
-            <div className="p-4 rounded-xl bg-gradient-to-br from-[var(--accent-1)]/20 to-[var(--accent-2)]/20 border border-[var(--accent-1)]/30">
-              <p className="text-xs text-[var(--text-muted)] mb-1">Este mes</p>
-              <p className="text-xl font-bold text-[var(--text-primary)]">
-                {formatCurrency(proyeccionCuotas[0]?.total || 0)}
-              </p>
-              <p className="text-xs text-[var(--accent-1)]">{proyeccionCuotas[0]?.cantidad_cuotas || 0} consumos en cuotas pendientes</p>
-            </div>
-            <div className="p-4 rounded-xl bg-[var(--glass-bg)]">
-              <p className="text-xs text-[var(--text-muted)] mb-1">Próximo mes</p>
-              <p className="text-xl font-bold text-[var(--text-primary)]">
-                {formatCurrency(proyeccionCuotas[1]?.total || 0)}
-              </p>
-              <p className="text-xs text-[var(--text-muted)]">{proyeccionCuotas[1]?.cantidad_cuotas || 0} consumos en cuotas pendientes</p>
-            </div>
-            <div className="p-4 rounded-xl bg-[var(--glass-bg)]">
-              <p className="text-xs text-[var(--text-muted)] mb-1">En 3 meses</p>
-              <p className="text-xl font-bold text-[var(--text-primary)]">
-                {formatCurrency(proyeccionCuotas[2]?.total || 0)}
-              </p>
-              <p className="text-xs text-[var(--text-muted)]">{proyeccionCuotas[2]?.cantidad_cuotas || 0} consumos en cuotas pendientes</p>
-            </div>
-            <div className="p-4 rounded-xl bg-[var(--glass-bg)]">
-              <p className="text-xs text-[var(--text-muted)] mb-1">Total 6 meses</p>
-              <p className="text-xl font-bold text-[var(--text-primary)]">
-                {formatCurrency(proyeccionCuotas.reduce((s, m) => s + (m.total || 0), 0))}
-              </p>
-              <p className="text-xs text-[var(--text-muted)]">comprometidos</p>
-            </div>
-          </div>
-
-          {/* Gráfico de barras — click para ver detalle */}
-          <p className="text-xs text-[var(--text-muted)] mb-3 text-center">Hacé click en una barra para ver el detalle</p>
-          <ResponsiveContainer width="100%" height={280}>
-            <BarChart
-              data={proyeccionCuotas.map((m, idx) => ({
-                mes: m.mes_nombre?.split(' ')[0] || m.mes,
-                total: m.total,
-                cantidad: m.cantidad_cuotas,
-                idx
-              }))}
-              barCategoryGap="20%"
-              onClick={(data) => {
-                if (data?.activeTooltipIndex !== undefined) {
-                  setMesDetalleIdx(prev => prev === data.activeTooltipIndex ? null : data.activeTooltipIndex);
-                }
-              }}
-              style={{ cursor: 'pointer' }}
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" />
-              <XAxis
-                dataKey="mes"
-                tick={{ fill: 'var(--text-muted)', fontSize: 12 }}
-                axisLine={{ stroke: 'var(--glass-border)' }}
-              />
-              <YAxis
-                tick={{ fill: 'var(--text-muted)', fontSize: 12 }}
-                axisLine={{ stroke: 'var(--glass-border)' }}
-                tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`}
-              />
-              <Tooltip
-                contentStyle={{
-                  background: 'var(--glass-bg)',
-                  border: '1px solid var(--glass-border)',
-                  borderRadius: '12px',
-                  backdropFilter: 'blur(10px)'
-                }}
-                formatter={(v, name, props) => [
-                  `${formatMonto(v || 0)} · ${props?.payload?.cantidad || 0} consumos`,
-                  'Total cuotas'
-                ]}
-              />
-              <Bar
-                dataKey="total"
-                name="Cuotas"
-                radius={[4, 4, 0, 0]}
-              >
-                {proyeccionCuotas.map((_, idx) => (
-                  <Cell
-                    key={idx}
-                    fill={mesDetalleIdx === idx ? 'var(--accent-1)' : 'url(#colorGradient)'}
-                    opacity={mesDetalleIdx !== null && mesDetalleIdx !== idx ? 0.4 : 1}
-                  />
-                ))}
-              </Bar>
-              <defs>
-                <linearGradient id="colorGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="var(--accent-1)" />
-                  <stop offset="100%" stopColor="var(--accent-2)" />
-                </linearGradient>
-              </defs>
-            </BarChart>
-          </ResponsiveContainer>
-
-          {/* Panel de detalle por mes */}
-          {mesDetalleIdx !== null && (() => {
-            const i = mesDetalleIdx;
-            const mesInfo = proyeccionCuotas[i];
-            const cuotasDelMes = mesInfo?.detalles || [];
-            return (
-              <div className="mt-4 border-t border-[var(--glass-border)] pt-4">
-                <div className="flex items-center justify-between mb-3">
-                  <p className="text-sm font-semibold text-[var(--text-primary)]">
-                    {mesInfo?.mes_nombre || `Mes ${i + 1}`} — {cuotasDelMes.length} consumos en cuotas pendientes
-                  </p>
-                  <button
-                    onClick={() => setMesDetalleIdx(null)}
-                    className="p-1 rounded-lg hover:bg-[var(--glass-bg)] text-[var(--text-muted)] transition-colors"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-                {cuotasDelMes.length === 0 ? (
-                  <p className="text-sm text-[var(--text-muted)] text-center py-4">Sin cuotas comprometidas este mes</p>
-                ) : (
-                  <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-                    {cuotasDelMes.map((c) => {
-                      const cuotaNumero = c.cuota_numero;
-                      const color = getTarjetaColor(c.tarjeta);
-                      return (
-                        <div key={c.id} className="flex items-center justify-between p-3 rounded-xl bg-[var(--glass-bg)]">
-                          <div className="flex items-center gap-3 min-w-0">
-                            <span
-                              className="shrink-0 px-2 py-0.5 rounded-full text-xs font-medium text-white"
-                              style={{ backgroundColor: color }}
-                            >
-                              {c.tarjeta}
-                            </span>
-                            <p className="text-sm text-[var(--text-primary)] truncate">{c.descripcion}</p>
-                          </div>
-                          <div className="flex items-center gap-3 shrink-0 ml-3">
-                            <span className="text-xs text-[var(--text-muted)]">
-                              cuota {cuotaNumero}/{c.total_cuotas}
-                            </span>
-                            <span className="text-sm font-semibold text-[var(--text-primary)]">
-                              {formatMonto(c.monto_cuota || 0)}
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })()}
-        </div>
-      )}
-    </div>
-  );
-};
+// NovedadesModal y GuiaView → views/Guia.jsx (fase 6).
 
 // MovimientosView se mudó a views/MovimientosView.jsx (fase 4).
 
 // CuotasView se mudó a views/CuotasView.jsx (fase 5).
-
-// Reintegros View - Devoluciones y créditos (sin uso desde la fase 4; se borra en la fase 6)
-const ReintegrosView = ({ reintegros = [], periodoRecienteLabel = null, formatCurrency, searchQuery = '' }) => {
-  // Por defecto solo los del último resumen de cada tarjeta: el histórico completo
-  // mezclaba reintegros de hace un año con los que hay que revisar ahora.
-  const [verHistorico, setVerHistorico] = useState(false);
-
-  const historicos = reintegros.filter(r => !r.es_reciente);
-  const visibles = verHistorico ? reintegros : reintegros.filter(r => r.es_reciente);
-
-  // Filtrar por búsqueda
-  const filtered = visibles.filter(r => {
-    if (!searchQuery) return true;
-    const query = searchQuery.toLowerCase();
-    return r.referencia_limpia?.toLowerCase().includes(query) ||
-           r.referencia_original?.toLowerCase().includes(query) ||
-           r.tarjeta?.toLowerCase().includes(query);
-  });
-
-  // Calcular total de reintegros
-  const totalPesos = filtered.reduce((sum, r) => sum + Math.abs(r.monto_pesos || 0), 0);
-  const totalDolares = filtered.reduce((sum, r) => sum + Math.abs(r.monto_dolares || 0), 0);
-
-  // Agrupar por tarjeta
-  const porTarjeta = filtered.reduce((acc, r) => {
-    const tarjeta = r.tarjeta || 'Sin tarjeta';
-    if (!acc[tarjeta]) acc[tarjeta] = { pesos: 0, dolares: 0, count: 0 };
-    acc[tarjeta].pesos += Math.abs(r.monto_pesos || 0);
-    acc[tarjeta].dolares += Math.abs(r.monto_dolares || 0);
-    acc[tarjeta].count++;
-    return acc;
-  }, {});
-
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3 px-1">
-        <p className="text-sm text-[var(--text-muted)]">
-          {verHistorico
-            ? <>Histórico completo · <span className="text-[var(--text-primary)] font-semibold">{reintegros.length}</span> reintegros</>
-            : <><span className="text-[var(--text-primary)] font-semibold">{visibles.length}</span> en el último resumen{periodoRecienteLabel ? ` · ${periodoRecienteLabel}` : ''}</>}
-        </p>
-        {historicos.length > 0 && (
-          <button
-            onClick={() => setVerHistorico(v => !v)}
-            className="text-xs px-3 py-1.5 rounded-lg border border-[var(--glass-border)]
-                       text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-          >
-            {verHistorico ? 'Ver solo el último resumen' : `Ver histórico (${historicos.length} anteriores)`}
-          </button>
-        )}
-      </div>
-
-      {/* Resumen de reintegros */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="glass-card p-5">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="p-2 rounded-lg bg-emerald-500/20">
-              <RefreshCcw className="w-5 h-5 text-emerald-500" />
-            </div>
-            <span className="text-sm text-[var(--text-muted)]">Total Reintegros</span>
-          </div>
-          <p className="text-2xl font-bold text-emerald-500">{filtered.length}</p>
-        </div>
-
-        <div className="glass-card p-5">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="p-2 rounded-lg bg-emerald-500/20">
-              <DollarSign className="w-5 h-5 text-emerald-500" />
-            </div>
-            <span className="text-sm text-[var(--text-muted)]">Total en Pesos</span>
-          </div>
-          <p className="text-2xl font-bold text-emerald-500">{formatCurrency(totalPesos)}</p>
-        </div>
-
-        {totalDolares > 0 && (
-          <div className="glass-card p-5">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="p-2 rounded-lg bg-emerald-500/20">
-                <DollarSign className="w-5 h-5 text-emerald-500" />
-              </div>
-              <span className="text-sm text-[var(--text-muted)]">Total en USD</span>
-            </div>
-            <p className="text-2xl font-bold text-emerald-500">{formatCurrency(totalDolares, 'USD')}</p>
-          </div>
-        )}
-      </div>
-
-      {/* Por tarjeta */}
-      {Object.keys(porTarjeta).length > 1 && (
-        <div className="glass-card p-6">
-          <h3 className="font-semibold text-[var(--text-primary)] mb-4">Por Tarjeta</h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {Object.entries(porTarjeta).map(([tarjeta, data]) => (
-              <div key={tarjeta} className="p-3 rounded-lg bg-[var(--glass-bg)]">
-                <p className="text-sm font-medium text-[var(--text-primary)] truncate">{tarjeta}</p>
-                <p className="text-lg font-bold text-emerald-500">{formatCurrency(data.pesos)}</p>
-                <p className="text-xs text-[var(--text-muted)]">{data.count} reintegros</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Lista de reintegros */}
-      <div className="glass-card overflow-hidden">
-        <div className="p-6 border-b border-[var(--glass-border)]">
-          <h3 className="text-lg font-semibold text-[var(--text-primary)]">
-            Detalle de Reintegros ({filtered.length})
-          </h3>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="bg-[var(--glass-bg)]">
-                <th className="text-left p-4 text-sm font-medium text-[var(--text-muted)]">Fecha</th>
-                <th className="text-left p-4 text-sm font-medium text-[var(--text-muted)]">Tarjeta</th>
-                <th className="text-left p-4 text-sm font-medium text-[var(--text-muted)]">Descripción</th>
-                <th className="text-right p-4 text-sm font-medium text-[var(--text-muted)]">Monto</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((mov, idx) => (
-                <tr
-                  key={mov.id || idx}
-                  className="border-b border-[var(--glass-border)] hover:bg-[var(--glass-bg)]
-                             transition-colors opacity-0 animate-fade-in-up"
-                  style={{ animationDelay: `${Math.min(idx, 20) * 30}ms`, animationFillMode: 'forwards' }}
-                >
-                  <td className="p-4 text-sm text-[var(--text-secondary)]">
-                    {parseFechaLocal(mov.fecha_compra)?.toLocaleDateString('es-AR') || '—'}
-                  </td>
-                  <td className="p-4">
-                    <span className="px-2 py-1 rounded-lg text-xs font-medium bg-[var(--glass-bg)]
-                                     text-[var(--text-secondary)]">
-                      {mov.tarjeta}
-                    </span>
-                  </td>
-                  <td className="p-4 text-sm text-[var(--text-primary)] font-medium">
-                    {mov.referencia_limpia || mov.referencia_original}
-                  </td>
-                  <td className="p-4 text-right">
-                    {mov.monto_pesos !== 0 && (
-                      <span className="text-sm font-semibold text-emerald-500">
-                        +{formatCurrency(Math.abs(mov.monto_pesos))}
-                      </span>
-                    )}
-                    {mov.monto_dolares !== 0 && (
-                      <span className="block text-sm font-medium text-emerald-400">
-                        +{formatCurrency(Math.abs(mov.monto_dolares), 'USD')}
-                      </span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {filtered.length === 0 && (
-          <div className="text-center py-12 text-[var(--text-muted)]">
-            <RefreshCcw className="w-12 h-12 mx-auto mb-4 opacity-50" />
-            <p>{searchQuery ? 'No se encontraron reintegros' : 'No hay reintegros en el último resumen'}</p>
-            {!searchQuery && historicos.length > 0 && !verHistorico && (
-              <p className="text-sm mt-2">Hay {historicos.length} en resúmenes anteriores.</p>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
 
 // Reglas View con funcionalidad de pendientes
 const ReglasView = ({ reglas, pendientes, onRefresh, searchQuery = '' }) => {
@@ -3221,8 +1589,8 @@ const ReglasView = ({ reglas, pendientes, onRefresh, searchQuery = '' }) => {
       {filteredPendientes.length > 0 && (
         <div className="glass-card p-6">
           <div className="flex items-center gap-2 mb-4">
-            <AlertCircle className="w-5 h-5 text-amber-500" />
-            <h3 className="font-semibold text-[var(--text-primary)]">
+            <AlertCircle className="w-5 h-5 text-[var(--warn)]" />
+            <h3 className="font-semibold text-[var(--label)]">
               Nombres pendientes de resolver ({filteredPendientes.length})
             </h3>
           </div>
@@ -3231,20 +1599,20 @@ const ReglasView = ({ reglas, pendientes, onRefresh, searchQuery = '' }) => {
             {filteredPendientes.map((p, idx) => (
               <div
                 key={p.id}
-                className="p-4 rounded-xl bg-[var(--glass-bg)] opacity-0 animate-fade-in-up"
+                className="p-4 rounded-xl bg-[var(--fill2)] opacity-0 animate-fade-in-up"
                 style={{ animationDelay: `${idx * 50}ms`, animationFillMode: 'forwards' }}
               >
                 <div className="flex items-center justify-between">
                   <div className="flex-1">
-                    <p className="font-medium text-[var(--text-primary)]">{p.referencia_original}</p>
+                    <p className="font-medium text-[var(--label)]">{p.referencia_original}</p>
                     {p.sugerencias?.length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-1">
                         {p.sugerencias.map((sug, i) => (
                           <button
                             key={i}
                             onClick={() => { setEditingId(p.id); setNombreLimpio(sug); }}
-                            className="text-xs px-2 py-0.5 rounded-full bg-[var(--accent-1)]/20
-                                       text-[var(--accent-1)] hover:bg-[var(--accent-1)]/30 transition-all"
+                            className="text-xs px-2 py-0.5 rounded-full bg-[var(--r2)]/20
+                                       text-[var(--r2)] hover:bg-[var(--r2)]/30 transition-all"
                           >
                             {sug}
                           </button>
@@ -3256,7 +1624,7 @@ const ReglasView = ({ reglas, pendientes, onRefresh, searchQuery = '' }) => {
                     <div className="flex gap-2">
                       <button
                         onClick={() => startEditing(p)}
-                        className="p-2 rounded-lg bg-emerald-500/20 text-emerald-500 hover:bg-emerald-500/30 transition-all"
+                        className="p-2 rounded-lg bg-emerald-500/20 text-[var(--ok)] hover:bg-emerald-500/30 transition-all"
                         title="Resolver"
                       >
                         <CheckCircle className="w-4 h-4" />
@@ -3264,7 +1632,7 @@ const ReglasView = ({ reglas, pendientes, onRefresh, searchQuery = '' }) => {
                       <button
                         onClick={() => handleIgnorar(p.id)}
                         disabled={loading}
-                        className="p-2 rounded-lg bg-red-500/20 text-red-500 hover:bg-red-500/30 transition-all
+                        className="p-2 rounded-lg bg-red-500/20 text-[var(--danger)] hover:bg-red-500/30 transition-all
                                    disabled:opacity-50"
                         title="Ignorar"
                       >
@@ -3282,22 +1650,22 @@ const ReglasView = ({ reglas, pendientes, onRefresh, searchQuery = '' }) => {
                       value={nombreLimpio}
                       onChange={(e) => setNombreLimpio(e.target.value)}
                       placeholder="Nombre limpio..."
-                      className="flex-1 px-3 py-2 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)]
-                                 text-[var(--text-primary)] text-sm focus:outline-none focus:border-[var(--accent-1)]"
+                      className="flex-1 px-3 py-2 rounded-lg bg-[var(--fill2)] border border-[var(--sep)]
+                                 text-[var(--label)] text-sm focus:outline-none focus:border-[var(--r2)]"
                       autoFocus
                       onKeyDown={(e) => e.key === 'Enter' && handleResolver(p.id)}
                     />
                     <button
                       onClick={() => handleResolver(p.id)}
                       disabled={loading || !nombreLimpio.trim()}
-                      className="px-4 py-2 rounded-lg bg-emerald-500 text-white font-medium
-                                 hover:bg-emerald-600 transition-all disabled:opacity-50"
+                      className="px-4 py-2 rounded-lg bg-[var(--inv)] text-[var(--inv-text)] font-medium
+                                 hover:opacity-90 transition-all disabled:opacity-50"
                     >
                       Guardar
                     </button>
                     <button
                       onClick={() => { setEditingId(null); setNombreLimpio(''); }}
-                      className="px-3 py-2 rounded-lg bg-[var(--glass-bg)] text-[var(--text-muted)]
+                      className="px-3 py-2 rounded-lg bg-[var(--fill2)] text-[var(--label2)]
                                  hover:bg-opacity-80 transition-all"
                     >
                       <X className="w-4 h-4" />
@@ -3312,10 +1680,10 @@ const ReglasView = ({ reglas, pendientes, onRefresh, searchQuery = '' }) => {
       
       {/* Reglas */}
       <div className="glass-card p-6">
-        <h3 className="font-semibold text-[var(--text-primary)] mb-4">
+        <h3 className="font-semibold text-[var(--label)] mb-4">
           Reglas de limpieza ({filteredReglas.length})
           {reglasUnicas.length < reglas.length && (
-            <span className="text-xs text-[var(--text-muted)] ml-2">
+            <span className="text-xs text-[var(--label2)] ml-2">
               ({reglas.length - reglasUnicas.length} duplicadas eliminadas)
             </span>
           )}
@@ -3325,18 +1693,18 @@ const ReglasView = ({ reglas, pendientes, onRefresh, searchQuery = '' }) => {
           {filteredReglas.map((regla, idx) => (
             <div
               key={regla.id || idx}
-              className="flex items-center justify-between p-4 rounded-xl bg-[var(--glass-bg)]
+              className="flex items-center justify-between p-4 rounded-xl bg-[var(--fill2)]
                          opacity-0 animate-fade-in-up"
               style={{ animationDelay: `${idx * 50}ms`, animationFillMode: 'forwards' }}
             >
               <div className="flex items-center gap-4">
-                <Tag className="w-4 h-4 text-[var(--accent-1)]" />
+                <Tag className="w-4 h-4 text-[var(--r2)]" />
                 <div>
-                  <code className="text-sm text-[var(--text-muted)]">{regla.patron}</code>
-                  <p className="font-medium text-[var(--text-primary)]">→ {regla.nombre_limpio}</p>
+                  <code className="text-sm text-[var(--label2)]">{regla.patron}</code>
+                  <p className="font-medium text-[var(--label)]">→ {regla.nombre_limpio}</p>
                 </div>
               </div>
-              <span className="text-sm text-[var(--text-muted)]">
+              <span className="text-sm text-[var(--label2)]">
                 {regla.veces_usado || 0} usos
               </span>
             </div>
@@ -3516,7 +1884,7 @@ const ImportarView = ({ onSuccess, preguntasFijos = [], onResponderPregunta }) =
     <div className="max-w-2xl mx-auto">
       <div
         className={`glass-card p-12 text-center border-2 border-dashed transition-all cursor-pointer
-                    ${dragOver ? 'border-[var(--accent-1)] bg-[var(--accent-1)]/10' : 'border-[var(--glass-border)]'}`}
+                    ${dragOver ? 'border-[var(--r2)] bg-[var(--r2)]/10' : 'border-[var(--sep)]'}`}
         onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
         onDrop={(e) => { e.preventDefault(); setDragOver(false); handleUpload(e.dataTransfer.files); }}
@@ -3532,19 +1900,19 @@ const ImportarView = ({ onSuccess, preguntasFijos = [], onResponderPregunta }) =
         />
         {uploading ? (
           <div className="animate-pulse">
-            <Sparkles className="w-16 h-16 mx-auto mb-4 text-[var(--accent-1)]" />
-            <p className="text-lg font-medium text-[var(--text-primary)]">Procesando...</p>
+            <Sparkles className="w-16 h-16 mx-auto mb-4 text-[var(--r2)]" />
+            <p className="text-lg font-medium text-[var(--label)]">Procesando...</p>
           </div>
         ) : (
           <>
-            <Upload className="w-16 h-16 mx-auto mb-4 text-[var(--accent-1)] opacity-70" />
-            <p className="text-lg font-medium text-[var(--text-primary)] mb-2">
+            <Upload className="w-16 h-16 mx-auto mb-4 text-[var(--r2)] opacity-70" />
+            <p className="text-lg font-medium text-[var(--label)] mb-2">
               Arrastrá resúmenes o últimos consumos
             </p>
-            <p className="text-sm text-[var(--text-muted)]">
+            <p className="text-sm text-[var(--label2)]">
               Resúmenes: PDF o capturas · Últimos consumos: Excel (.xlsx, .xls) o CSV
             </p>
-            <p className="text-xs text-[var(--text-muted)] mt-1">La app reconoce cuál es cuál. Podés subir varios juntos.</p>
+            <p className="text-xs text-[var(--label2)] mt-1">La app reconoce cuál es cuál. Podés subir varios juntos.</p>
           </>
         )}
       </div>
@@ -3559,20 +1927,20 @@ const ImportarView = ({ onSuccess, preguntasFijos = [], onResponderPregunta }) =
                          ${!r.exito ? 'border-l-4 border-l-red-500' : r.pendiente ? 'border-l-4 border-l-amber-400' : 'border-l-4 border-l-emerald-500'}`}
               style={{ animationDelay: `${idx * 100}ms`, animationFillMode: 'forwards' }}
             >
-              {!r.exito ? <XCircle className="w-5 h-5 text-red-500 mt-0.5" />
-                : r.pendiente ? <AlertCircle className="w-5 h-5 text-amber-400 mt-0.5" />
-                : <CheckCircle className="w-5 h-5 text-emerald-500 mt-0.5" />}
+              {!r.exito ? <XCircle className="w-5 h-5 text-[var(--danger)] mt-0.5" />
+                : r.pendiente ? <AlertCircle className="w-5 h-5 text-[var(--warn)] mt-0.5" />
+                : <CheckCircle className="w-5 h-5 text-[var(--ok)] mt-0.5" />}
               <div className="flex-1 min-w-0">
-                <p className="font-medium text-[var(--text-primary)] truncate">{r.archivo}</p>
-                <p className="text-[10px] uppercase tracking-widest text-[var(--text-muted)] mt-0.5">
+                <p className="font-medium text-[var(--label)] truncate">{r.archivo}</p>
+                <p className="text-[10px] uppercase tracking-widest text-[var(--label2)] mt-0.5">
                   {r.tipo === 'consumos' ? 'Últimos consumos' : 'Resumen'}
                 </p>
-                {r.error && <p className="text-sm text-red-400">{r.error}</p>}
+                {r.error && <p className="text-sm text-[var(--danger)]">{r.error}</p>}
                 {r.movimientos && (
-                  <p className="text-sm text-[var(--text-muted)]">{r.movimientos} movimientos importados</p>
+                  <p className="text-sm text-[var(--label2)]">{r.movimientos} movimientos importados</p>
                 )}
-                {r.detalle && <p className="text-sm text-[var(--text-secondary)] whitespace-pre-line">{r.detalle}</p>}
-                {r.warnings?.map((w, i) => <p key={i} className="text-xs text-amber-500 mt-1">{w}</p>)}
+                {r.detalle && <p className="text-sm text-[var(--label2)] whitespace-pre-line">{r.detalle}</p>}
+                {r.warnings?.map((w, i) => <p key={i} className="text-xs text-[var(--warn)] mt-1">{w}</p>)}
               </div>
             </div>
           ))}
@@ -3600,18 +1968,6 @@ const ImportarView = ({ onSuccess, preguntasFijos = [], onResponderPregunta }) =
 
 // ==================== Últimos Consumos (pre-resumen) ====================
 
-const COLORES_CATEGORIA = {
-  Marketplace: '#8b5cf6',
-  Suscripciones: '#06b6d4',
-  Viajes: '#f59e0b',
-  Supermercado: '#10b981',
-  'Servicios/Impuestos': '#ef4444',
-  Hogar: '#ec4899',
-  Gastronomia: '#f97316',
-  Salud: '#14b8a6',
-  Otros: '#64748b',
-};
-
 // Modal de mapeo manual de columnas (fallback si el formato no se reconoce)
 const CSVColumnMapper = ({ headers, preview, onConfirm, onCancel }) => {
   const [map, setMap] = useState({ fecha: '', descripcion: '', monto: '', montoDolares: '', cuotas: '' });
@@ -3627,20 +1983,20 @@ const CSVColumnMapper = ({ headers, preview, onConfirm, onCancel }) => {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="glass-card p-6 max-w-lg w-full max-h-[80vh] overflow-y-auto">
-        <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-1">Mapear columnas</h3>
-        <p className="text-sm text-[var(--text-muted)] mb-4">
+        <h3 className="text-lg font-semibold text-[var(--label)] mb-1">Mapear columnas</h3>
+        <p className="text-sm text-[var(--label2)] mb-4">
           No reconocimos el formato. Indicá qué columna es cada campo.
         </p>
         <div className="space-y-3">
           {campos.map(({ key, label, req }) => (
             <div key={key} className="flex items-center gap-3">
-              <label className="w-40 text-sm text-[var(--text-secondary)]">
-                {label}{req && <span className="text-red-400"> *</span>}
+              <label className="w-40 text-sm text-[var(--label2)]">
+                {label}{req && <span className="text-[var(--danger)]"> *</span>}
               </label>
               <select
                 value={map[key]}
                 onChange={(e) => setMap({ ...map, [key]: e.target.value })}
-                className="flex-1 px-3 py-2 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--text-primary)] text-sm"
+                className="flex-1 px-3 py-2 rounded-lg bg-[var(--fill2)] border border-[var(--sep)] text-[var(--label)] text-sm"
               >
                 <option value="">— Ninguna —</option>
                 {headers.map((h, i) => (
@@ -3651,13 +2007,13 @@ const CSVColumnMapper = ({ headers, preview, onConfirm, onCancel }) => {
           ))}
         </div>
         <div className="flex justify-end gap-2 mt-6">
-          <button onClick={onCancel} className="px-4 py-2 rounded-lg bg-[var(--glass-bg)] text-[var(--text-muted)] text-sm">
+          <button onClick={onCancel} className="px-4 py-2 rounded-lg bg-[var(--fill2)] text-[var(--label2)] text-sm">
             Cancelar
           </button>
           <button
             onClick={() => onConfirm(map)}
             disabled={!valido}
-            className="px-4 py-2 rounded-lg bg-[var(--accent-1)] text-white font-medium text-sm disabled:opacity-50"
+            className="px-4 py-2 rounded-lg bg-[var(--inv)] text-[var(--inv-text)] font-medium text-sm disabled:opacity-50"
           >
             Confirmar
           </button>
@@ -3667,246 +2023,7 @@ const CSVColumnMapper = ({ headers, preview, onConfirm, onCancel }) => {
   );
 };
 
-const ConsumosLiveView = ({ consumosLive = [], tarjetas = [], resumenes = [], formatCurrency, onDeleteConsumos, onIrAImportar }) => {
-  // La importación se hace desde la bandeja única (Importar); esta vista es el detalle.
-  const [filtroTexto, setFiltroTexto] = useState('');
-  const [filtroTarjeta, setFiltroTarjeta] = useState('');
-  const [filtroCategoria, setFiltroCategoria] = useState('');
-  const [ocultarOficializados, setOcultarOficializados] = useState(true);
-
-  // Fecha de cierre del último resumen por tarjeta (para dedup por período)
-  const cierrePorTarjeta = {};
-  resumenes.forEach((r) => {
-    // Match por últimos 4 dígitos del nombre de la tarjeta
-    const ult4 = (r.tarjeta || '').match(/(\d{4})/)?.[1];
-    if (!ult4 || !r.fecha_cierre) return;
-    const fechaIso = normalizarFechaResumen(r.fecha_cierre);
-    if (!fechaIso) return;
-    if (!cierrePorTarjeta[ult4] || fechaIso > cierrePorTarjeta[ult4]) {
-      cierrePorTarjeta[ult4] = fechaIso;
-    }
-  });
-
-  function normalizarFechaResumen(f) {
-    if (!f) return '';
-    if (/^\d{4}-\d{2}-\d{2}$/.test(f)) return f;
-    const m = String(f).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-    if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
-    return '';
-  }
-
-  // Aplicar dedup por período + filtros
-  const visibles = consumosLive.filter((c) => {
-    if (ocultarOficializados) {
-      const cierre = cierrePorTarjeta[c.tarjeta_ult4];
-      if (cierre && c.fecha && c.fecha <= cierre) return false;
-    }
-    if (filtroTarjeta && c.tarjeta !== filtroTarjeta) return false;
-    if (filtroCategoria && c.categoria !== filtroCategoria) return false;
-    if (filtroTexto && !c.descripcion.toLowerCase().includes(filtroTexto.toLowerCase())) return false;
-    return true;
-  });
-
-  // Stats (sobre visibles, excluyendo pagos)
-  const consumosGasto = visibles.filter((c) => !c.es_pago);
-  const totalGastado = consumosGasto.reduce((s, c) => s + (c.monto_pesos > 0 ? c.monto_pesos : 0), 0);
-  const totalDevoluciones = consumosGasto.reduce((s, c) => s + (c.monto_pesos < 0 ? c.monto_pesos : 0), 0);
-  const totalDolares = consumosGasto.reduce((s, c) => s + (c.monto_dolares > 0 ? c.monto_dolares : 0), 0);
-  const cantConsumos = consumosGasto.filter((c) => c.monto_pesos > 0 || c.monto_dolares > 0).length;
-
-  // Comparación vs último resumen de las tarjetas presentes
-  const ult4Presentes = [...new Set(consumosGasto.map((c) => c.tarjeta_ult4))];
-  let totalResumenRef = 0;
-  ult4Presentes.forEach((ult4) => {
-    const resumenesTarjeta = resumenes
-      .filter((r) => (r.tarjeta || '').includes(ult4))
-      .sort((a, b) => (b.anio - a.anio) || (b.mes - a.mes));
-    if (resumenesTarjeta[0]) totalResumenRef += resumenesTarjeta[0].total_consumos_pesos || 0;
-  });
-  const pctVsResumen = totalResumenRef > 0 ? Math.round((totalGastado / totalResumenRef) * 100) : null;
-
-  // Gasto por día
-  const porDia = {};
-  consumosGasto.forEach((c) => {
-    if (!c.fecha || c.monto_pesos <= 0) return;
-    porDia[c.fecha] = (porDia[c.fecha] || 0) + c.monto_pesos;
-  });
-  const dataPorDia = Object.entries(porDia)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([fecha, total]) => ({ fecha: fecha.slice(5), total }));
-
-  // Gasto por categoría
-  const porCategoria = {};
-  consumosGasto.forEach((c) => {
-    if (c.monto_pesos <= 0) return;
-    porCategoria[c.categoria] = (porCategoria[c.categoria] || 0) + c.monto_pesos;
-  });
-  const dataCategoria = Object.entries(porCategoria)
-    .sort(([, a], [, b]) => b - a)
-    .map(([name, value]) => ({ name, value }));
-
-  const tarjetasUnicas = [...new Set(consumosLive.map((c) => c.tarjeta))];
-  const categoriasUnicas = [...new Set(consumosLive.filter((c) => !c.es_pago).map((c) => c.categoria))];
-
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h2 className="text-2xl font-bold text-[var(--text-primary)] flex items-center gap-2">
-            <Zap className="w-6 h-6 text-[var(--accent-1)]" />
-            Últimos consumos
-          </h2>
-          <p className="text-sm text-[var(--text-muted)]">Gasto en curso antes del cierre del resumen</p>
-        </div>
-        <div className="flex items-center gap-2">
-          {consumosLive.length > 0 && (
-            <button
-              onClick={() => { if (confirm('¿Limpiar todos los consumos importados?')) onDeleteConsumos?.(); }}
-              className="px-3 py-2 rounded-lg bg-[var(--glass-bg)] text-[var(--text-muted)] text-sm hover:text-red-400 transition-colors flex items-center gap-1.5"
-            >
-              <Trash2 className="w-4 h-4" /> Limpiar
-            </button>
-          )}
-          <button
-            onClick={() => onIrAImportar?.()}
-            className="px-4 py-2 rounded-lg bg-[var(--accent-1)] text-white font-medium text-sm flex items-center gap-1.5"
-          >
-            <Upload className="w-4 h-4" /> Importar
-          </button>
-        </div>
-      </div>
-
-      {consumosLive.length === 0 ? (
-        <div className="glass-card p-12 text-center">
-          <Zap className="w-12 h-12 mx-auto mb-3 text-[var(--text-muted)] opacity-50" />
-          <p className="text-[var(--text-muted)]">Todavía no importaste consumos. Subí el Excel de "Últimos consumos" de tu banco desde Importar.</p>
-        </div>
-      ) : (
-        <>
-          {/* StatCards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <StatCard icon={DollarSign} label="Total gastado" value={formatCurrency(totalGastado)} delay={0} />
-            <StatCard icon={DollarSign} label="Consumido USD" value={`USD ${totalDolares.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} delay={100} />
-            <StatCard
-              icon={TrendingUp}
-              label={pctVsResumen != null ? 'vs último cierre' : 'Devoluciones'}
-              value={pctVsResumen != null ? `${pctVsResumen}%` : formatCurrency(Math.abs(totalDevoluciones))}
-              delay={200}
-            />
-            <StatCard icon={Receipt} label="Consumos" value={cantConsumos} delay={300} />
-          </div>
-
-          {/* Gráficos */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {dataPorDia.length > 0 && (
-              <div className="glass-card p-6">
-                <h3 className="font-semibold text-[var(--text-primary)] mb-4">Gasto por día</h3>
-                <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={dataPorDia}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" />
-                    <XAxis dataKey="fecha" tick={{ fontSize: 11, fill: 'var(--text-muted)' }} />
-                    <YAxis tick={{ fontSize: 11, fill: 'var(--text-muted)' }} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
-                    <Tooltip formatter={(v) => formatCurrency(v)} contentStyle={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', borderRadius: 8 }} />
-                    <Bar dataKey="total" fill="var(--accent-1)" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-            {dataCategoria.length > 0 && (
-              <div className="glass-card p-6">
-                <h3 className="font-semibold text-[var(--text-primary)] mb-4">Gasto por categoría</h3>
-                <ResponsiveContainer width="100%" height={220}>
-                  <RechartsPie>
-                    <Pie data={dataCategoria} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={(e) => e.name}>
-                      {dataCategoria.map((entry, i) => (
-                        <Cell key={i} fill={COLORES_CATEGORIA[entry.name] || '#64748b'} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(v) => formatCurrency(v)} contentStyle={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', borderRadius: 8 }} />
-                  </RechartsPie>
-                </ResponsiveContainer>
-              </div>
-            )}
-          </div>
-
-          {/* Filtros */}
-          <div className="glass-card p-4 flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2 flex-1 min-w-[180px]">
-              <Search className="w-4 h-4 text-[var(--text-muted)]" />
-              <input
-                type="text"
-                placeholder="Buscar comercio..."
-                value={filtroTexto}
-                onChange={(e) => setFiltroTexto(e.target.value)}
-                className="flex-1 bg-transparent text-sm text-[var(--text-primary)] focus:outline-none"
-              />
-            </div>
-            <select value={filtroTarjeta} onChange={(e) => setFiltroTarjeta(e.target.value)} className="px-3 py-1.5 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)] text-sm text-[var(--text-primary)]">
-              <option value="">Todas las tarjetas</option>
-              {tarjetasUnicas.map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
-            <select value={filtroCategoria} onChange={(e) => setFiltroCategoria(e.target.value)} className="px-3 py-1.5 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)] text-sm text-[var(--text-primary)]">
-              <option value="">Todas las categorías</option>
-              {categoriasUnicas.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
-            <button
-              onClick={() => setOcultarOficializados((v) => !v)}
-              className={`px-3 py-1.5 rounded-lg text-sm flex items-center gap-1.5 border transition-colors ${
-                ocultarOficializados ? 'bg-[var(--accent-1)] text-white border-[var(--accent-1)]' : 'bg-[var(--glass-bg)] text-[var(--text-muted)] border-[var(--glass-border)]'
-              }`}
-              title="Oculta los consumos previos al cierre del último resumen importado"
-            >
-              {ocultarOficializados ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              Ocultar ya facturados
-            </button>
-          </div>
-
-          {/* Lista */}
-          <div className="glass-card divide-y divide-[var(--glass-border)]">
-            {visibles.length === 0 ? (
-              <p className="p-6 text-center text-[var(--text-muted)]">No hay consumos con estos filtros.</p>
-            ) : (
-              [...visibles].sort((a, b) => (b.fecha || '').localeCompare(a.fecha || '')).map((c) => (
-                <div key={c.id} className="flex items-center gap-3 p-3 sm:px-4">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className={`font-medium truncate ${c.es_pago ? 'text-[var(--text-muted)]' : 'text-[var(--text-primary)]'}`}>
-                        {c.descripcion || '(sin descripción)'}
-                      </p>
-                      {c.es_cuota && (
-                        <span className="text-xs px-1.5 py-0.5 rounded bg-[var(--accent-1)]/15 text-[var(--accent-1)]">
-                          {c.cuota_actual}/{c.total_cuotas}
-                        </span>
-                      )}
-                      {c.es_pendiente && (
-                        <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-500 flex items-center gap-1">
-                          <Clock className="w-3 h-3" /> Pendiente
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-[var(--text-muted)]">
-                      {c.fecha} · {c.tarjeta} · {c.es_pago ? 'Pago/devolución' : c.categoria}
-                    </p>
-                  </div>
-                  <div className="text-right shrink-0">
-                    {c.monto_dolares > 0 ? (
-                      <p className="font-semibold text-emerald-500">USD {c.monto_dolares.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</p>
-                    ) : (
-                      <p className={`font-semibold ${c.monto_pesos < 0 ? 'text-emerald-500' : 'text-[var(--text-primary)]'}`}>
-                        {formatCurrency(c.monto_pesos)}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </>
-      )}
-    </div>
-  );
-};
+// ConsumosLiveView → views/ConsumosLiveView.jsx (fase 6).
 
 export default App;
 // Build 1769553006
