@@ -61,3 +61,17 @@ export function momento(isoDateTime, ahora = new Date()) {
   const mismoDia = f.toDateString() === ahora.toDateString();
   return mismoDia ? `hoy ${hora}` : `${f.getDate()}/${f.getMonth() + 1} ${hora}`;
 }
+
+/** Valor corto para etiquetas de gráfico: '1,8 M', '450 k'. */
+export function corto(n) {
+  const v = Number(n) || 0;
+  if (Math.abs(v) >= 1e6) return `${(Math.round(v / 1e5) / 10).toLocaleString('es-AR')} M`;
+  if (Math.abs(v) >= 1e3) return `${Math.round(v / 1e3)} k`;
+  return String(Math.round(v));
+}
+
+/** 'YYYY-MM' → 'octubre 2026' */
+export function mesLargo(mesKey) {
+  const [a, m] = String(mesKey).split('-').map(Number);
+  return new Date(a, m - 1, 1).toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }).replace(' de ', ' ');
+}

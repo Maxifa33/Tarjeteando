@@ -10,6 +10,7 @@ import { LiveCardsSection } from './components/LiveCards.jsx';
 import AppShell from './ui/AppShell.jsx';
 import { manchasDeLuz } from './ui/identidad.js';
 import MesView from './views/MesView.jsx';
+import { serieEvolucion, detalleMes } from './services/evolucion.js';
 import { cicloDePago, composicion as componerMes, cuotasDelMes, desfasePorTarjeta, proximoMes, sumarMeses } from './services/mes.js';
 import { clasesApariencia, modoEfectivo, temaLegacy } from './services/apariencia.js';
 import {
@@ -1794,8 +1795,21 @@ const App = () => {
     const cuotasPorTarjeta = {};
     cuotasProx.items.forEach(i => { if (!i.es_estimado_usd) cuotasPorTarjeta[i.tarjeta] = (cuotasPorTarjeta[i.tarjeta] || 0) + i.monto; });
     const prox = proximoMes({ cuotasDelMes: cuotasProx.total, fijosArs, fijosUsd, porTarjetaSiguiente: siguiente.porTarjeta, cuotasPorTarjeta });
-    return { ciclo, comp, cuotas, siguiente, cuotasProx, prox };
+    return { ciclo, comp, cuotas, siguiente, cuotasProx, prox, desfase };
   }, [tarjetas, resumenes, ciclosLive, consumosLive, cuotasActivas, cotizacionVenta, gastosFijosDetalle]);
+
+  // Evolución y proyección (fase 2): 12 pagados + en curso + 6 comprometidos.
+  const evolucion = useMemo(() => {
+    const opts = { desfase: mes.desfase, cotizacionVenta };
+    const columnas = serieEvolucion({
+      resumenes, movimientos, tipos: tiposGasto, planes: cuotasActivas, fijos: gastosFijosDetalle,
+      ciclo: mes.ciclo, composicion: mes.comp, ...opts
+    });
+    const detalles = Object.fromEntries(columnas
+      .filter(c => c.tipo === 'comprometido')
+      .map(c => [c.mesKey, detalleMes(c, cuotasActivas, opts)]));
+    return { columnas, detalles };
+  }, [mes, resumenes, movimientos, tiposGasto, cuotasActivas, gastosFijosDetalle, cotizacionVenta]);
 
   // Format currency (usa las funciones helper globales)
   const formatCurrency = (amount, currency = 'ARS') => {
@@ -1858,6 +1872,7 @@ const App = () => {
               onImportar={() => setActiveView('importar')}
               tarjetas={tarjetas}
               oscuro={oscuro}
+              evolucion={evolucion}
             />
           ) : activeView === 'tarjetas' ? (
             // Tarjetas: placeholder hasta la fase 3 (el dashboard, con foco en "Mis Tarjetas").

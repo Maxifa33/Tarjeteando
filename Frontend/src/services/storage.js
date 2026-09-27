@@ -564,15 +564,19 @@ class StorageService {
 
       const totalMes = resumenesDelMes.reduce((sum, r) => sum + (r.total_a_pagar_pesos || 0), 0);
 
+      // Desglose por tarjetaId (el nombre de la tarjeta, como en la sección Mes).
+      const porTarjeta = resumenesDelMes.reduce((acc, r) => {
+        acc[r.tarjeta] = (acc[r.tarjeta] || 0) + (r.total_a_pagar_pesos || 0);
+        return acc;
+      }, {});
+
       resultado.push({
         mes: fecha.toLocaleDateString('es-AR', { month: 'short' }),
         anio,
         total: totalMes,
-        // Desglose por tarjeta
-        ...resumenesDelMes.reduce((acc, r) => {
-          acc[r.tarjeta] = r.total_a_pagar_pesos || 0;
-          return acc;
-        }, {})
+        porTarjeta,
+        // Compatibilidad: el dashboard viejo lee cada tarjeta como clave de primer nivel.
+        ...porTarjeta
       });
     }
 

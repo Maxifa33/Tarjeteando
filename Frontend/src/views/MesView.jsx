@@ -3,10 +3,12 @@ import { ChevronRight, AlertTriangle, Plus } from 'lucide-react';
 import Capsula from '../ui/Capsula.jsx';
 import Seg from '../ui/Seg.jsx';
 import useCompacto from '../ui/useCompacto.js';
-import { identidades, identidadTarjeta } from '../ui/identidad.js';
+import { identidades, identidadTarjeta, ordenApilado } from '../ui/identidad.js';
+import EvolucionChart from '../ui/EvolucionChart.jsx';
+import DetalleMes from '../ui/DetalleMes.jsx';
 import { sumarMeses } from '../services/mes.js';
 import { hoyISO } from '../services/consumos/comun.js';
-import { pesos, dolares, nombreMes, capitalizar, mesCorto, diaCorto, diaLargo, hoyLargo, momento } from '../ui/formato.js';
+import { pesos, dolares, nombreMes, capitalizar, mesCorto, diaCorto, diaLargo, hoyLargo, momento, mesLargo } from '../ui/formato.js';
 
 /**
  * Sección Mes: cuánto del próximo pago ya está comprometido y cuánto queda libre
@@ -212,7 +214,8 @@ const MesView = ({
   onAbrirTarjeta,
   onImportar,
   tarjetas = [],
-  oscuro = true
+  oscuro = true,
+  evolucion = null
 }) => {
   const compacto = useCompacto();
   const [vista, setVista] = useState('ciclo');
@@ -230,8 +233,43 @@ const MesView = ({
   };
   const quitarTope = () => { clearTimeout(guardarRef.current); setTopeLocal(null); onTope?.(null); };
 
-  const ids = useMemo(() => identidades(tarjetas), [tarjetas]);
+  // Identidades: las tarjetas de la lista (orden de alta) + las que solo aparecen en el
+  // historial (dadas de baja) o en Últimos consumos sin tarjeta, agregadas al final
+  // para no repintar las demás.
+  const extras = useMemo(() => {
+    const conocidas = new Set(tarjetas.map(t => t.nombre));
+    const vistas = new Map();
+    ciclo.porTarjeta.forEach(t => { if (!conocidas.has(t.tarjetaId)) vistas.set(t.tarjetaId, { nombre: t.tarjetaId, banco: t.banco, red: t.red, etiqueta: t.nombre }); });
+    (evolucion?.columnas || []).forEach(c => Object.keys(c.porTarjeta).forEach(id => {
+      if (!conocidas.has(id) && !vistas.has(id)) vistas.set(id, { nombre: id });
+    }));
+    return [...vistas.values()];
+  }, [tarjetas, ciclo, evolucion]);
+  const ids = useMemo(() => identidades([...tarjetas, ...extras]), [tarjetas, extras]);
   const idDe = (tarjetaId, extra = {}) => ids.get(tarjetaId) || identidadTarjeta({ nombre: tarjetaId, ...extra }, 0);
+
+  // ----- Evolución y proyección (fase 2) -----
+  const [modoEvo, setModoEvo] = useState('tarjeta');
+  const [vistaEvo, setVistaEvo] = useState('grafico');
+  const [selEvo, setSelEvo] = useState(null);
+  const columnasEvo = evolucion?.columnas || [];
+  const selDefault = columnasEvo.findIndex(c => c.tipo === 'comprometido');
+  const seleccionEvo = selEvo ?? (selDefault >= 0 ? selDefault : columnasEvo.length - 1);
+  const seriesEvo = useMemo(() => {
+    const usados = new Set(columnasEvo.flatMap(c => Object.keys(c.porTarjeta).filter(k => c.porTarjeta[k] > 0)));
+    const lista = [...tarjetas, ...extras].filter(t => usados.has(t.nombre));
+    return {
+      tarjeta: ordenApilado(lista).map(t => {
+        const id = ids.get(t.nombre);
+        return { id: t.nombre, nombre: t.etiqueta || t.nombre, color: oscuro ? id.chartOscuro : id.chartClaro };
+      }),
+      tipo: [
+        { id: 'cuotas', nombre: 'Cuotas', color: 'var(--r1)' },
+        { id: 'fijos', nombre: 'Fijos', color: 'var(--r2)' },
+        { id: 'variables', nombre: 'Variables', color: 'var(--r3)' }
+      ]
+    };
+  }, [columnasEvo, tarjetas, extras, ids, oscuro]);
 
   const esCiclo = vista === 'ciclo';
   const mesKey = esCiclo ? ciclo.mesKey : sumarMeses(ciclo.mesKey, 1);
@@ -463,8 +501,43 @@ const MesView = ({
     </section>
   );
 
-  // Lugar reservado para "Evolución y proyección" (fase 2).
-  const Evolucion = <div id="mes-evolucion" />;
+  const nPagados = columnasEvo.filter(c => c.tipo === 'pagado').length;
+  const ultimoFut = [...columnasEvo].reverse().find(c => c.tipo === 'comprometido');
+  const colSel = columnasEvo[seleccionEvo];
+  const Evolucion = columnasEvo.length ? (
+    <section aria-label="Evolución y proyección" style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: compacto ? 0 : 12, paddingTop: 24, borderTop: '0.5px solid var(--sep)' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <h2 style={{ margin: 0, fontSize: 22, lineHeight: '28px', fontWeight: 700, letterSpacing: '-.01em' }}>Evolución y proyección</h2>
+        <span style={{ fontSize: 15, color: 'var(--label2)' }}>
+          {nPagados > 0 ? `${nPagados} ${nPagados === 1 ? 'mes pagado' : 'meses pagados'}, ` : ''}
+          {nombreMes(ciclo.mesKey)} en curso{ultimoFut ? ` y lo que ya está comprometido hasta ${mesLargo(ultimoFut.mesKey)}` : ''}.
+          {modoEvo === 'tipo' ? ' Por tipo usa la detección de fijos de hoy, con tus cambios.' : ''}
+        </span>
+      </div>
+      <EvolucionChart
+        columnas={columnasEvo}
+        series={seriesEvo}
+        modo={modoEvo}
+        onModo={setModoEvo}
+        vista={vistaEvo}
+        onVista={setVistaEvo}
+        seleccion={seleccionEvo}
+        onSeleccion={setSelEvo}
+        tope={topeVal}
+        compacto={compacto}
+      />
+      <DetalleMes
+        columna={colSel}
+        detalle={colSel ? evolucion.detalles?.[colSel.mesKey] : null}
+        modo={modoEvo}
+        series={seriesEvo}
+        fijos={fijos}
+        identidadDe={(id) => idDe(id)}
+        subtituloCurso={fuentes ? `Estimado con ${fuentes}` : 'Estimado'}
+        compacto={compacto}
+      />
+    </section>
+  ) : null;
 
   const Cabecera = (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: compacto ? 'stretch' : 'flex-end', gap: compacto ? 12 : 24, flexDirection: compacto ? 'column' : 'row' }}>
