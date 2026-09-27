@@ -22,3 +22,21 @@ export function useMedia(query) {
 export default function useCompacto() {
   return useMedia(QUERY);
 }
+
+/**
+ * Ancho disponible de un nodo, en vivo. Devuelve [ref, ancho].
+ * ref es un callback ref: funciona aunque el nodo se monte más tarde.
+ */
+export function useAncho() {
+  const [nodo, setNodo] = useState(null);
+  const [ancho, setAncho] = useState(0);
+  useEffect(() => {
+    if (!nodo) return undefined;
+    setAncho(nodo.clientWidth);
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(([e]) => setAncho(Math.round(e.contentRect.width)));
+    ro.observe(nodo);
+    return () => ro.disconnect();
+  }, [nodo]);
+  return [setNodo, ancho];
+}

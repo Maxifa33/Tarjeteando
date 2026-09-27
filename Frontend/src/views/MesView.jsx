@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronRight, AlertTriangle, Plus } from 'lucide-react';
 import Capsula from '../ui/Capsula.jsx';
 import Seg from '../ui/Seg.jsx';
-import useCompacto from '../ui/useCompacto.js';
+import useCompacto, { useAncho } from '../ui/useCompacto.js';
 import { identidades, identidadTarjeta, ordenApilado } from '../ui/identidad.js';
 import EvolucionChart from '../ui/EvolucionChart.jsx';
 import DetalleMes from '../ui/DetalleMes.jsx';
@@ -218,6 +218,9 @@ const MesView = ({
   evolucion = null
 }) => {
   const compacto = useCompacto();
+  const [refEvo, anchoEvo] = useAncho();
+  // Web ancha: gráfico y detalle del mes lado a lado, para no dejar el costado vacío.
+  const evoLado = !compacto && anchoEvo >= 960;
   const [vista, setVista] = useState('ciclo');
   const [topeLocal, setTopeLocal] = useState(tope);
   const guardarRef = useRef(null);
@@ -505,7 +508,7 @@ const MesView = ({
   const ultimoFut = [...columnasEvo].reverse().find(c => c.tipo === 'comprometido');
   const colSel = columnasEvo[seleccionEvo];
   const Evolucion = columnasEvo.length ? (
-    <section aria-label="Evolución y proyección" style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: compacto ? 0 : 12, paddingTop: 24, borderTop: '0.5px solid var(--sep)' }}>
+    <section ref={refEvo} aria-label="Evolución y proyección" style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: compacto ? 0 : 12, paddingTop: 24, borderTop: '0.5px solid var(--sep)' }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         <h2 style={{ margin: 0, fontSize: 22, lineHeight: '28px', fontWeight: 700, letterSpacing: '-.01em' }}>Evolución y proyección</h2>
         <span style={{ fontSize: 15, color: 'var(--label2)' }}>
@@ -514,28 +517,37 @@ const MesView = ({
           {modoEvo === 'tipo' ? ' Por tipo usa la detección de fijos de hoy, con tus cambios.' : ''}
         </span>
       </div>
-      <EvolucionChart
-        columnas={columnasEvo}
-        series={seriesEvo}
-        modo={modoEvo}
-        onModo={setModoEvo}
-        vista={vistaEvo}
-        onVista={setVistaEvo}
-        seleccion={seleccionEvo}
-        onSeleccion={setSelEvo}
-        tope={topeVal}
-        compacto={compacto}
-      />
-      <DetalleMes
-        columna={colSel}
-        detalle={colSel ? evolucion.detalles?.[colSel.mesKey] : null}
-        modo={modoEvo}
-        series={seriesEvo}
-        fijos={fijos}
-        identidadDe={(id) => idDe(id)}
-        subtituloCurso={fuentes ? `Estimado con ${fuentes}` : 'Estimado'}
-        compacto={compacto}
-      />
+      <div style={evoLado
+        ? { display: 'grid', gridTemplateColumns: 'minmax(0,1.7fr) minmax(320px,1fr)', gap: 28, alignItems: 'start' }
+        : { display: 'flex', flexDirection: 'column', gap: 16 }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <EvolucionChart
+            columnas={columnasEvo}
+            series={seriesEvo}
+            modo={modoEvo}
+            onModo={setModoEvo}
+            vista={vistaEvo}
+            onVista={setVistaEvo}
+            seleccion={seleccionEvo}
+            onSeleccion={setSelEvo}
+            tope={topeVal}
+            compacto={compacto}
+          />
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <DetalleMes
+            columna={colSel}
+            detalle={colSel ? evolucion.detalles?.[colSel.mesKey] : null}
+            modo={modoEvo}
+            series={seriesEvo}
+            fijos={fijos}
+            identidadDe={(id) => idDe(id)}
+            subtituloCurso={fuentes ? `Estimado con ${fuentes}` : 'Estimado'}
+            compacto={compacto || evoLado}
+          />
+        </div>
+      </div>
     </section>
   ) : null;
 

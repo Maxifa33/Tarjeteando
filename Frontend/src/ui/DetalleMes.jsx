@@ -59,6 +59,11 @@ const DetalleMes = ({ columna: c, detalle, modo = 'tarjeta', series, fijos, iden
               )}
               <span className="cap" style={{ textAlign: 'right' }}>{Math.round(pct)} %</span>
               <span style={{ textAlign: 'right', fontWeight: 600 }}>{pesos(s.valor)}</span>
+              {compacto && (
+                <span aria-hidden="true" style={{ gridColumn: '1 / -1', height: 4, marginTop: -6, borderRadius: 2, background: 'var(--track)', overflow: 'hidden' }}>
+                  <span className="spr" style={{ display: 'block', height: 4, width: `${pct}%`, background: s.color, borderRadius: 2 }} />
+                </span>
+              )}
             </div>
           );
         })}

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import Seg from './Seg.jsx';
+import { useAncho } from './useCompacto.js';
 import { escalaY } from '../services/evolucion.js';
 import { pesos, dolares, corto, mesLargo, capitalizar } from './formato.js';
 
@@ -11,9 +12,11 @@ import { pesos, dolares, corto, mesLargo, capitalizar } from './formato.js';
  * Ningún texto usa el color de la serie: los valores van en --label / --label2.
  */
 
+// slot = ancho por mes. Se estira para llenar el ancho disponible entre slotMin y
+// slotMax; por debajo de slotMin aparece scroll horizontal. Las columnas no pasan de col.
 const TAM = {
-  web: { plotH: 220, slot: 62, col: 24, eje: 64, pie: 28 },
-  compacto: { plotH: 150, slot: 22, col: 12, eje: 40, pie: 28 }
+  web: { plotH: 220, slot: 62, slotMin: 44, slotMax: 120, col: 24, eje: 64, pie: 28 },
+  compacto: { plotH: 150, slot: 22, slotMin: 22, slotMax: 40, col: 12, eje: 40, pie: 28 }
 };
 
 const ESTADO = { pagado: 'Pagado', en_curso: 'En curso', comprometido: 'Comprometido' };
@@ -82,6 +85,7 @@ const EvolucionChart = ({
   compacto = false
 }) => {
   const [hover, setHover] = useState(null);
+  const [refPlot, anchoDisp] = useAncho();
   const t = compacto ? TAM.compacto : TAM.web;
 
   // Compacto: 6 pagados + en curso + 6 comprometidos.
@@ -96,7 +100,10 @@ const EvolucionChart = ({
 
   const { max, ticks } = escalaY(Math.max(...columnas.map((c) => c.total), 0), tope, { compacto });
   const Y = (v) => (v / max) * t.plotH;
-  const ancho = columnas.length * t.slot;
+  const slot = anchoDisp > 0 && columnas.length
+    ? Math.min(t.slotMax, Math.max(t.slotMin, Math.floor((anchoDisp - t.eje - 4) / columnas.length)))
+    : t.slot;
+  const ancho = columnas.length * slot;
   const items = modo === 'tipo' ? series.tipo : series.tarjeta;
 
   const tooltip = (() => {
@@ -105,8 +112,8 @@ const EvolucionChart = ({
     const c = columnas[j];
     if (!c) return null;
     const w = 230;
-    let x = j * t.slot + t.slot + 6;
-    if (x + w > ancho) x = j * t.slot - w - 6;
+    let x = j * slot + slot + 6;
+    if (x + w > ancho) x = j * slot - w - 6;
     const filas = valoresDe(c, modo, series).filter((s) => s.valor > 0).reverse();
     return (
       <div className="graf-tip" role="status" style={{ left: x, top: 0, width: w }}>
@@ -141,7 +148,7 @@ const EvolucionChart = ({
       ) : (
         <>
           <Leyenda items={items} tope={tope} />
-          <div style={{ overflowX: 'auto', overflowY: 'visible', paddingTop: 18 }}>
+          <div ref={refPlot} style={{ overflowX: 'auto', overflowY: 'visible', paddingTop: 18 }}>
             <div
               style={{ position: 'relative', height: t.plotH + t.pie, marginLeft: t.eje, width: ancho }}
               onMouseLeave={() => setHover(null)}
@@ -155,14 +162,14 @@ const EvolucionChart = ({
 
               {nFut > 0 && (
                 <>
-                  <div aria-hidden="true" style={{ position: 'absolute', left: jFut * t.slot - 2, width: nFut * t.slot + 4, top: -14, bottom: 0, borderRadius: 14, background: 'var(--fill2)' }} />
-                  {!compacto && <span className="cap" aria-hidden="true" style={{ position: 'absolute', left: jFut * t.slot + 12, top: -12, fontWeight: 600 }}>Ya comprometido</span>}
+                  <div aria-hidden="true" style={{ position: 'absolute', left: jFut * slot - 2, width: nFut * slot + 4, top: -14, bottom: 0, borderRadius: 14, background: 'var(--fill2)' }} />
+                  {!compacto && <span className="cap" aria-hidden="true" style={{ position: 'absolute', left: jFut * slot + 12, top: -12, fontWeight: 600 }}>Ya comprometido</span>}
                 </>
               )}
               {jCurso > 0 && (
                 <>
-                  <div aria-hidden="true" style={{ position: 'absolute', left: jCurso * t.slot - 1, top: -14, height: t.plotH + 14, width: 1.5, background: 'var(--label)', opacity: 0.7 }} />
-                  {!compacto && <span className="cap" aria-hidden="true" style={{ position: 'absolute', left: jCurso * t.slot + 6, top: -12, fontWeight: 700, color: 'var(--label)' }}>Hoy</span>}
+                  <div aria-hidden="true" style={{ position: 'absolute', left: jCurso * slot - 1, top: -14, height: t.plotH + 14, width: 1.5, background: 'var(--label)', opacity: 0.7 }} />
+                  {!compacto && <span className="cap" aria-hidden="true" style={{ position: 'absolute', left: jCurso * slot + 6, top: -12, fontWeight: 700, color: 'var(--label)' }}>Hoy</span>}
                 </>
               )}
 
@@ -177,7 +184,7 @@ const EvolucionChart = ({
                     key={c.mesKey}
                     type="button"
                     className={`graf-col ${seleccion === i ? 'on' : ''}`}
-                    style={{ left: j * t.slot, width: t.slot, height: t.plotH + t.pie }}
+                    style={{ left: j * slot, width: slot, height: t.plotH + t.pie }}
                     aria-label={`${capitalizar(mesLargo(c.mesKey))}, ${ESTADO[c.tipo].toLowerCase()}: ${pesos(c.total)}`}
                     aria-pressed={seleccion === i}
                     onClick={() => onSeleccion?.(i)}
