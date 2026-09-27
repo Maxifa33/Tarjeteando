@@ -1,0 +1,177 @@
+{
+  "proyecto": "tarjeteando",
+  "feature": "rediseno-fase-0-base",
+  "objective": "Instalar el sistema visual nuevo (tokens, apariencia, barra superior, riel de celular, ventana de vidrio) sin romper ninguna vista existente.",
+
+  "scope": {
+    "incluye": [
+      "Tokens del README en src/ui/tokens.css (oscuro, claro, reducir transparencia, contraste alto)",
+      "Apariencia: Sistema / Claro / Oscuro + Reducir transparencia, persistida y migrada desde el tema viejo",
+      "AppShell web: marca a la izquierda, pestañas de vidrio centradas (Mes · Tarjetas · Movimientos · Cuotas), Buscar, menú 'Más' e Importar a la derecha, ventana de vidrio con scroll interno",
+      "Campo de luz de fondo (4 manchas difuminadas con el color de cada tarjeta)",
+      "Celular (< 768 px): riel lateral plegable abajo a la derecha, con opción 'Menú a la izquierda'",
+      "Menú 'Más': Apariencia, Ajustes (abre SettingsModal), Reglas de nombres, Reintegros (hasta la fase 4), Últimos consumos, Guía y novedades",
+      "Capa de compatibilidad: las variables CSS viejas (--text-primary, --glass-bg, etc.) apuntan a los tokens nuevos para que las vistas viejas se lean bien mientras se migran",
+      "Quitar el import de Google Fonts (Plus Jakarta / Space Grotesk) y el .animated-bg"
+    ],
+    "no_incluye": [
+      "Rediseñar el contenido de las secciones (fases 1 a 5)",
+      "Cambios en parsers, backend o cálculos",
+      "Restyling de OnboardingWizard y SettingsModal por dentro: solo deben seguir funcionando y leerse bien"
+    ]
+  },
+
+  "database": {
+    "tablas_nuevas": [],
+    "tablas_modificadas": [],
+    "migracion_sql": null
+  },
+
+  "backend": {
+    "endpoints_nuevos": [],
+    "funciones_o_servicios": [],
+    "storage": []
+  },
+
+  "frontend": {
+    "componentes_nuevos": [
+      {
+        "path": "Frontend/src/ui/tokens.css",
+        "proposito": "Tokens del README bajo .tj (oscuro) y .tj.claro. Incluye --spring, tipografías y clases base: .vidrio (backdrop-filter blur(40px) saturate(180%) + borde 0.5px --win-border), .vidrio-solido, .chip-plastico, .cap, .seg, .btn, .btn-pri, .fila. Media queries prefers-reduced-motion, prefers-reduced-transparency y prefers-contrast:more. Al final, bloque de compatibilidad que redefine las variables viejas de index.css apuntando a los tokens nuevos.",
+        "props": null,
+        "estado_local": [],
+        "interacciones": []
+      },
+      {
+        "path": "Frontend/src/ui/identidad.js",
+        "proposito": "identidadTarjeta(tarjeta, indiceAlta) → { plastico, texto, texto2, chartClaro, chartOscuro, clave }. Tabla del README; fallback grafito + slots de 'otros bancos' por orden de alta (nunca por monto). ordenApilado(tarjetas) según el README.",
+        "props": null,
+        "estado_local": [],
+        "interacciones": []
+      },
+      {
+        "path": "Frontend/src/ui/identidad.test.js",
+        "proposito": "El mismo banco y red siempre da el mismo color. El fallback usa el orden de alta y no cambia si cambia el monto. Galicia Visa lleva texto oscuro.",
+        "props": null,
+        "estado_local": [],
+        "interacciones": []
+      },
+      {
+        "path": "Frontend/src/ui/AppShell.jsx",
+        "proposito": "Marco de la app. Web: header absoluto (top 22px, alto 52) con marca, <nav> de pestañas de vidrio, botones Buscar / Más e Importar. <main className='vidrio'> con left/right 40, top 96, bottom 40, radio 36, padding 30px 44px, overflow-y auto. Celular: sin header de pestañas; título de marca arriba del contenido y <Rail/>. Renderiza <CampoDeLuz/> detrás.",
+        "props": { "seccion": "'mes'|'tarjetas'|'movimientos'|'cuotas'|'otra'", "onSeccion": "fn(id)", "onImportar": "fn()", "onBuscar": "fn(texto)", "menu": "items del menú Más", "tarjetasParaLuz": "[{clave, peso}]", "children": "node" },
+        "estado_local": ["menuAbierto: bool", "buscando: bool"],
+        "interacciones": ["Pestaña → onSeccion", "Buscar abre un campo en la barra que escribe en searchQuery (misma búsqueda global de hoy); Esc lo cierra", "Más abre el menú (popover de vidrio); clic afuera o Esc lo cierra"]
+      },
+      {
+        "path": "Frontend/src/ui/CampoDeLuz.jsx",
+        "proposito": "4 manchas absolutas (600px, blur 80px, opacity var(--blob-op)) con el color de gráfico de cada tarjeta. Escala por peso (0.6–1.35) según el share del total en curso. Transición de transform 1.1s con --spring. Se oculta con Reducir transparencia o prefers-reduced-transparency. aria-hidden.",
+        "props": { "manchas": "[{clave, color, x, y, escala, opacidad}]" },
+        "estado_local": [],
+        "interacciones": []
+      },
+      {
+        "path": "Frontend/src/ui/Rail.jsx",
+        "proposito": "Solo en celular. Botón de vidrio de 62px abajo a la derecha (bottom 30, right 12) con el ícono y el nombre de la sección actual. Un toque lo despliega hacia arriba (alto animado con --spring) con Mes, Tarjetas, Movimientos, Cuotas, separador e Importar (botón monocromo). Velo transparente detrás para cerrarlo. Con izquierda=true se ancla a left 12.",
+        "props": { "seccion": "string", "onSeccion": "fn", "onImportar": "fn", "izquierda": "bool" },
+        "estado_local": ["abierto: bool"],
+        "interacciones": ["Toque en el botón → abre / cierra (aria-expanded)", "Elegir sección → onSeccion + cerrar + scroll del contenido a 0", "Con el menú cerrado, los ítems ocultos llevan tabindex -1 y aria-hidden"]
+      },
+      {
+        "path": "Frontend/src/ui/useCompacto.js",
+        "proposito": "Hook: true si el ancho del viewport es < 768 px (matchMedia con listener).",
+        "props": null,
+        "estado_local": [],
+        "interacciones": []
+      },
+      {
+        "path": "Frontend/src/ui/Hoja.jsx",
+        "proposito": "Hoja inferior de vidrio para celular: velo rgba(0,0,0,.32), panel con radio 34 arriba, max-height 90%, scroll interno, agarradera y botón cerrar (32px). Entra con translateY(100%) → 0 y --spring. role=dialog y aria-modal. Esc cierra. Se usa desde la fase 4.",
+        "props": { "abierta": "bool", "onCerrar": "fn", "titulo": "string", "children": "node" },
+        "estado_local": [],
+        "interacciones": ["Velo o X → onCerrar"]
+      },
+      {
+        "path": "Frontend/src/ui/Seg.jsx",
+        "proposito": "Control segmentado (role=group). La opción activa lleva fondo --solid y sombra.",
+        "props": { "opciones": "[{id,label}]", "valor": "id", "onCambio": "fn", "ariaLabel": "string" },
+        "estado_local": [],
+        "interacciones": []
+      }
+    ],
+    "componentes_modificados": [
+      {
+        "path": "Frontend/src/App.jsx",
+        "cambios": [
+          "Reemplazar sidebar y header actuales por <AppShell>. Conservar todo el estado y los handlers.",
+          "Mapa de secciones → vistas existentes: mes → DashboardView (hasta la fase 1), tarjetas → DashboardView con foco en tarjetas (placeholder hasta la fase 3), movimientos → MovimientosView, cuotas → CuotasView, otras (importar, consumos-live, reintegros, reglas, guia) se abren desde el menú Más o desde Importar.",
+          "activeView sigue existiendo. Solo cambia cómo se navega.",
+          "Estado apariencia {modo:'sistema'|'claro'|'oscuro', reducirTransparencia:bool, railIzquierda:bool}: se guarda en storage.getConfig().apariencia; aplicar la clase .claro y .rt en el contenedor .tj.",
+          "Migración al leer: si config.apariencia no existe y hay 'tarjetas_theme': light → claro, dark → oscuro, liquid → oscuro. Default: sistema (sigue prefers-color-scheme en vivo).",
+          "OnboardingWizard y NovedadesModal se siguen mostrando igual que hoy."
+        ]
+      },
+      {
+        "path": "Frontend/src/index.css",
+        "cambios": [
+          "Quitar @import de Google Fonts, .animated-bg y bgFloat.",
+          "Importar ./ui/tokens.css.",
+          "Dejar las clases viejas (.glass, .glass-card, .stat-card) apuntando a los tokens nuevos, sin hover que levante la card (translateY) ni glow."
+        ]
+      },
+      {
+        "path": "Frontend/src/services/storage.js",
+        "cambios": [
+          "getConfig() devuelve también apariencia {modo, reducirTransparencia, railIzquierda} y tope_mensual (null por defecto) sin romper configs viejas (merge con defaults).",
+          "exportAll/importAll ya incluyen config: verificar que apariencia y tope_mensual viajan."
+        ]
+      }
+    ],
+    "rutas_nuevas": [],
+    "estado_global": [
+      { "variable": "apariencia", "ubicacion": "App.jsx + storage.config.apariencia", "proposito": "modo de color, reducir transparencia y lado del riel" }
+    ]
+  },
+
+  "integraciones_externas": [],
+
+  "notificaciones": {
+    "tipo": null,
+    "trigger": null,
+    "destinatario": null,
+    "contenido": null
+  },
+
+  "acceptance_criteria": [
+    "Desde la barra superior o el riel se llega a Mes, Tarjetas, Movimientos y Cuotas; desde Más a Ajustes, Reglas, Reintegros, Últimos consumos y Guía; Importar abre ImportarView.",
+    "Un usuario con 'tarjetas_theme' = 'liquid' abre la app en oscuro sin tocar nada.",
+    "Con 'Sistema', cambiar el modo del sistema operativo cambia la app sin recargar.",
+    "Con 'Reducir transparencia' (o prefers-reduced-transparency), la ventana, la barra y los menús son opacos y el campo de luz desaparece.",
+    "A 390 px de ancho no hay scroll horizontal, el riel abre y cierra, y todas sus áreas táctiles miden 44 px o más.",
+    "Las vistas viejas siguen leyéndose (sin texto invisible) en claro y en oscuro.",
+    "npm test pasa; no hay errores en consola."
+  ],
+
+  "edge_cases": [
+    "localStorage lleno o bloqueado: la apariencia cae al default sin romper (try/catch como el resto de storage).",
+    "Sin tarjetas cargadas: el campo de luz usa 4 manchas neutras (--label2 al 20%).",
+    "Teclado: Tab recorre pestañas, Buscar, Más e Importar con foco visible; Esc cierra menú, búsqueda y riel.",
+    "SettingsModal usa colores hardcodeados por tema ('dark'/'liquid'): mapear para que con modo oscuro reciba 'dark' y con claro 'light'."
+  ],
+
+  "orden_implementacion": [
+    "1. tokens.css + identidad.js + test",
+    "2. storage.getConfig con apariencia y tope_mensual (defaults + migración)",
+    "3. Seg, useCompacto, CampoDeLuz, Rail, Hoja",
+    "4. AppShell y reemplazo del layout en App.jsx",
+    "5. Capa de compatibilidad en index.css y revisión visual de cada vista vieja en claro y oscuro",
+    "6. npm test + prueba manual a 1440 y 390 px"
+  ],
+
+  "riesgos": [
+    { "descripcion": "backdrop-filter sobre una ventana grande con scroll puede ir lento en equipos modestos.", "mitigacion": "Un solo blur grande (la ventana); el contenido interno sin blur. Si hay lag, bajar el blur a 24px." },
+    { "descripcion": "Las vistas viejas usan colores de Tailwind hardcodeados (emerald, amber) que pueden quedar con poco contraste sobre el vidrio claro.", "mitigacion": "No arreglarlas acá: se reemplazan en sus fases. Solo corregir lo ilegible." }
+  ],
+
+  "notas_para_claude_code": "Referencia visual: rediseno-2026/prototipos/tarjeteando-app-web.html (barra, ventana, menú) y tarjeteando-app-iphone.html (riel). En los prototipos las clases se llaman .tj/.mb; en la app usar .tj para todo. No borrar DashboardView todavía. No usar framer-motion. No tocar APP_VERSION."
+}

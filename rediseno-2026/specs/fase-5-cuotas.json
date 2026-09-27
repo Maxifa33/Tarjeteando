@@ -1,0 +1,137 @@
+{
+  "proyecto": "tarjeteando",
+  "feature": "rediseno-fase-5-cuotas",
+  "objective": "Ver de un vistazo cuándo termina cada plan y cuánta plata se libera, y resolver los planes que el banco dejó de facturar.",
+
+  "scope": {
+    "incluye": [
+      "Frase: restante después del mes actual, qué se libera el mes que viene y cuándo termina el último plan",
+      "4 cifras: En curso, Este mes, Restante, A revisar",
+      "Filtros En curso / A revisar / Terminados / Todos (reemplaza 'Ver N terminadas')",
+      "Línea de tiempo (web) por mes: pagado sólido, este mes rayado, falta translúcido al 30%, a revisar con borde punteado (no se proyecta), terminados atenuados al 60%, etiqueta Última / A revisar / Terminado",
+      "Celular: una barra por plan con un segmento por cuota y 'termina en X'",
+      "Detalle del plan (panel en web, hoja en celular): cuota, total, pagado, restante, puntos por cuota, próximas cuotas; aviso de 'última' (cuánto se libera) y de 'a revisar' con acciones",
+      "Decisión del usuario sobre planes 'a revisar': Marcar como terminado / Sigue vigente (persistida)"
+    ],
+    "no_incluye": [
+      "Editar montos o cantidad de cuotas",
+      "Adelantar cuotas o simular cancelaciones"
+    ]
+  },
+
+  "database": {
+    "tablas_nuevas": [],
+    "tablas_modificadas": [],
+    "migracion_sql": null
+  },
+
+  "backend": {
+    "endpoints_nuevos": [],
+    "funciones_o_servicios": [],
+    "storage": []
+  },
+
+  "frontend": {
+    "componentes_nuevos": [
+      {
+        "path": "Frontend/src/services/planes-vista.js",
+        "proposito": "lineaDeTiempo(planes, {hoyMesKey, desde, hasta}) → {meses:[mesKey], filas:[{planId, inicio, fin, pagadasHasta, enCurso:bool, estado, restante}]}. inicio = período del plan − (cuota_actual − 1). resumenPlanes(planes) → {enCurso, esteMes, restante, aRevisar, seLiberaProximoMes:[{planId, monto}], terminaUltimo:mesKey}. proximasCuotas(plan, n:4).",
+        "props": null,
+        "estado_local": [],
+        "interacciones": []
+      },
+      {
+        "path": "Frontend/src/services/planes-vista.test.js",
+        "proposito": "Inicio y fin correctos (con el caso Easy Warnes de cuotas.test.js), restante = monto × cuotas que faltan, un plan 'última' se libera el mes siguiente, un interrumpido no suma al restante ni a la proyección, rango de meses recortado con un indicador de 'empezó antes'.",
+        "props": null,
+        "estado_local": [],
+        "interacciones": []
+      },
+      {
+        "path": "Frontend/src/ui/LineaDeTiempoPlanes.jsx",
+        "proposito": "Grid de filas de 300 px + pista + 130 px. Encabezado de meses (el actual en negrita, año en ene y en el primer mes). Líneas verticales hairline y 'Hoy' de 1.5 px. Barras de 14 px por plan con radios según el tramo. Cada fila es un <button> con aria-label 'Plan, estado' → onElegir.",
+        "props": { "datos": "salida de lineaDeTiempo", "identidades": "map", "elegido": "planId", "onElegir": "fn" },
+        "estado_local": [],
+        "interacciones": []
+      },
+      {
+        "path": "Frontend/src/ui/DetallePlan.jsx",
+        "proposito": "Plástico chico + nombre + 'Tarjeta · compra en mes año'. Aviso: 'a revisar' con ícono de triángulo --warn y los botones 'Marcar como terminado' (primario) y 'Sigue vigente'; 'última' con ícono de check --ok y 'Desde <mes> liberás $x por mes'. 4 cifras, puntos por cuota (pagada 100%, este mes 65%, falta 20%) y la lista de próximas cuotas.",
+        "props": { "plan": "object", "identidad": "object", "proximas": "array", "onDecidir": "fn(planId, 'terminado'|'vigente')" },
+        "estado_local": [],
+        "interacciones": []
+      }
+    ],
+    "componentes_modificados": [
+      {
+        "path": "Frontend/src/services/cuotas.js",
+        "cambios": [
+          "construirPlanes(movimientos, resumenes, decisiones = []) acepta decisiones [{claveDePlan, decision:'terminado'|'vigente', fecha}].",
+          "Con 'terminado', un plan interrumpido pasa a estado 'terminada' (con motivo 'decision_usuario') y no se proyecta.",
+          "Con 'vigente', deja de marcarse como interrumpido y se proyecta hasta su última cuota.",
+          "Tests nuevos en cuotas.test.js. Los 19 tests existentes siguen en verde."
+        ]
+      },
+      {
+        "path": "Frontend/src/services/storage.js",
+        "cambios": ["Nueva key tarjetas_decisiones_planes con get/add/remove. Incluirla en exportAll/importAll."]
+      },
+      {
+        "path": "Frontend/src/App.jsx → CuotasView (moverla a Frontend/src/views/CuotasView.jsx)",
+        "cambios": [
+          "Nueva UI.",
+          "Plan elegido inicial: el que viene de 'Ver plan' (fase 4) o el primero de la lista.",
+          "Orden: por fecha de fin ascendente.",
+          "Celular: barra por cuota + DetallePlan en <Hoja>."
+        ]
+      },
+      {
+        "path": "Frontend/src/App.jsx",
+        "cambios": ["Pasar decisiones a construirPlanes; onDecidir guarda y recalcula planes, proyección, Mes y el gráfico."]
+      }
+    ],
+    "rutas_nuevas": [],
+    "estado_global": [
+      { "variable": "decisionesPlanes", "ubicacion": "storage tarjetas_decisiones_planes + App.jsx", "proposito": "Qué hacer con los planes que el banco dejó de facturar" }
+    ]
+  },
+
+  "integraciones_externas": [],
+
+  "notificaciones": {
+    "tipo": "in-app",
+    "trigger": "Decidir sobre un plan a revisar",
+    "destinatario": "usuario",
+    "contenido": "Aviso 'Listo: <plan> quedó como terminado / vigente' con Deshacer (borra la decisión)"
+  },
+
+  "acceptance_criteria": [
+    "El restante y las cuotas del mes coinciden con la proyección que usan Mes y el gráfico.",
+    "Marcar un plan a revisar como terminado lo saca de A revisar, lo pasa a Terminados y baja la proyección; Deshacer lo revierte.",
+    "Marcar 'Sigue vigente' lo proyecta; si después el banco lo vuelve a facturar, no queda duplicado.",
+    "La etiqueta 'Última' aparece solo en el plan cuya última cuota es la del mes actual, y el aviso dice cuánto se libera.",
+    "Celular: cada plan muestra tantos segmentos como cuotas (hasta 24; con más, una barra continua con porcentaje)."
+  ],
+
+  "edge_cases": [
+    "Plan en USD: montos en U$S y restante pesificado con la cotización, marcado 'estimado'.",
+    "Plan que empezó antes del rango visible: la barra arranca en el borde con '‹'.",
+    "Plan de 1 cuota: se trata como compra común (no aparece en Cuotas), igual que hoy.",
+    "Decisión guardada sobre un plan que ya no existe (resumen borrado): se ignora sin error."
+  ],
+
+  "orden_implementacion": [
+    "1. Decisiones en cuotas.js + storage + tests",
+    "2. planes-vista.js + tests",
+    "3. LineaDeTiempoPlanes y DetallePlan",
+    "4. CuotasView web",
+    "5. Celular",
+    "6. Conectar decisiones y Deshacer en App.jsx"
+  ],
+
+  "riesgos": [
+    { "descripcion": "Cambiar construirPlanes impacta proyección, Mes y el gráfico.", "mitigacion": "Sin decisiones, la salida tiene que ser idéntica a la de hoy: agregar un test que compare antes y después con las fixtures reales." }
+  ],
+
+  "notas_para_claude_code": "Prototipo: sección Cuotas en web e iPhone. Se elimina el trofeo y el brillo verde de 'última cuota': el aviso con la plata que se libera lo reemplaza. Usar claveDePlan de cuotas.js como identificador de las decisiones."
+}

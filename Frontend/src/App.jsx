@@ -1737,20 +1737,20 @@ const App = () => {
   };
 
   const menuMas = [
+    { tipo: 'item', id: 'ajustes', label: 'Ajustes', onSelect: () => setSettingsOpen(true) },
+    { tipo: 'item', id: 'consumos-live', label: 'Últimos consumos', onSelect: () => setActiveView('consumos-live') },
+    { tipo: 'item', id: 'reglas', label: 'Reglas de nombres', onSelect: () => setActiveView('reglas') },
+    // Reintegros pasa a ser un filtro de Movimientos en la fase 4.
+    { tipo: 'item', id: 'reintegros', label: `Reintegros${reintegrosRecientes.length ? ` (${reintegrosRecientes.length})` : ''}`, onSelect: () => setActiveView('reintegros') },
+    { tipo: 'item', id: 'guia', label: 'Guía y novedades', onSelect: () => setActiveView('guia') },
+    { tipo: 'sep' },
     { tipo: 'titulo', label: 'Apariencia' },
     { tipo: 'radio', id: 'modo-sistema', label: 'Sistema', checked: apariencia.modo === 'sistema', onSelect: () => cambiarApariencia({ modo: 'sistema' }) },
     { tipo: 'radio', id: 'modo-claro', label: 'Claro', checked: apariencia.modo === 'claro', onSelect: () => cambiarApariencia({ modo: 'claro' }) },
     { tipo: 'radio', id: 'modo-oscuro', label: 'Oscuro', checked: apariencia.modo === 'oscuro', onSelect: () => cambiarApariencia({ modo: 'oscuro' }) },
     { tipo: 'sep' },
     { tipo: 'check', id: 'rt', label: 'Reducir transparencia', checked: apariencia.reducirTransparencia, onSelect: () => cambiarApariencia({ reducirTransparencia: !apariencia.reducirTransparencia }) },
-    { tipo: 'check', id: 'rail-izq', label: 'Menú a la izquierda', checked: apariencia.railIzquierda, onSelect: () => cambiarApariencia({ railIzquierda: !apariencia.railIzquierda }), soloCelular: true },
-    { tipo: 'sep' },
-    { tipo: 'item', id: 'ajustes', label: 'Ajustes', onSelect: () => setSettingsOpen(true) },
-    { tipo: 'item', id: 'reglas', label: 'Reglas de nombres', onSelect: () => setActiveView('reglas') },
-    // Reintegros pasa a ser un filtro de Movimientos en la fase 4.
-    { tipo: 'item', id: 'reintegros', label: `Reintegros${reintegrosRecientes.length ? ` (${reintegrosRecientes.length})` : ''}`, onSelect: () => setActiveView('reintegros') },
-    { tipo: 'item', id: 'consumos-live', label: 'Últimos consumos', onSelect: () => setActiveView('consumos-live') },
-    { tipo: 'item', id: 'guia', label: 'Guía y novedades', onSelect: () => setActiveView('guia') }
+    { tipo: 'check', id: 'rail-izq', label: 'Menú a la izquierda', checked: apariencia.railIzquierda, onSelect: () => cambiarApariencia({ railIzquierda: !apariencia.railIzquierda }), soloCelular: true }
   ];
 
   // Campo de luz: una mancha por tarjeta (orden de alta), escala según su último total a pagar.

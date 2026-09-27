@@ -1,0 +1,126 @@
+{
+  "proyecto": "tarjeteando",
+  "feature": "rediseno-fase-1-mes",
+  "objective": "Reemplazar el dashboard por la sección Mes, que responde cuánto del próximo pago ya está comprometido y cuánto queda libre hasta el tope.",
+
+  "scope": {
+    "incluye": [
+      "services/mes.js: ciclo de pago, composición cuotas/fijos/variables, libre vs tope, próximo mes (funciones puras con test)",
+      "MesView: fecha, título del mes, Este ciclo / Próximo mes, frase, cápsula, leyenda, tope, columnas Comprometido · Recurrente · En curso",
+      "Tope mensual editable (slider + valor tocable para escribirlo), guardado en config.tope_mensual",
+      "Pregunta de gastos fijos (reusa preguntasFijos) con Deshacer",
+      "Filas de En curso por tarjeta que llevan a Tarjetas con esa tarjeta elegida",
+      "Versión celular apilada, en el orden del prototipo iPhone"
+    ],
+    "no_incluye": [
+      "Gráfico Evolución y proyección (fase 2): dejar el lugar reservado al final",
+      "StatCards reordenables, badge de cotización y gráfico de torta del dashboard viejo: se eliminan a propósito"
+    ]
+  },
+
+  "database": {
+    "tablas_nuevas": [],
+    "tablas_modificadas": [],
+    "migracion_sql": null
+  },
+
+  "backend": {
+    "endpoints_nuevos": [],
+    "funciones_o_servicios": [],
+    "storage": []
+  },
+
+  "frontend": {
+    "componentes_nuevos": [
+      {
+        "path": "Frontend/src/services/mes.js",
+        "proposito": "Cálculos puros. (1) cicloDePago({hoy, tarjetas, resumenes, ciclosLive, consumosLive}) → { mesKey, porTarjeta:[{tarjetaId, fuente:'resumen_cerrado'|'en_curso'|'sin_datos', total, totalUsd, cierre, vencimiento, plasticos:[{ult4, total}]}] }. El mes del ciclo es el del próximo vencimiento ≥ hoy. Por tarjeta: resumen cerrado que vence en ese mes, si no, el ciclo en curso (ciclosLive) cuyo vencimiento cae en ese mes; si no hay ninguno, 'sin_datos'. (2) composicion({porTarjeta, cuotasDelMes, fijosArs, fijosUsd}) → { cuotas, fijos, fijosUsd, variables, total, avisos[] }; variables = total − cuotas − fijos, nunca negativo (si da negativo: variables 0 y aviso 'datos_inconsistentes'). (3) libre(total, tope) → { libre, pasado:bool, pct }. (4) proximoMes({planes, fijosArs, porTarjetaSiguiente}) → misma forma que composicion, con variables = lo ya consumido en ciclos que vencen el mes siguiente (0 si no hay).",
+        "props": null,
+        "estado_local": [],
+        "interacciones": []
+      },
+      {
+        "path": "Frontend/src/services/mes.test.js",
+        "proposito": "Casos: fixture del prototipo (BBVA cerrado 326.410 + Santander 892.242,65 + Galicia Visa 412.380,20 + Galicia MC 187.905 = 1.818.937,85; cuotas 353.893,44; fijos 70.997 → variables 1.394.047,41; tope 2.000.000 → libre 181.062,15). Tarjeta sin datos no suma y genera aviso. Últimos consumos que ya incluyen la cuota: no se duplica. Tope null → libre null. Fechas en el límite (vencimiento hoy).",
+        "props": null,
+        "estado_local": [],
+        "interacciones": []
+      },
+      {
+        "path": "Frontend/src/views/MesView.jsx",
+        "proposito": "Sección Mes, según el prototipo web. Frase: 'Tu tope para octubre es $X. Ya hay $Y en camino, te quedan $Z.' / 'te pasás por $Z' (con --danger, ícono y texto). Sin tope: 'Ya hay $Y en camino.' + botón 'Poné un tope'. Cápsula de 64 px: segmentos r1/r2/r3 con 3px de separación, ancho proporcional a max(tope,total), etiqueta interna solo si el segmento mide ≥ 9% y el texto entra, marcador de tope (línea 2px --label + 'tope $X'). Leyenda de 4 columnas + slider. Columnas: Comprometido · cuotas (planes del mes: chip plástico, nombre · n/t, 'hasta mes' o 'última', monto), Recurrente · fijos (detalle de gastosFijosDetalle + pregunta), En curso · por tarjeta (fila con mini plástico; SuperCard con 2 plásticos y barra de proporción por plástico).",
+        "props": { "ciclo": "salida de cicloDePago", "composicion": "salida de composicion", "proximo": "salida de proximoMes", "planesDelMes": "array", "fijos": "gastosFijosDetalle", "preguntas": "preguntasFijos", "onResponderPregunta": "fn", "onDeshacerPregunta": "fn", "tope": "number|null", "onTope": "fn", "onAbrirTarjeta": "fn(tarjetaId)", "compacto": "bool" },
+        "estado_local": ["vista: 'ciclo'|'proximo'"],
+        "interacciones": ["Seg Este ciclo / Próximo mes", "Slider → onTope con debounce de 300 ms al guardar (la UI se actualiza en vivo)", "Tocar el valor del tope → input numérico", "Fila de tarjeta → onAbrirTarjeta", "Responder la pregunta → onResponderPregunta; aparece 'Listo…' + Deshacer (onDeshacerPregunta)"]
+      },
+      {
+        "path": "Frontend/src/ui/Capsula.jsx",
+        "proposito": "La cápsula como componente reutilizable (se usa también en Tarjetas con 14 px de alto). Anima width y left con --spring.",
+        "props": { "segmentos": "[{valor, color, textoColor, label}]", "escala": "number", "tope": "number|null", "alto": "number" },
+        "estado_local": [],
+        "interacciones": []
+      }
+    ],
+    "componentes_modificados": [
+      {
+        "path": "Frontend/src/App.jsx",
+        "cambios": [
+          "Sección 'mes' renderiza MesView (DashboardView deja de usarse; borrarla en la fase 6).",
+          "Calcular ciclo, composición y próximo con useMemo desde tarjetas, resumenes, ciclosLive, consumosLive, cuotasActivas (proyectarCuotas) y gastosFijosDetalle.",
+          "onAbrirTarjeta → setActiveView('tarjetas') + tarjeta elegida (estado que usa la fase 3).",
+          "onDeshacerPregunta: sacar la última decisión de esa pregunta de tarjetas_decisiones_fijos y recalcular series."
+        ]
+      },
+      {
+        "path": "Frontend/src/services/storage.js",
+        "cambios": ["removeDecisionFijo(id) para Deshacer"]
+      }
+    ],
+    "rutas_nuevas": [],
+    "estado_global": [
+      { "variable": "tope_mensual", "ubicacion": "storage.config.tope_mensual", "proposito": "Tope de gasto mensual del usuario (null = sin tope)" },
+      { "variable": "tarjetaElegida", "ubicacion": "App.jsx", "proposito": "Tarjeta a mostrar al entrar a la sección Tarjetas desde Mes" }
+    ]
+  },
+
+  "integraciones_externas": [],
+
+  "notificaciones": {
+    "tipo": "in-app",
+    "trigger": "Responder la pregunta de fijos",
+    "destinatario": "usuario",
+    "contenido": "Confirmación en línea ('Listo: Megatlon sigue como fijo.') con Deshacer"
+  },
+
+  "acceptance_criteria": [
+    "Con los datos reales de la Mac, el total de Mes coincide con la suma de lo que muestra cada Card/SuperCard de Últimos consumos más los resúmenes cerrados sin pagar del mismo mes.",
+    "Cuotas del mes = proyección de cuotas del mes correspondiente (verificar con el caso Easy Warnes de cuotas.test.js).",
+    "Mover el tope actualiza frase, cápsula y 'Libre' en vivo; al recargar, el tope sigue.",
+    "Sin tope, no hay segmento 'Libre' ni marcador, y aparece 'Poné un tope'.",
+    "Una tarjeta sin datos del ciclo aparece en En curso como 'Sin datos de este ciclo · Importá Últimos consumos' y no suma.",
+    "Próximo mes muestra cuotas + fijos del mes siguiente y el texto de que todavía no abrió el ciclo, si corresponde.",
+    "A 390 px: orden frase → cápsula → leyenda 2×2 → tope → pregunta → En curso → (gráfico, fase 2) → cuotas → fijos."
+  ],
+
+  "edge_cases": [
+    "Fijos en USD: se muestran aparte (+ U$S x) y no entran en la cápsula en pesos.",
+    "Un resumen cerrado ya vencido (vencimiento < hoy) no cuenta para el ciclo.",
+    "Dos tarjetas del mismo banco con vencimientos en meses distintos: cada una en su mes.",
+    "Total 0 (sin datos): estado vacío con 'Importá tu primer resumen o Últimos consumos' y botón Importar."
+  ],
+
+  "orden_implementacion": [
+    "1. services/mes.js + tests en verde",
+    "2. Capsula.jsx",
+    "3. MesView web",
+    "4. Conectar en App.jsx (incluye Deshacer)",
+    "5. Layout compacto",
+    "6. Comparar contra el prototipo en claro y oscuro"
+  ],
+
+  "riesgos": [
+    { "descripcion": "La definición de 'ciclo de pago' cambia lo que el usuario ve como total del mes respecto del dashboard viejo.", "mitigacion": "Mostrar debajo de En curso de qué fuentes sale el total (Últimos consumos de hoy HH:MM · resumen cerrado de BBVA) y documentar la regla en CLAUDE.md." }
+  ],
+
+  "notas_para_claude_code": "proyectarCuotas devuelve proyeccion[0] = mes siguiente al último resumen, no 'el mes actual'. Elegí el índice por mes_key contra ciclo.mesKey, no por posición. El total de Últimos consumos ya trae la cuota del mes: variables se calcula como residuo. Prototipo: sección Mes de tarjeteando-app-web.html y del iPhone."
+}

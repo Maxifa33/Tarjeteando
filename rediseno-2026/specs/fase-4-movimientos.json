@@ -1,0 +1,125 @@
+{
+  "proyecto": "tarjeteando",
+  "feature": "rediseno-fase-4-movimientos",
+  "objective": "Movimientos más fácil de recorrer: lista por día, filtros en una fila y un panel de detalle donde se renombra, se clasifica y se ve la historia de cada comercio.",
+
+  "scope": {
+    "incluye": [
+      "Encabezado: Por mes / Por resumen, fichas de período (en 'por resumen', fichas por tarjeta con chip de plástico), total del período y barra Variables / Fijos / Cuotas",
+      "Filtros en una fila: búsqueda + Todos, Variables, Fijos, Cuotas, Reintegros, En dólares",
+      "Lista agrupada por día con el total del día; las cuotas plegadas en 'Cuotas del período'",
+      "Panel de detalle a la derecha (web) y hoja inferior (celular): tarjeta y plástico, nombre, monto, fecha completa, descripción original en monoespaciada, plan en cuotas + 'Ver plan en Cuotas', Tipo Variable | Fijo, renombrar (crea regla) con aviso, historial del comercio en 6 resúmenes",
+      "Reintegros pasa a ser un filtro de Movimientos (monto en --ok con '−' y la etiqueta 'Reintegro'); ReintegrosView sale del menú",
+      "Estados vacíos: sin resultados con filtros (Quitar filtros) y período sin datos"
+    ],
+    "no_incluye": [
+      "Cambiar cómo se crean las reglas o cómo se calcula el tipo (se reusan onEditarDescripcion y onCambiarTipo)",
+      "Edición de montos o fechas"
+    ]
+  },
+
+  "database": {
+    "tablas_nuevas": [],
+    "tablas_modificadas": [],
+    "migracion_sql": null
+  },
+
+  "backend": {
+    "endpoints_nuevos": [],
+    "funciones_o_servicios": [],
+    "storage": []
+  },
+
+  "frontend": {
+    "componentes_nuevos": [
+      {
+        "path": "Frontend/src/services/movimientos-vista.js",
+        "proposito": "Sacar de MovimientosView la lógica de filtrado a funciones puras: filtrarMovimientos(movs, {modo:'mes'|'resumen', periodo, resumenId, tipo, texto, tipos, reintegros}) y agruparPorDia(movs) → [{fecha, label ('Viernes 25 de septiembre'), total, filas}], separarCuotas(movs), composicionPeriodo(movs, tipos) y historialComercio(movs, claveComercio, ultimos:6) usando claveComercio de series.js. Mantener exactamente la semántica actual de los modos 'mes' y 'resumen' (misma paginación y el mismo resumen por defecto).",
+        "props": null,
+        "estado_local": [],
+        "interacciones": []
+      },
+      {
+        "path": "Frontend/src/services/movimientos-vista.test.js",
+        "proposito": "Mismos resultados que la vista actual para los modos mes y resumen con las fixtures; búsqueda por nombre limpio y por descripción original; USD; reintegros con signo; agrupación por día en fecha local (sin corrimiento UTC); historial de un comercio renombrado.",
+        "props": null,
+        "estado_local": [],
+        "interacciones": []
+      },
+      {
+        "path": "Frontend/src/ui/FilaMovimiento.jsx",
+        "proposito": "Botón fila (≥ 56 px web, 58 celular). Web: chip plástico, nombre, descripción original + ·ult4 en --label2, etiquetas Fijo (borde --r2) / Reintegro (borde --ok) / U$S / Cuota n/t (borde --r1), monto rounded a la derecha. Celular: sin etiquetas; el tipo va como texto en la segunda línea ('Fijo · ·4410').",
+        "props": { "mov": "object", "nombre": "string", "tipo": "string", "seleccionado": "bool", "onClick": "fn", "compacto": "bool" },
+        "estado_local": [],
+        "interacciones": []
+      },
+      {
+        "path": "Frontend/src/ui/DetalleMovimiento.jsx",
+        "proposito": "Contenido del panel o de la hoja. Seg Variable | Fijo → onCambiarTipo(mov, tipo) con 'Vale desde este resumen en adelante…'. Campo 'Nombre para mostrar' + Guardar → onEditarDescripcion (regla por clave de comercio) y aviso 'Regla creada: «RAW» se va a mostrar como «X»' 3.2 s en la parte de abajo (role=status). Historial: 6 columnas de 14 px del color de la tarjeta, la actual opaca y el resto al 45%, más una frase ('Promedio de los últimos 6: $x' / 'Subió 14% este mes…' si hay pregunta de fijo pendiente).",
+        "props": { "mov": "object", "identidad": "object", "tipo": "string", "historial": "array", "plan": "object|null", "onCambiarTipo": "fn", "onEditarDescripcion": "fn", "onVerPlan": "fn(planId)" },
+        "estado_local": ["borrador: string"],
+        "interacciones": []
+      }
+    ],
+    "componentes_modificados": [
+      {
+        "path": "Frontend/src/App.jsx → MovimientosView (moverla a Frontend/src/views/MovimientosView.jsx)",
+        "cambios": [
+          "Nueva UI según el prototipo. Web: grid 1fr + 380 px; el panel queda sticky arriba.",
+          "Celular: DetalleMovimiento dentro de <Hoja>.",
+          "Selección por defecto: el primer movimiento visible; si el filtro deja afuera al seleccionado, pasar al primero visible.",
+          "Recibe reintegros (los datos que hoy usa ReintegrosView) y los mezcla como filas tipo 'reintegro'. Por defecto solo los recientes, con 'Ver anteriores' dentro del filtro Reintegros (mismo comportamiento que hoy).",
+          "Mantener filtroTipoGastoInicial (entrada desde otras vistas)."
+        ]
+      },
+      {
+        "path": "Frontend/src/App.jsx",
+        "cambios": ["Quitar Reintegros del menú Más (fase 0).", "onVerPlan → sección Cuotas con ese plan elegido (fase 5)."]
+      }
+    ],
+    "rutas_nuevas": [],
+    "estado_global": [
+      { "variable": "movimientosFiltro", "ubicacion": "App.jsx", "proposito": "Para abrir Movimientos ya filtrado desde Tarjetas (tarjeta) o desde Mes" }
+    ]
+  },
+
+  "integraciones_externas": [],
+
+  "notificaciones": {
+    "tipo": "in-app",
+    "trigger": "Guardar un nombre (crear regla)",
+    "destinatario": "usuario",
+    "contenido": "Aviso 'Regla creada: «RAW» se va a mostrar como «X»' durante 3.2 s"
+  },
+
+  "acceptance_criteria": [
+    "Con los mismos filtros, la lista nueva devuelve exactamente los mismos movimientos que la vista vieja (lo prueban los tests).",
+    "Renombrar un comercio cambia el nombre en todos los meses y en la regla; el tipo no cambia (regla existente del proyecto).",
+    "Pasar un movimiento a Fijo o a Variable actualiza la etiqueta, la barra del período y Mes.",
+    "El filtro Reintegros muestra los mismos reintegros que ReintegrosView, con el mismo total.",
+    "En celular, tocar una fila abre la hoja; el velo, la X y Esc la cierran; el foco vuelve a la fila.",
+    "Búsqueda con 200+ movimientos sin lag perceptible (filtrado memoizado)."
+  ],
+
+  "edge_cases": [
+    "Movimiento sin fecha: grupo 'Sin fecha' al final.",
+    "Movimiento en USD y en pesos a la vez: mostrar los dos montos.",
+    "Nombre vacío al guardar: no crea regla; el botón queda deshabilitado.",
+    "Cuota de un plan que ya no existe en construirPlanes: ocultar 'Ver plan'."
+  ],
+
+  "orden_implementacion": [
+    "1. movimientos-vista.js + tests contra el comportamiento actual",
+    "2. FilaMovimiento y DetalleMovimiento",
+    "3. MovimientosView nueva (web)",
+    "4. Reintegros como filtro",
+    "5. Hoja en celular",
+    "6. Quitar ReintegrosView del menú (el componente se borra en la fase 6)"
+  ],
+
+  "riesgos": [
+    { "descripcion": "La vista vieja tiene lógica sutil de 'por resumen' (resumen por defecto, paginación).", "mitigacion": "Escribir primero los tests con el comportamiento actual y recién después mover la lógica." }
+  ],
+
+  "notas_para_claude_code": "Prototipo: sección Movimientos en web e iPhone. En el prototipo el total del período es de datos de ejemplo; en la app es el real. Los días de la semana salen de la fecha local, nunca hardcodeados."
+}
