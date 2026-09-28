@@ -158,7 +158,21 @@ describe('fechas en el límite', () => {
     const r = [{ tarjeta: 'VISA BBVA', fecha_cierre: '2026-09-15', fecha_vencimiento: '2026-09-25', total_a_pagar_pesos: 1000 }];
     const c = cicloDePago({ hoy: HOY, tarjetas: [tarjetas[0]], resumenes: r, mesKey: '2026-09' });
     assert.equal(c.porTarjeta[0].fuente, 'sin_datos');
-    assert.equal(mesDelProximoVencimiento({ hoy: HOY, resumenes: r }), '2026-09');
+    // Venció el 25/9 y hoy es 26/9: el próximo pago de esa tarjeta es en octubre.
+    assert.equal(mesDelProximoVencimiento({ hoy: HOY, resumenes: r }), '2026-10');
+  });
+
+  test('todo vencido: el próximo pago se estima con el día del último vencimiento de cada tarjeta', () => {
+    const r = [
+      { tarjeta: 'VISA BBVA', fecha_vencimiento: '2026-08-05' },
+      { tarjeta: 'VISA BBVA', fecha_vencimiento: '2026-09-05' },
+      { tarjeta: 'VISA Galicia', fecha_vencimiento: '2026-09-16' }
+    ];
+    assert.equal(mesDelProximoVencimiento({ hoy: HOY, resumenes: r }), '2026-10');
+    // Si una tarjeta todavía no llegó a su día de vencimiento este mes, es este mes.
+    const r2 = [{ tarjeta: 'VISA BBVA', fecha_vencimiento: '2026-07-28' }];
+    assert.equal(mesDelProximoVencimiento({ hoy: HOY, resumenes: r2 }), '2026-09');
+    assert.equal(mesDelProximoVencimiento({ hoy: HOY, resumenes: [] }), '2026-09');
   });
 
   test('dos tarjetas del mismo banco que vencen en meses distintos: cada una en su mes', () => {

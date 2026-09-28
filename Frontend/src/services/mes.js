@@ -65,13 +65,31 @@ function ciclosConDatos(ciclosLive = {}, consumosLive = [], hoy) {
     .filter((x) => x.datos.n > 0);
 }
 
-/** Mes del próximo vencimiento ≥ hoy. Sin ninguno: el mes de hoy. */
+/**
+ * Mes del próximo vencimiento ≥ hoy.
+ * Si todo lo cargado ya venció (ej.: el último resumen venció el 5 y hoy es 27), el
+ * próximo pago se estima con el último vencimiento de cada tarjeta corrido al mes de
+ * hoy: si ese día ya pasó, es el mes siguiente. Sin ningún dato: el mes de hoy.
+ */
 export function mesDelProximoVencimiento({ hoy = hoyISO(), resumenes = [], ciclosLive = {}, consumosLive = [] } = {}) {
-  const vtos = [
-    ...resumenes.map((r) => r?.fecha_vencimiento),
-    ...ciclosConDatos(ciclosLive, consumosLive, hoy).map((x) => x.ciclo.fecha_vencimiento)
-  ].filter((v) => mesKeyDe(v) && v >= hoy).sort();
-  return mesKeyDe(vtos[0]) || mesKeyDe(hoy);
+  const fuentes = [
+    ...resumenes.map((r) => ({ clave: r?.tarjeta || '', vto: r?.fecha_vencimiento })),
+    ...ciclosConDatos(ciclosLive, consumosLive, hoy).map((x) => ({ clave: x.ciclo.grupoKey || '', vto: x.ciclo.fecha_vencimiento }))
+  ].filter((f) => mesKeyDe(f.vto) && /^\d{4}-\d{2}-\d{2}/.test(f.vto));
+
+  const futuros = fuentes.map((f) => f.vto).filter((v) => v >= hoy).sort();
+  if (futuros.length) return mesKeyDe(futuros[0]);
+
+  const mkHoy = mesKeyDe(hoy);
+  const ultimoPorClave = new Map();
+  fuentes.forEach((f) => {
+    if (!ultimoPorClave.has(f.clave) || f.vto > ultimoPorClave.get(f.clave)) ultimoPorClave.set(f.clave, f.vto);
+  });
+  const candidatos = [...ultimoPorClave.values()].map((vto) => {
+    const dia = vto.slice(8, 10);
+    return `${mkHoy}-${dia}` >= hoy ? mkHoy : sumarMeses(mkHoy, 1);
+  }).sort();
+  return candidatos[0] || mkHoy;
 }
 
 /**

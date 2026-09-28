@@ -288,7 +288,10 @@ const MesView = ({
   // Slider: el máximo sale del total y del tope guardado (no del que se está moviendo).
   const maximo = Math.max(1000000, Math.ceil((Math.max(total * 2, (tope || 0) * 1.5)) / 500000) * 500000);
 
-  const sinNada = esCiclo && total === 0 && ciclo.porTarjeta.every(t => t.fuente === 'sin_datos');
+  // Estado vacío solo para quien todavía no importó nada (sin historia, sin fijos, sin cuotas).
+  // Con historia pero sin datos del ciclo, se muestra el mes con lo comprometido.
+  const sinHistoria = !columnasEvo.some(c => c.total > 0) && (fijos?.items || []).length === 0 && planesDelMes.length === 0;
+  const sinNada = esCiclo && total === 0 && ciclo.porTarjeta.every(t => t.fuente === 'sin_datos') && sinHistoria;
   const inconsistente = c.avisos?.some(a => a.tipo === 'datos_inconsistentes');
 
   // ----- frase -----
