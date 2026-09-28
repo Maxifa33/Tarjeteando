@@ -467,9 +467,11 @@ class PDFParserService {
     }
     
     if (metadatos.fecha_cierre) {
-      const fecha = new Date(metadatos.fecha_cierre);
-      metadatos.mes = fecha.getMonth() + 1;
-      metadatos.anio = fecha.getFullYear();
+      // Del string 'YYYY-MM-DD', sin new Date(): leída como UTC, un cierre el día 1
+      // quedaba en el mes anterior al correr el backend en hora argentina.
+      const [anio, mes] = String(metadatos.fecha_cierre).split('-').map(Number);
+      metadatos.mes = mes;
+      metadatos.anio = anio;
     }
 
     return metadatos;
