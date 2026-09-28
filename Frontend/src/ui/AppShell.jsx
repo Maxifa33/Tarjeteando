@@ -1,17 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Search, Plus, X, Check } from 'lucide-react';
+import { Search, Plus, X, Check, MoreHorizontal } from 'lucide-react';
 import { SECCIONES } from './secciones.js';
 import CampoDeLuz from './CampoDeLuz.jsx';
 import Rail from './Rail.jsx';
 import useCompacto from './useCompacto.js';
 
-// Ícono de apariencia del prototipo: círculo mitad lleno.
-const IconoApariencia = () => (
-  <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" aria-hidden="true">
-    <circle cx="12" cy="12" r="9" />
-    <path d="M12 3a9 9 0 0 0 0 18Z" fill="currentColor" />
-  </svg>
-);
 
 const Marca = () => (
   <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
@@ -172,12 +165,13 @@ const AppShell = ({
         ref={masRef}
         type="button"
         className="ico vidrio"
-        aria-label="Apariencia y más opciones"
+        aria-label="Más"
+        title="Más"
         aria-haspopup="menu"
         aria-expanded={menuAbierto}
         onClick={() => setMenuAbierto(a => !a)}
       >
-        <IconoApariencia />
+        <MoreHorizontal size={20} strokeWidth={2} aria-hidden="true" />
       </button>
       {menuAbierto && (
         <MenuMas
