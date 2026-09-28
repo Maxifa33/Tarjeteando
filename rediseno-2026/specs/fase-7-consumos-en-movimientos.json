@@ -1,0 +1,121 @@
+{
+  "proyecto": "tarjeteando",
+  "feature": "rediseno-fase-7-consumos-en-movimientos",
+  "objective": "Últimos consumos deja de ser una vista aparte escondida en el menú Más: sus consumos (lo gastado después del último cierre) pasan a Movimientos, como se hizo con Reintegros. Una sola lista de gastos.",
+
+  "scope": {
+    "incluye": [
+      "Movimientos muestra los consumos de Últimos consumos que todavía no están en un resumen, marcados 'En curso'",
+      "Nuevo filtro 'En curso' en la fila de filtros (después de 'Todos'), que muestra solo esos consumos, sin importar el período",
+      "Modo 'Por resumen': una ficha 'En curso' por tarjeta, antes de sus resúmenes cerrados",
+      "Modo 'Por mes': el mes de cada consumo en curso los incluye junto con los movimientos de resúmenes (sin duplicar)",
+      "Cabecera cuando el filtro 'En curso' está activo: total, consumos, % del último cierre, cuándo se actualizó, botón Importar",
+      "Tarjetas sin resúmenes (Macro, Santander American): 'Ver todos' abre Movimientos con el filtro En curso y esa tarjeta",
+      "Borrar ConsumosLiveView, su ítem del menú Más y la vista 'consumos-live'; 'Borrar Últimos consumos importados' pasa a Importar (con confirmación)"
+    ],
+    "no_incluye": [
+      "Cambios en cómo se importan o se agrupan los ciclos de Últimos consumos",
+      "Los gráficos 'Gasto por día' y 'Gasto por categoría' (se eliminan: Mes y Tarjetas ya muestran el en curso)",
+      "El toggle 'Ocultar ya facturados' (siempre se ocultan: si ya está en un resumen, aparece como movimiento del resumen)"
+    ]
+  },
+
+  "database": { "tablas_nuevas": [], "tablas_modificadas": [], "migracion_sql": null },
+
+  "backend": { "endpoints_nuevos": [], "funciones_o_servicios": [], "storage": [] },
+
+  "frontend": {
+    "componentes_nuevos": [],
+    "componentes_modificados": [
+      {
+        "path": "Frontend/src/services/movimientos-vista.js",
+        "cambios": [
+          "movimientosEnCurso({ consumosLive, ciclosLive, resumenes, tarjetas, reglas }) → filas con la forma de un movimiento: { id: 'live:<id>', origen: 'en_curso', fecha_compra, referencia_original, referencia_limpia (con las reglas de nombres si aplican), tarjeta, tarjetaId/grupoKey, ult4, monto_pesos, monto_dolares, cuota_texto ('n/t' si es cuota), categoria, es_pendiente }.",
+          "Qué consumos entran: EXACTAMENTE los mismos que Mes y Tarjetas cuentan como 'en curso' (reusar services/consumos/ciclos.js — cardsEnCurso / resumenCard — no reimplementar la deduplicación con fechas). Se excluyen los pagos (es_pago).",
+          "filtrarMovimientos acepta enCurso (lista anterior) y tipo 'en_curso': con 'en_curso' devuelve solo esas filas (sin período), filtradas por texto y tarjeta. En modo 'mes' mezcla las del período. En modo 'resumen' con resumenId 'en_curso:<grupoKey>' devuelve las de esa tarjeta.",
+          "tipoDeFila: una fila en curso es 'reintegro' si es negativa, 'cuota' si tiene cuota_texto, si no 'variable' (no hay fijos hasta que llega el resumen).",
+          "resumenEnCurso(filas, resumenes) → { total, totalUsd, cantidad, pctUltimoCierre, actualizado } con la misma cuenta que la vieja ConsumosLiveView."
+        ]
+      },
+      {
+        "path": "Frontend/src/services/movimientos-vista.test.js",
+        "cambios": [
+          "La suma de movimientosEnCurso por tarjeta coincide con el 'en curso' de Mes (cicloDePago) para las mismas fixtures.",
+          "Un consumo que ya está en un resumen importado no aparece dos veces en modo 'mes'.",
+          "Tarjeta sin ningún resumen: todos sus consumos (no pagos) aparecen.",
+          "es_pago excluido; negativo = reintegro; cuota con cuota_texto.",
+          "Filtro 'en_curso' ignora el período y respeta texto y tarjeta.",
+          "Los tests existentes siguen en verde sin cambios de resultado cuando no hay consumos en curso."
+        ]
+      },
+      {
+        "path": "Frontend/src/views/MovimientosView.jsx",
+        "cambios": [
+          "Prop nueva enCurso (+ onImportar). Filtro 'En curso' entre 'Todos' y 'Variables'; se oculta si no hay consumos en curso.",
+          "FilaMovimiento: etiqueta 'En curso' (borde --label2) y, si es_pendiente, 'Pendiente'. Segunda línea: categoría · ·ult4.",
+          "Modo 'Por resumen': por cada tarjeta con consumos en curso, una ficha 'En curso' antes de sus resúmenes (mismo chip de plástico).",
+          "Con el filtro 'En curso' activo, reemplazar la cabecera del período por: 'En curso · $total' + '+ U$S x' si hay + 'N consumos · X % del último cierre · actualizado <momento>' + botón Importar.",
+          "DetalleMovimiento para una fila en curso: tarjeta, monto, fecha, descripción original, categoría, cuota n/t. Ocultar 'Tipo Variable | Fijo' y mostrar en su lugar 'El tipo se define cuando llega el resumen'. 'Renombrar' solo si las reglas de nombres ya se aplican a Últimos consumos; si no, ocultarlo. Historial del comercio: incluir las filas en curso.",
+          "Estado vacío del filtro 'En curso': 'No hay consumos en curso. Importá tus Últimos consumos.' + botón Importar."
+        ]
+      },
+      {
+        "path": "Frontend/src/App.jsx",
+        "cambios": [
+          "Calcular enCurso con movimientosEnCurso (useMemo sobre consumosLive, ciclosLive, resumenes, tarjetas, reglas) y pasarlo a MovimientosView.",
+          "Tarjetas → onVerMovimientos de un grupo sin resúmenes: setMovimientosFiltro({ tarjeta: <nombre o grupoKey>, tipo: 'en_curso', n }) + Movimientos (en vez de 'consumos-live').",
+          "Quitar el ítem 'Últimos consumos' del menú Más, la entrada en TITULOS y la rama activeView === 'consumos-live'. Cualquier setActiveView('consumos-live') restante → Movimientos con filtro 'en_curso'.",
+          "handleDeleteConsumosLive pasa a Importar."
+        ]
+      },
+      {
+        "path": "Frontend/src/views/ImportarView.jsx (o donde viva la importación de Últimos consumos)",
+        "cambios": ["Link 'Borrar Últimos consumos importados' debajo de la carga de Últimos consumos, con confirmación (no window.confirm: usar el patrón de confirmación de la app si existe)."]
+      },
+      {
+        "path": "Frontend/src/views/ConsumosLiveView.jsx",
+        "cambios": ["Borrar el archivo."]
+      },
+      {
+        "path": "Frontend/src/novedades.js + GUIA + CLAUDE.md",
+        "cambios": ["Subir APP_VERSION. Novedad: 'Últimos consumos ahora está en Movimientos: filtro En curso'. Actualizar la Guía y la estructura en CLAUDE.md."]
+      }
+    ],
+    "rutas_nuevas": [],
+    "estado_global": []
+  },
+
+  "integraciones_externas": [],
+
+  "notificaciones": { "tipo": null, "trigger": null, "destinatario": null, "contenido": null },
+
+  "acceptance_criteria": [
+    "El total del filtro 'En curso' es igual a la suma de las tarjetas con fuente 'en curso' en Mes → En curso · por tarjeta.",
+    "Ningún consumo aparece dos veces en Movimientos (en curso + resumen).",
+    "Los consumos de Macro y Santander American (sin resúmenes) se ven en Movimientos.",
+    "Desde Tarjetas, 'Ver todos' de cualquier tarjeta abre Movimientos con sus consumos.",
+    "El menú Más ya no tiene 'Últimos consumos' y no queda código de ConsumosLiveView.",
+    "npm test en verde."
+  ],
+
+  "edge_cases": [
+    "Sin Últimos consumos importados: el filtro 'En curso' no aparece y nada cambia.",
+    "Consumo en USD solamente: monto en U$S, igual que los movimientos.",
+    "Consumo pendiente (es_pendiente): etiqueta 'Pendiente'.",
+    "Llega el resumen que cubre esos consumos: dejan de estar 'En curso' y aparecen una sola vez como movimientos del resumen."
+  ],
+
+  "orden_implementacion": [
+    "1. movimientosEnCurso + filtrarMovimientos + tests",
+    "2. MovimientosView: filtro, fila, ficha por resumen, cabecera, detalle",
+    "3. App.jsx: conectar, Tarjetas → Movimientos, quitar la vista vieja",
+    "4. Importar: borrar consumos",
+    "5. Borrar ConsumosLiveView, Novedades, Guía, CLAUDE.md"
+  ],
+
+  "riesgos": [
+    { "descripcion": "Duplicar consumos o no coincidir con el total de Mes.", "mitigacion": "No reimplementar la deduplicación: usar la misma función que Mes y testear que los totales coinciden." }
+  ],
+
+  "notas_para_claude_code": "Mismo patrón que Reintegros en la fase 4. Mantener la estética de Movimientos (sin gráficos nuevos). Commit en feat/rediseno-bc y actualizar el PR."
+}

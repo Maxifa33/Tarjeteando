@@ -37,7 +37,7 @@ tarjetas-proyecto/
 │       ├── index.css          ← importa ui/tokens.css; clases mínimas de las vistas secundarias
 │       ├── novedades.js       ← APP_VERSION, NOVEDADES, GUIA
 │       ├── views/             ← secciones: MesView, TarjetasView, MovimientosView, CuotasView,
-│       │                         ConsumosLiveView, Guia (Novedades + Guía), Onboarding
+│       │                         Guia (Novedades + Guía), Onboarding
 │       ├── ui/                ← piezas visuales: tokens.css, AppShell, Rail, Hoja, Seg, CampoDeLuz,
 │       │                         Capsula, EvolucionChart, DetalleMes, MiniHistorial, Plastico,
 │       │                         PilaWallet, FilaMovimiento, DetalleMovimiento, LineaDeTiempoPlanes,
@@ -47,7 +47,7 @@ tarjetas-proyecto/
 │           ├── mes.js             ← ciclo de pago, composición, tope, próximo mes
 │           ├── evolucion.js       ← gráfico Evolución y proyección
 │           ├── tarjetas.js        ← qué muestra cada plástico, nombres personalizados
-│           ├── movimientos-vista.js ← filtros, días, historial de comercio
+│           ├── movimientos-vista.js ← filtros, días, historial de comercio, consumos en curso
 │           ├── planes-vista.js    ← línea de tiempo y cifras de Cuotas
 │           ├── cuotas.js          ← planes y proyección (única calculadora de cuotas)
 │           ├── series.js          ← gastos fijos (cadenas por ID de movimiento)
@@ -71,10 +71,10 @@ tarjetas-proyecto/
 `App.jsx` conecta estado y handlers; la UI de cada sección vive en `src/views/` y los cálculos en `src/services/` (funciones puras con test). Regla: **código nuevo fuera de `App.jsx`**.
 
 - `AppShell` (`ui/`) — marco: barra superior con pestañas **Mes · Tarjetas · Movimientos · Cuotas**, Buscar, menú **Más** e **Importar**; ventana de vidrio con scroll interno; en celular (< 768 px) riel plegable abajo.
-- Menú **Más** — Apariencia (Sistema / Claro / Oscuro, Reducir transparencia, Menú a la izquierda en celular), Ajustes (`SettingsModal`), Reglas de nombres (`ReglasView`), Últimos consumos (`ConsumosLiveView`), Guía y novedades.
+- Menú **Más** (⋯) — Ajustes (`SettingsModal`), Reglas de nombres (`ReglasView`), Guía y novedades, Apariencia (Sistema / Claro / Oscuro, Reducir transparencia, Menú a la izquierda en celular).
 - `MesView` — próximo pago, cápsula cuotas/fijos/variables, tope, pregunta de fijos, En curso por tarjeta, Evolución y proyección.
 - `TarjetasView` — pila tipo Wallet + detalle de la tarjeta, o la vista Todas (con resúmenes cargados y borrar).
-- `MovimientosView` — lista por día, filtros en una fila (Reintegros es un filtro), detalle en panel o en `Hoja`.
+- `MovimientosView` — lista por día, filtros en una fila (Reintegros y **En curso** son filtros), detalle en panel o en `Hoja`. Los Últimos consumos que todavía no están en un resumen se ven acá (fase 7); ya no hay vista aparte.
 - `CuotasView` — línea de tiempo de planes, decisiones sobre planes "a revisar".
 - `activeView` sigue siendo la fuente de verdad de la navegación ('dashboard' = Mes).
 
@@ -135,9 +135,9 @@ Para otros bancos, el backend usa Claude Vision API como fallback automático (r
 
 ---
 
-## Cambios recientes (27/09/2026) — Rediseño B+C
+## Cambios recientes (27/09/2026) — Rediseño B+C (fases 0 a 7)
 
-Rama `feat/rediseno-bc` (fases 0 a 6, specs en `rediseno-2026/specs/`, prototipos en `rediseno-2026/prototipos/`).
+Rama `feat/rediseno-bc` (fases 0 a 7, specs en `rediseno-2026/specs/`, prototipos en `rediseno-2026/prototipos/`).
 
 **Qué cambió para el usuario:** la app pasa a 4 secciones (Mes, Tarjetas, Movimientos, Cuotas) dentro de una ventana de vidrio, con apariencia Sistema / Claro / Oscuro. El dashboard viejo, las StatCards, la vista Reintegros y los temas Liquid / dorado ya no existen.
 
@@ -152,6 +152,8 @@ Rama `feat/rediseno-bc` (fases 0 a 6, specs en `rediseno-2026/specs/`, prototipo
 - **Accesibilidad** es criterio de aceptación: foco visible, `aria-label` en íconos, áreas táctiles ≥ 44 px en celular, `prefers-reduced-motion`, `prefers-reduced-transparency` y `prefers-contrast` respetados. Ningún texto usa el color de una serie.
 - Modales, hojas y avisos van en un **portal a `<body>`** (dentro de `<main>` quedan debajo de la barra y del riel y el vidrio no desenfoca).
 - Fechas: nunca `new Date('YYYY-MM-DD')`; siempre strings o constructores locales.
+
+**Últimos consumos en Movimientos (fase 7):** `movimientosEnCurso` (`services/movimientos-vista.js`) arma filas con forma de movimiento (`origen: 'en_curso'`, id `live:<id>`) a partir de `cardsEnCurso` / `resumenCard`: son exactamente los consumos que Mes y Tarjetas cuentan como en curso. Se excluyen los pagos y los ciclos que ya cubre un resumen importado (cierre ±5 días o posterior), así nada aparece dos veces. Los nombres se limpian con las mismas reglas que los resúmenes (`nombreSegunReglas`). En curso no hay fijos: el tipo se define cuando llega el resumen. "Borrar Últimos consumos importados" está en Importar.
 
 **localStorage 1.4.0** (`services/migraciones.js`, idempotente): el tema viejo pasa a `config.apariencia`; se borran `tarjetas_theme`, `dashboard_card_order` y `config.theme`. Keys y campos nuevos: `config.apariencia`, `config.tope_mensual`, `tarjetas_decisiones_planes`; las decisiones de fijos tienen `id` (Deshacer). Todo viaja en `exportAll`/`importAll`; un backup de 1.3.0 se importa sin pérdida (test).
 
@@ -181,7 +183,7 @@ Rama `feat/ultimos-consumos-supercard`. Diseño: `~/Claude/Projects/Tarjeteando/
 - Un plástico sin consumos en el ciclo no ocupa fila.
 
 **localStorage 1.3.0:** keys nuevas `tarjetas_ciclos_live`, `tarjetas_alias_ult4`, `plantillas_consumos`. Los consumos viejos sin grupo se reemplazan al subir de nuevo su archivo.
-**ConsumosLiveView** ya no tiene uploader propio: su botón lleva a Importar.
+**ConsumosLiveView** ya no tiene uploader propio: su botón lleva a Importar. *(Desde la fase 7 del rediseño la vista no existe: los consumos están en Movimientos.)*
 **Build:** `node_modules` está instalado para macOS; en la VM de Cowork `vite build` falla por el binario de rollup (no es un bug del código).
 
 ---
@@ -243,7 +245,7 @@ Rama `fix/auditoria-parser-cuotas-2026-09`. Detalle completo en `references/cont
 ### Feature "Últimos consumos" (consumos pre-resumen, XLSX)
 - Nueva sección en sidebar (icon Zap). Importa el export "Últimos consumos" de Galicia (.xlsx) para ver gasto en curso antes del cierre.
 - **Independiente** de resúmenes/movimientos/cuotas. Vive en localStorage key `tarjetas_consumos_live`.
-- Parser nuevo: `Frontend/src/services/consumos-parser.js` (usa SheetJS). Componentes `ConsumosLiveView` + `CSVColumnMapper` en `App.jsx`.
+- Parser nuevo: `Frontend/src/services/consumos-parser.js` (usa SheetJS). Componentes `ConsumosLiveView` + `CSVColumnMapper` en `App.jsx`. *(ConsumosLiveView se borró en la fase 7.)*
 - **Nueva dependencia:** `xlsx`. Correr `cd Frontend && npm install` antes de levantar.
 
 ---

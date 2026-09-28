@@ -365,6 +365,7 @@
 .tj .tag.cuota { box-shadow: inset 0 0 0 1px var(--r1); }
 .tj .tag.reint { box-shadow: inset 0 0 0 1px var(--ok); }
 .tj .tag.revisar { box-shadow: inset 0 0 0 1px var(--warn); }
+.tj .tag.en-curso { box-shadow: inset 0 0 0 1px var(--label2); }
 
 .tj .pchip {
   min-height: 36px;

@@ -66,7 +66,11 @@ const DetalleMovimiento = ({
         <span aria-hidden="true" style={{ width: 42, height: 28, borderRadius: 6, background: identidad.plastico, boxShadow: '0 4px 10px rgba(0,0,0,.25)', flexShrink: 0 }} />
         <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
           <span style={{ fontSize: 13, fontWeight: 600 }}>{nombreTarjeta}</span>
-          <span className="cap">{mov.tarjeta_ult4 ? `Plástico ·${mov.tarjeta_ult4}` : (mov.resumen_id ? 'Resumen importado' : '')}</span>
+          <span className="cap">
+            {mov.origen === 'en_curso'
+              ? `Últimos consumos${mov.tarjeta_ult4 ? ` · plástico ·${mov.tarjeta_ult4}` : ''}`
+              : mov.tarjeta_ult4 ? `Plástico ·${mov.tarjeta_ult4}` : (mov.resumen_id ? 'Resumen importado' : '')}
+          </span>
         </span>
       </div>
 
@@ -74,11 +78,11 @@ const DetalleMovimiento = ({
         <span style={{ fontSize: 20, lineHeight: '25px', fontWeight: 700, letterSpacing: '-.01em', overflowWrap: 'anywhere' }}>{actual}</span>
         {ars !== 0 && <span className="rnd" style={{ fontSize: 26, lineHeight: '32px', fontWeight: 700, color: esReint ? 'var(--ok)' : 'var(--label)' }}>{signo}{pesos(Math.abs(ars), { decimales: 2 })}</span>}
         {usd !== 0 && <span className="rnd" style={{ fontSize: ars !== 0 ? 17 : 26, lineHeight: ars !== 0 ? '22px' : '32px', fontWeight: 700, color: esReint ? 'var(--ok)' : 'var(--label)' }}>{signo}{dolares(Math.abs(usd))}</span>}
-        <span className="cap" style={{ fontSize: 13 }}>{fechaCompleta(mov.fecha_compra || mov.fecha)}{esReint ? ' · Reintegro' : ''}</span>
+        <span className="cap" style={{ fontSize: 13 }}>{fechaCompleta(mov.fecha_compra || mov.fecha)}{esReint ? ' · Reintegro' : ''}{mov.origen === 'en_curso' ? ' · En curso' : ''}{mov.es_pendiente ? ' · Pendiente' : ''}</span>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <span className="cap">Descripción en el resumen</span>
+        <span className="cap">{mov.origen === 'en_curso' ? 'Descripción en Últimos consumos' : 'Descripción en el resumen'}{mov.categoria ? ` · ${mov.categoria}` : ''}</span>
         <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12, padding: '6px 10px', borderRadius: 8, background: 'var(--fill)', overflowWrap: 'anywhere' }}>
           {mov.referencia_original || '—'}
         </span>
@@ -99,7 +103,14 @@ const DetalleMovimiento = ({
         </div>
       )}
 
-      {(tipo === 'fijo' || tipo === 'variable') && (
+      {mov.origen === 'en_curso' && tipo === 'variable' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span className="cap">Tipo de gasto</span>
+          <span style={{ fontSize: 14, color: 'var(--label2)' }}>El tipo se define cuando llega el resumen.</span>
+        </div>
+      )}
+
+      {mov.origen !== 'en_curso' && (tipo === 'fijo' || tipo === 'variable') && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <span className="cap">Tipo de gasto</span>
           <Seg

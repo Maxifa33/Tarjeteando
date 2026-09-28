@@ -11,11 +11,11 @@ import MesView from './views/MesView.jsx';
 import TarjetasView from './views/TarjetasView.jsx';
 import MovimientosView from './views/MovimientosView.jsx';
 import CuotasView from './views/CuotasView.jsx';
-import ConsumosLiveView from './views/ConsumosLiveView.jsx';
 import OnboardingWizard from './views/Onboarding.jsx';
 import { NovedadesModal, GuiaView } from './views/Guia.jsx';
 import { armarTarjetas, buscarTarjeta, nombreVisible, migrarNombresLive } from './services/tarjetas.js';
 import { serieEvolucion, detalleMes } from './services/evolucion.js';
+import { movimientosEnCurso, nombreSegunReglas } from './services/movimientos-vista.js';
 import { cicloDePago, cuotasDelMes, desfasePorTarjeta, proximoMes, sumarMeses, composicionPorTarjeta, composicionDesdeTarjetas, fijosPorTarjeta } from './services/mes.js';
 import { clasesApariencia, modoEfectivo } from './services/apariencia.js';
 import {
@@ -949,40 +949,12 @@ const App = () => {
       let tarjetasData = storage.getTarjetas();
       const reglasLocales = storage.getReglas();
 
-      // Aplicar reglas locales a los movimientos
+      // Aplicar reglas locales a los movimientos (la misma función que limpia los
+      // nombres de Últimos consumos: services/movimientos-vista.js).
       if (reglasLocales.length > 0) {
-        // Reglas por clave de comercio (las crea el usuario al renombrar): valen para
-        // todos los meses, aunque el banco cambie el código de factura. Tienen
-        // prioridad sobre las reglas viejas; entre ellas gana la más reciente.
-        const reglasClave = reglasLocales
-          .filter(r => r.es_clave)
-          .sort((a, b) => String(b.fecha_creacion || '').localeCompare(String(a.fecha_creacion || '')));
         movimientosData = movimientosData.map(m => {
-          if (reglasClave.length) {
-            const clave = claveComercio(m.referencia_original);
-            const rc = clave && reglasClave.find(r => r.patron === clave);
-            if (rc) return { ...m, referencia_limpia: rc.nombre_limpio };
-          }
-          // Buscar si hay una regla que coincida con la referencia_original
-          const regla = reglasLocales.find(r => {
-            if (r.es_clave) return false;
-            if (r.es_exacta) {
-              // Coincidencia exacta
-              return r.patron === m.referencia_original;
-            } else {
-              // Coincidencia por regex/patrón
-              try {
-                const regex = new RegExp(r.patron, 'i');
-                return regex.test(m.referencia_original);
-              } catch {
-                return r.patron.toLowerCase() === m.referencia_original.toLowerCase();
-              }
-            }
-          });
-          if (regla) {
-            return { ...m, referencia_limpia: regla.nombre_limpio };
-          }
-          return m;
+          const nombre = nombreSegunReglas(m.referencia_original, reglasLocales);
+          return nombre ? { ...m, referencia_limpia: nombre } : m;
         });
       }
 
@@ -1155,13 +1127,12 @@ const App = () => {
   const seccionActual = SECCION_DE_VISTA[activeView] || 'otra';
   const TITULOS = {
     dashboard: 'Mes', tarjetas: 'Tarjetas', movimientos: 'Movimientos', cuotas: 'Cuotas',
-    'consumos-live': 'Últimos consumos', reintegros: 'Reintegros', reglas: 'Reglas de nombres',
+    reintegros: 'Reintegros', reglas: 'Reglas de nombres',
     importar: 'Importar', guia: 'Guía y novedades'
   };
 
   const menuMas = [
     { tipo: 'item', id: 'ajustes', label: 'Ajustes', onSelect: () => setSettingsOpen(true) },
-    { tipo: 'item', id: 'consumos-live', label: 'Últimos consumos', onSelect: () => setActiveView('consumos-live') },
     { tipo: 'item', id: 'reglas', label: 'Reglas de nombres', onSelect: () => setActiveView('reglas') },
     { tipo: 'item', id: 'guia', label: 'Guía y novedades', onSelect: () => setActiveView('guia') },
     { tipo: 'sep' },
@@ -1242,6 +1213,18 @@ const App = () => {
   );
   // Para abrir Movimientos ya filtrado desde otra vista: { tarjeta?, tipo?, n }
   const [movimientosFiltro, setMovimientosFiltro] = useState(null);
+  // Últimos consumos que todavía no están en un resumen: van en Movimientos (fase 7).
+  const enCurso = useMemo(
+    () => movimientosEnCurso({ consumosLive, ciclosLive, resumenes, tarjetas, reglas }),
+    [consumosLive, ciclosLive, resumenes, tarjetas, reglas]
+  );
+  // Una navegación vieja a 'consumos-live' abre Movimientos con el filtro En curso.
+  useEffect(() => {
+    if (activeView === 'consumos-live') {
+      setMovimientosFiltro({ tipo: 'en_curso', n: Date.now() });
+      setActiveView('movimientos');
+    }
+  }, [activeView]);
   // Plan elegido al entrar a Cuotas desde un movimiento ("Ver plan en Cuotas"); lo usa la fase 5.
   const [planElegido, setPlanElegido] = useState(null);
   useEffect(() => { if (activeView !== 'cuotas') setPlanElegido(null); }, [activeView]);
@@ -1341,12 +1324,14 @@ const App = () => {
               resumenes={resumenes}
               onDeleteResumen={async (r) => { storage.deleteResumen(r.id); await fetchData(); }}
               onVerMovimientos={(t) => {
-                if (t.tarjeta) {
-                  setMovimientosFiltro({ tarjeta: t.tarjeta.nombre, n: Date.now() });
-                  setActiveView('movimientos');
+                // En curso (o sin resúmenes): sus Últimos consumos, con el filtro En curso.
+                // Si no, el último resumen de esa tarjeta.
+                if (t.estado === 'en_curso' || !t.tarjeta) {
+                  setMovimientosFiltro({ tarjeta: t.id, tipo: 'en_curso', n: Date.now() });
                 } else {
-                  setActiveView('consumos-live'); // grupo sin resúmenes: sus consumos viven ahí
+                  setMovimientosFiltro({ tarjeta: t.tarjeta.nombre, n: Date.now() });
                 }
+                setActiveView('movimientos');
               }}
               oscuro={oscuro}
             />
@@ -1367,15 +1352,12 @@ const App = () => {
               onVerPlan={(plan) => { setPlanElegido(plan.id); setActiveView('cuotas'); }}
               filtro={movimientosFiltro}
               nombresTarjetas={nombresTarjetas}
+              enCurso={enCurso}
+              mesCiclo={mes.ciclo.mesKey}
+              gruposDelMes={mes.ciclo.porTarjeta.filter(t => t.fuente === 'en_curso').flatMap(t => t.grupoKeys)}
+              onImportar={() => setActiveView('importar')}
+              nombreDe={nombreDe}
               oscuro={oscuro}
-            />
-          ) : activeView === 'consumos-live' ? (
-            <ConsumosLiveView
-              consumosLive={consumosLive}
-              tarjetas={tarjetas}
-              resumenes={resumenes}
-              onDeleteConsumos={handleDeleteConsumosLive}
-              onIrAImportar={() => setActiveView('importar')}
             />
           ) : activeView === 'cuotas' ? (
             <CuotasView
@@ -1402,7 +1384,13 @@ const App = () => {
           ) : activeView === 'guia' ? (
             <GuiaView onVerNovedades={() => setMostrarNovedades(true)} />
           ) : activeView === 'importar' ? (
-            <ImportarView onSuccess={() => { refrescarLive(); fetchData(); }} preguntasFijos={preguntasFijos} onResponderPregunta={responderPreguntaFijo} />
+            <ImportarView
+              onSuccess={() => { refrescarLive(); fetchData(); }}
+              preguntasFijos={preguntasFijos}
+              onResponderPregunta={responderPreguntaFijo}
+              cantidadConsumosLive={consumosLive.length}
+              onBorrarConsumosLive={() => handleDeleteConsumosLive()}
+            />
           ) : null}
       </AppShell>
 
@@ -1731,8 +1719,9 @@ const describirGrupo = (g, alias) => {
  * últimos consumos (Excel / CSV → se leen en el navegador). Reconoce cuál es
  * cuál por el tipo de archivo y, dentro de los Excel, por su formato.
  */
-const ImportarView = ({ onSuccess, preguntasFijos = [], onResponderPregunta }) => {
+const ImportarView = ({ onSuccess, preguntasFijos = [], onResponderPregunta, cantidadConsumosLive = 0, onBorrarConsumosLive }) => {
   const [uploading, setUploading] = useState(false);
+  const [confirmarBorrado, setConfirmarBorrado] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [results, setResults] = useState([]);
   const [mapeoManual, setMapeoManual] = useState(null); // formato nuevo sin IA disponible
@@ -1917,6 +1906,40 @@ const ImportarView = ({ onSuccess, preguntasFijos = [], onResponderPregunta }) =
         )}
       </div>
 
+      {/* Borrar Últimos consumos importados (antes estaba en la vista Últimos consumos) */}
+      {cantidadConsumosLive > 0 && (
+        <div className="mt-4 flex flex-wrap items-center gap-3" role={confirmarBorrado ? 'group' : undefined} aria-label={confirmarBorrado ? 'Confirmar borrado' : undefined}>
+          {confirmarBorrado ? (
+            <>
+              <span className="text-sm text-[var(--label)]">
+                ¿Borrar los {cantidadConsumosLive} Últimos consumos importados? Los resúmenes no se tocan.
+              </span>
+              <button
+                type="button"
+                autoFocus
+                onClick={() => { onBorrarConsumosLive?.(); setConfirmarBorrado(false); }}
+                className="btn"
+                style={{ minHeight: 44, color: 'var(--danger)' }}
+              >
+                Borrar
+              </button>
+              <button type="button" onClick={() => setConfirmarBorrado(false)} className="btn" style={{ minHeight: 44, background: 'transparent' }}>
+                Cancelar
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmarBorrado(true)}
+              className="text-sm text-[var(--label2)] hover:text-[var(--danger)] underline underline-offset-2"
+              style={{ minHeight: 44 }}
+            >
+              Borrar Últimos consumos importados
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Results */}
       {results.length > 0 && (
         <div className="mt-6 space-y-3">
@@ -1966,7 +1989,6 @@ const ImportarView = ({ onSuccess, preguntasFijos = [], onResponderPregunta }) =
   );
 };
 
-// ==================== Últimos Consumos (pre-resumen) ====================
 
 // Modal de mapeo manual de columnas (fallback si el formato no se reconoce)
 const CSVColumnMapper = ({ headers, preview, onConfirm, onCancel }) => {
@@ -2022,8 +2044,6 @@ const CSVColumnMapper = ({ headers, preview, onConfirm, onCancel }) => {
     </div>
   );
 };
-
-// ConsumosLiveView → views/ConsumosLiveView.jsx (fase 6).
 
 export default App;
 // Build 1769553006

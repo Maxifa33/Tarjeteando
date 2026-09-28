@@ -1,16 +1,16 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, ChevronRight, X, CheckCircle } from 'lucide-react';
+import { Search, ChevronRight, X, CheckCircle, Plus } from 'lucide-react';
 import Seg from '../ui/Seg.jsx';
 import Hoja from '../ui/Hoja.jsx';
 import FilaMovimiento from '../ui/FilaMovimiento.jsx';
 import DetalleMovimiento from '../ui/DetalleMovimiento.jsx';
 import useCompacto, { useMedia } from '../ui/useCompacto.js';
 import { identidades, identidadTarjeta } from '../ui/identidad.js';
-import { pesos, dolares, mesCorto, mesLargo, capitalizar } from '../ui/formato.js';
+import { pesos, dolares, mesCorto, mesLargo, capitalizar, momento } from '../ui/formato.js';
 import {
   filtrarMovimientos, mesesDisponibles, ordenarResumenes, agruparPorDia, separarCuotas,
-  composicionPeriodo, historialComercio, tipoDeFila, planDeMovimiento, mesKeyDeFecha
+  composicionPeriodo, historialComercio, tipoDeFila, planDeMovimiento, mesKeyDeFecha, resumenEnCurso
 } from '../services/movimientos-vista.js';
 
 /**
@@ -20,6 +20,7 @@ import {
 
 const TIPOS = [
   { id: 'todos', label: 'Todos' },
+  { id: 'en_curso', label: 'En curso' }, // Últimos consumos (fase 7); solo si hay
   { id: 'variables', label: 'Variables' },
   { id: 'fijos', label: 'Fijos' },
   { id: 'cuotas', label: 'Cuotas' },
@@ -49,6 +50,11 @@ const MovimientosView = ({
   filtro = null, // { tarjeta?, tipo?, n } — entrada desde otras vistas
   filtroTipoGastoInicial = '',
   nombresTarjetas = {},
+  enCurso = [], // consumos de Últimos consumos que todavía no están en un resumen (fase 7)
+  onImportar,
+  nombreDe = null, // nombre personalizado de la tarjeta (App → nombreVisible)
+  mesCiclo = null, // mes de pago que muestra Mes ('YYYY-MM')
+  gruposDelMes = null, // grupos de Últimos consumos que cuenta Mes
   oscuro = true
 }) => {
   const compacto = useCompacto();
@@ -67,13 +73,18 @@ const MovimientosView = ({
   const [aviso, setAviso] = useState(null);
   const filasRef = useRef(new Map());
 
-  const meses = useMemo(() => mesesDisponibles(movimientos), [movimientos]);
+  const meses = useMemo(() => mesesDisponibles(movimientos, enCurso), [movimientos, enCurso]);
   const resOrdenados = useMemo(() => ordenarResumenes(resumenes), [resumenes]);
+  // Tarjetas con consumos en curso: una ficha 'En curso' cada una en "Por resumen".
+  const tarjetasEnCurso = useMemo(() => [...new Set(enCurso.map((m) => m.tarjeta))], [enCurso]);
+  const hayEnCurso = enCurso.length > 0;
 
   // Por defecto, como la vista vieja: el mes o el resumen más reciente.
   const mesActivo = meses.includes(periodo) ? periodo : meses[0] || null;
-  const resumenActivo = resOrdenados.find((r) => r.id === resumenId) || resOrdenados[0] || null;
-  const modoEfectivo = modo === 'resumen' && resOrdenados.length ? 'resumen' : 'mes';
+  const fichaEnCurso = String(resumenId || '').startsWith('en_curso:') && tarjetasEnCurso.includes(resumenId.slice(9)) ? resumenId.slice(9) : null;
+  const resumenActivo = fichaEnCurso ? null : (resOrdenados.find((r) => r.id === resumenId) || resOrdenados[0] || null);
+  const modoEfectivo = modo === 'resumen' && (resOrdenados.length || hayEnCurso) ? 'resumen' : 'mes';
+  const tipoEfectivo = tipo === 'en_curso' && !hayEnCurso && !tarjeta ? 'todos' : tipo;
 
   const cambiarModo = (m) => {
     setModo(m);
@@ -83,6 +94,12 @@ const MovimientosView = ({
   // Entrada desde otras vistas (Tarjetas "Ver todos", Mes, etc.).
   useEffect(() => {
     if (!filtro?.n) return;
+    if (filtro.tipo === 'en_curso') {
+      // Tarjetas → "Ver todos" de una tarjeta en curso: sus consumos, sin período.
+      setTarjeta(filtro.tarjeta || '');
+      setTipo('en_curso');
+      return;
+    }
     if (filtro.tarjeta) {
       setTarjeta(filtro.tarjeta);
       const ultimo = resOrdenados.find((r) => r.tarjeta === filtro.tarjeta);
@@ -99,20 +116,28 @@ const MovimientosView = ({
   const idDe = (nombre) => ids.get(nombre) || identidadTarjeta({ nombre }, 0);
   const colorDe = (nombre) => { const i = idDe(nombre); return oscuro ? i.chartOscuro : i.chartClaro; };
   const tarjetaInfo = (nombre) => tarjetas.find((t) => t.nombre === nombre);
-  const nombreTarjeta = (nombre) => { const t = tarjetaInfo(nombre); return (t && nombresTarjetas[t.id]) || nombre; };
+  // Los consumos de tarjetas sin resúmenes tienen el grupo de Últimos consumos como tarjeta.
+  const etiquetaDe = (nombre) => enCurso.find((m) => m.tarjeta === nombre)?.tarjeta_label || nombre;
+  const nombreTarjeta = (nombre) => {
+    if (nombreDe) return nombreDe(nombre, etiquetaDe(nombre));
+    const t = tarjetaInfo(nombre);
+    return (t && nombresTarjetas[t.id]) || etiquetaDe(nombre);
+  };
 
   // ---------- filtrado (memoizado) ----------
   const base = useMemo(() => ({
-    modo: modoEfectivo, periodo: mesActivo, resumenId: resumenActivo?.id, texto: busqueda, tarjeta, fijos: gastosFijos
-  }), [modoEfectivo, mesActivo, resumenActivo?.id, busqueda, tarjeta, gastosFijos]);
+    modo: modoEfectivo, periodo: mesActivo, resumenId: fichaEnCurso ? `en_curso:${fichaEnCurso}` : resumenActivo?.id,
+    texto: busqueda, tarjeta, fijos: gastosFijos, enCurso
+  }), [modoEfectivo, mesActivo, fichaEnCurso, resumenActivo?.id, busqueda, tarjeta, gastosFijos, enCurso]);
   const delPeriodo = useMemo(() => filtrarMovimientos(movimientos, { ...base, texto: '', tipo: 'todos' }), [movimientos, base]);
   const filtrados = useMemo(
-    () => filtrarMovimientos(movimientos, { ...base, tipo, reintegros, verAnteriores }),
-    [movimientos, base, tipo, reintegros, verAnteriores]
+    () => filtrarMovimientos(movimientos, { ...base, tipo: tipoEfectivo, reintegros, verAnteriores }),
+    [movimientos, base, tipoEfectivo, reintegros, verAnteriores]
   );
+  const cabeceraEnCurso = useMemo(() => resumenEnCurso(filtrados, resumenes, { gruposDelMes }), [filtrados, resumenes, gruposDelMes]);
   const comp = useMemo(() => composicionPeriodo(delPeriodo, gastosFijos), [delPeriodo, gastosFijos]);
 
-  const plegarCuotas = tipo !== 'cuotas' && tipo !== 'reintegros';
+  const plegarCuotas = !['cuotas', 'reintegros', 'en_curso'].includes(tipoEfectivo);
   const { cuotas, resto } = useMemo(
     () => (plegarCuotas ? separarCuotas(filtrados) : { cuotas: [], resto: filtrados }),
     [filtrados, plegarCuotas]
@@ -171,12 +196,16 @@ const MovimientosView = ({
     setAviso(`Regla creada: «${mov.referencia_original}» se va a mostrar como «${nombre}».`);
   };
 
-  const hayFiltros = !!busqueda || tipo !== 'todos' || !!tarjeta;
+  const hayFiltros = !!busqueda || tipoEfectivo !== 'todos' || !!tarjeta;
   const quitarFiltros = () => { onBuscar?.(''); setTipo('todos'); setTarjeta(''); setVerAnteriores(false); };
 
   // ---------- encabezado ----------
-  const subPeriodo = tipo === 'reintegros'
+  const subPeriodo = tipoEfectivo === 'en_curso'
+    ? `Últimos consumos${tarjeta ? ` · ${nombreTarjeta(tarjeta)}` : ''}`
+    : tipoEfectivo === 'reintegros'
     ? (verAnteriores ? 'Todos los reintegros' : `Último resumen de cada tarjeta${periodoRecienteLabel ? ` · ${periodoRecienteLabel}` : ''}`)
+    : modoEfectivo === 'resumen' && fichaEnCurso
+      ? `${nombreTarjeta(fichaEnCurso)} · en curso`
     : modoEfectivo === 'resumen' && resumenActivo
       ? `${nombreTarjeta(resumenActivo.tarjeta)} · resumen de ${mesLargo(mesKeyDeFecha(resumenActivo.fecha_cierre) || `${resumenActivo.anio}-${String(resumenActivo.mes).padStart(2, '0')}`)}`
       : mesActivo ? capitalizar(mesLargo(mesActivo)) : 'Sin movimientos';
@@ -187,11 +216,17 @@ const MovimientosView = ({
     return `${t?.banco || nombreTarjeta(r.tarjeta)} ${mk ? `${mesCorto(mk)} '${mk.slice(2, 4)}` : ''}`.trim();
   };
 
-  const Fichas = tipo === 'reintegros' ? null : (
+  const Fichas = tipoEfectivo === 'reintegros' || tipoEfectivo === 'en_curso' ? null : (
     <div className="fichas" role="group" aria-label={modoEfectivo === 'resumen' ? 'Resumen' : 'Mes'}>
+      {modoEfectivo === 'resumen' && tarjetasEnCurso.map((t) => (
+        <button key={`en_curso:${t}`} type="button" className={`pchip ${fichaEnCurso === t ? 'on' : ''}`} aria-pressed={fichaEnCurso === t} onClick={() => setResumenId(`en_curso:${t}`)}>
+          <span className="chip-plastico" aria-hidden="true" style={{ width: 18, height: 12, background: idDe(t).plastico }} />
+          {nombreTarjeta(t)} · en curso
+        </button>
+      ))}
       {modoEfectivo === 'resumen'
         ? resOrdenados.map((r) => (
-          <button key={r.id} type="button" className={`pchip ${r.id === resumenActivo?.id ? 'on' : ''}`} aria-pressed={r.id === resumenActivo?.id} onClick={() => setResumenId(r.id)}>
+          <button key={r.id} type="button" className={`pchip ${!fichaEnCurso && r.id === resumenActivo?.id ? 'on' : ''}`} aria-pressed={!fichaEnCurso && r.id === resumenActivo?.id} onClick={() => setResumenId(r.id)}>
             <span className="chip-plastico" aria-hidden="true" style={{ width: 18, height: 12, background: idDe(r.tarjeta).plastico }} />
             {labelResumen(r)}
           </button>
@@ -208,7 +243,30 @@ const MovimientosView = ({
   const totalReintUsd = filtrados.reduce((s, m) => s + Math.abs(Number(m.monto_dolares) || 0), 0);
   const nAnteriores = reintegros.filter((r) => !r.es_reciente).length;
 
-  const Totales = tipo === 'reintegros' ? (
+  const Totales = tipoEfectivo === 'en_curso' ? (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <span className="rnd" style={{ fontSize: compacto ? 28 : 34, lineHeight: '40px', fontWeight: 700, letterSpacing: '-.02em' }}>
+          <span style={{ fontSize: compacto ? 18 : 22, color: 'var(--label2)', fontWeight: 600 }}>En curso · </span>
+          {pesos(cabeceraEnCurso.total, { decimales: 2 })}
+          {cabeceraEnCurso.totalUsd > 0 && <span style={{ fontSize: 18, color: 'var(--label2)' }}> + {dolares(cabeceraEnCurso.totalUsd)}</span>}
+        </span>
+        <span className="cap" style={{ fontSize: 13 }}>
+          {cabeceraEnCurso.cantidad} {cabeceraEnCurso.cantidad === 1 ? 'consumo' : 'consumos'}
+          {cabeceraEnCurso.pctUltimoCierre !== null ? ` · ${cabeceraEnCurso.pctUltimoCierre} % del último cierre` : ''}
+          {cabeceraEnCurso.actualizado ? ` · actualizado ${momento(cabeceraEnCurso.actualizado)}` : ''}
+        </span>
+        {mesCiclo && cabeceraEnCurso.posterior !== 0 && (
+          <span className="cap" style={{ fontSize: 13 }}>
+            {pesos(cabeceraEnCurso.delMes)} entran en el pago de {mesLargo(mesCiclo).split(' ')[0]} (lo que muestra Mes) y {pesos(cabeceraEnCurso.posterior)} son de ciclos que Mes todavía no cuenta.
+          </span>
+        )}
+      </div>
+      <button type="button" className="btn" onClick={onImportar} style={{ minHeight: 44 }}>
+        <Plus size={16} aria-hidden="true" /> Importar
+      </button>
+    </div>
+  ) : tipoEfectivo === 'reintegros' ? (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap' }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
         <span className="rnd" style={{ fontSize: compacto ? 28 : 34, lineHeight: '40px', fontWeight: 700, letterSpacing: '-.02em', color: 'var(--ok)' }}>
@@ -264,8 +322,8 @@ const MovimientosView = ({
         />
       </label>
       <div className="fichas" role="group" aria-label="Tipo" style={{ width: compacto ? '100%' : 'auto' }}>
-        {TIPOS.map((t) => (
-          <button key={t.id} type="button" className={`pchip ${tipo === t.id ? 'on' : ''}`} aria-pressed={tipo === t.id} onClick={() => setTipo(t.id)}>{t.label}</button>
+        {TIPOS.filter((t) => t.id !== 'en_curso' || hayEnCurso || tipoEfectivo === 'en_curso').map((t) => (
+          <button key={t.id} type="button" className={`pchip ${tipoEfectivo === t.id ? 'on' : ''}`} aria-pressed={tipoEfectivo === t.id} onClick={() => setTipo(t.id)}>{t.label}</button>
         ))}
         {tarjeta && (
           <button type="button" className="pchip on" onClick={() => setTarjeta('')} aria-label={`Quitar el filtro de ${nombreTarjeta(tarjeta)}`}>
@@ -326,7 +384,15 @@ const MovimientosView = ({
       ))}
       {filtrados.length === 0 && (
         <div style={{ padding: '48px 20px', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center' }}>
-          {hayFiltros ? (
+          {tipoEfectivo === 'en_curso' && !busqueda ? (
+            <>
+              <span style={{ fontSize: 17, fontWeight: 600 }}>No hay consumos en curso</span>
+              <span className="cap" style={{ fontSize: 14, maxWidth: 420 }}>Importá tus Últimos consumos para ver lo que gastaste desde el último cierre.</span>
+              <button type="button" className="btn btn-pri" onClick={onImportar} style={{ marginTop: 6, minHeight: 44 }}>
+                <Plus size={16} aria-hidden="true" /> Importar
+              </button>
+            </>
+          ) : hayFiltros ? (
             <>
               <span style={{ fontSize: 17, fontWeight: 600 }}>No hay resultados con estos filtros</span>
               <span className="cap" style={{ fontSize: 14, maxWidth: 420 }}>Probá con otro nombre o quitá los filtros para ver todo el período.</span>
@@ -350,7 +416,7 @@ const MovimientosView = ({
       identidad={idDe(sel.tarjeta)}
       color={colorDe(sel.tarjeta)}
       tipo={tipoDeFila(sel, gastosFijos)}
-      historial={historialComercio(movimientos, sel, resumenes)}
+      historial={historialComercio(movimientos, sel, resumenes, { enCurso })}
       plan={planDeMovimiento(sel, planes)}
       pregunta={preguntas.find((p) => p.candidato?.mov_id === sel.id || p.ultimo?.mov_id === sel.id) || null}
       onCambiarTipo={onCambiarTipo}
@@ -365,7 +431,7 @@ const MovimientosView = ({
         <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--label2)' }}>{subPeriodo}</span>
         <h1 className="titulo">Movimientos</h1>
       </div>
-      {tipo !== 'reintegros' && (
+      {tipoEfectivo !== 'reintegros' && tipoEfectivo !== 'en_curso' && (
         <Seg
           ariaLabel="Agrupar por"
           valor={modoEfectivo}

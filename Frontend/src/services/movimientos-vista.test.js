@@ -8,8 +8,10 @@ import assert from 'node:assert/strict';
 
 import {
   filtrarMovimientos, mesesDisponibles, ordenarResumenes, agruparPorDia, separarCuotas,
-  composicionPeriodo, historialComercio, tipoDeFila, planDeMovimiento, labelDia, mesKeyDeFecha
+  composicionPeriodo, historialComercio, tipoDeFila, planDeMovimiento, labelDia, mesKeyDeFecha,
+  movimientosEnCurso, resumenEnCurso, nombreSegunReglas
 } from './movimientos-vista.js';
+import { cicloDePago } from './mes.js';
 
 // ---- Copia de la lógica vieja (sin filtros de fecha/banco, que ya no están en la UI) ----
 function filtroViejo(movimientos, { modoFiltro, mesSeleccionado, resumenSeleccionado, searchQuery = '', filtroTarjeta = '', filtroMoneda = '', filtroCuotas = '', filtroTipoGasto = '', gastosFijos = new Set() }) {
@@ -151,5 +153,130 @@ describe('planDeMovimiento', () => {
   test('plan que ya no existe: null (se oculta "Ver plan")', () => {
     assert.equal(planDeMovimiento(movs[2], []), null);
     assert.equal(planDeMovimiento(movs[0], planes), null);
+  });
+});
+
+// ───────────── Fase 7: Últimos consumos dentro de Movimientos ─────────────
+describe('movimientosEnCurso', () => {
+  const HOY = '2026-09-26';
+  const tarjetasEC = [
+    { nombre: 'VISA BBVA', banco: 'BBVA', tipo: 'VISA' },
+    { nombre: 'VISA Santander', banco: 'Santander', tipo: 'VISA' },
+    { nombre: 'VISA Galicia', banco: 'Galicia', tipo: 'VISA' }
+  ];
+  const resumenesEC = [
+    { id: 'B-9', tarjeta: 'VISA BBVA', fecha_cierre: '2026-09-24', fecha_vencimiento: '2026-10-05', total_a_pagar_pesos: 326410, total_consumos_pesos: 300000 },
+    { id: 'S-8', tarjeta: 'VISA Santander', fecha_cierre: '2026-08-28', fecha_vencimiento: '2026-09-09', total_a_pagar_pesos: 700000, total_consumos_pesos: 800000 },
+    { id: 'G-9', tarjeta: 'VISA Galicia', fecha_cierre: '2026-09-04', fecha_vencimiento: '2026-09-16', total_a_pagar_pesos: 380000 }
+  ];
+  const ciclo = (grupoKey, banco, red, miembros, cierre, vto) => ({ grupoKey, banco, red, principal: miembros[0], miembros, fecha_cierre: cierre, fecha_vencimiento: vto, estado: 'provisional', actualizado_at: '2026-09-26T22:46:00.000Z' });
+  const c = (id, grupo_key, ciclo_cierre, ult4, pesos, extra = {}) => ({ id, grupo_key, ciclo_cierre, tarjeta_ult4: ult4, monto_pesos: pesos, monto_dolares: 0, fecha: '2026-09-20', descripcion: 'COMERCIO ' + id, categoria: 'Otros', ...extra });
+  const ciclosEC = {
+    'Santander|Visa|3327': ciclo('Santander|Visa|3327', 'Santander', 'Visa', ['3327', '1510'], '2026-10-01', '2026-10-09'),
+    'Galicia|Visa|4410': ciclo('Galicia|Visa|4410', 'Galicia', 'Visa', ['4410'], '2026-10-02', '2026-10-14'),
+    // Macro: sin resúmenes cargados.
+    'Macro|Visa|7788': ciclo('Macro|Visa|7788', 'Macro', 'Visa', ['7788'], '2026-10-05', '2026-10-15'),
+    // BBVA: este ciclo ya lo cubre el resumen cerrado del 24/09 (no conciliado todavía).
+    'BBVA|Visa|2291': ciclo('BBVA|Visa|2291', 'BBVA', 'Visa', ['2291'], '2026-09-25', '2026-10-05')
+  };
+  const consumosEC = [
+    c('s1', 'Santander|Visa|3327', '2026-10-01', '3327', 739748.66, { descripcion: 'MERPAGO*COTO SUC 45' }),
+    c('s2', 'Santander|Visa|3327', '2026-10-01', '3327', 108327.44, { es_cuota: true, cuota_actual: 3, total_cuotas: 6 }),
+    c('s3', 'Santander|Visa|3327', '2026-10-01', '1510', 44166.55),
+    c('s4', 'Santander|Visa|3327', '2026-10-01', '3327', -8642, { descripcion: 'REINTEGRO COTO' }),
+    c('s5', 'Santander|Visa|3327', '2026-10-01', '3327', -500000, { es_pago: true, descripcion: 'SU PAGO' }),
+    c('g1', 'Galicia|Visa|4410', '2026-10-02', '4410', 412380.2, { es_pendiente: true }),
+    c('m1', 'Macro|Visa|7788', '2026-10-05', '7788', 0, { monto_dolares: 20, descripcion: 'STEAM' }),
+    c('m2', 'Macro|Visa|7788', '2026-10-05', '7788', 15000),
+    c('b1', 'BBVA|Visa|2291', '2026-09-25', '2291', 72118.4)
+  ];
+  const reglas = [{ patron: 'coto', nombre_limpio: 'Coto' }];
+  const filas = movimientosEnCurso({ consumosLive: consumosEC, ciclosLive: ciclosEC, resumenes: resumenesEC, tarjetas: tarjetasEC, reglas, hoy: HOY });
+  const por = (id) => filas.find((f) => f.id === `live:${id}`);
+
+  test('la cabecera separa lo que entra en el pago de Mes (= su en curso) de lo posterior', () => {
+    const mes = cicloDePago({ hoy: HOY, tarjetas: tarjetasEC, resumenes: resumenesEC, ciclosLive: ciclosEC, consumosLive: consumosEC });
+    const enCursoMes = mes.porTarjeta.filter((t) => t.fuente === 'en_curso').reduce((acc, t) => acc + t.total, 0);
+    const grupos = mes.porTarjeta.filter((t) => t.fuente === 'en_curso').flatMap((t) => t.grupoKeys);
+    const r = resumenEnCurso(filas, resumenesEC, { gruposDelMes: grupos });
+    assert.ok(Math.abs(r.delMes - enCursoMes) < 0.01, `${r.delMes} vs ${enCursoMes}`);
+    assert.ok(Math.abs(r.delMes + r.posterior - r.total) < 0.01);
+  });
+
+  test('la suma por tarjeta coincide con el en curso de Mes (cicloDePago)', () => {
+    const mes = cicloDePago({ hoy: HOY, tarjetas: tarjetasEC, resumenes: resumenesEC, ciclosLive: ciclosEC, consumosLive: consumosEC });
+    mes.porTarjeta.filter((t) => t.fuente === 'en_curso').forEach((t) => {
+      const suma = filas.filter((f) => f.tarjeta === t.tarjetaId).reduce((acc, f) => acc + f.monto_pesos, 0);
+      assert.ok(Math.abs(suma - t.total) < 0.01, `${t.tarjetaId}: ${suma} vs ${t.total}`);
+    });
+  });
+
+  test('un ciclo que ya cubre un resumen importado no aparece dos veces', () => {
+    assert.equal(por('b1'), undefined);
+    const mesSep = filtrarMovimientos([{ id: 'x', resumen_id: 'B-9', tarjeta: 'VISA BBVA', fecha_compra: '2026-09-20', referencia_limpia: 'Disco', referencia_original: 'DISCO', monto_pesos: 72118.4 }],
+      { modo: 'mes', periodo: '2026-09', enCurso: filas });
+    assert.equal(mesSep.filter((m) => m.monto_pesos === 72118.4).length, 1);
+  });
+
+  test('tarjeta sin ningún resumen: todos sus consumos (no pagos) aparecen', () => {
+    assert.deepEqual(filas.filter((f) => f.grupoKey === 'Macro|Visa|7788').map((f) => f.id), ['live:m1', 'live:m2']);
+    assert.equal(por('m1').tarjeta, 'Macro|Visa|7788');
+    assert.equal(por('m1').tarjeta_label, 'Macro Visa');
+  });
+
+  test('pagos excluidos; negativo = reintegro; cuota con n/t; reglas de nombres', () => {
+    assert.equal(por('s5'), undefined);
+    assert.equal(tipoDeFila(por('s4')), 'reintegro');
+    assert.equal(por('s2').cuota_texto, '3/6');
+    assert.equal(tipoDeFila(por('s2')), 'cuota');
+    assert.equal(tipoDeFila(por('s1'), new Set(['live:s1'])), 'variable', 'no hay fijos en curso');
+    assert.equal(por('s1').referencia_limpia, 'Coto');
+    assert.equal(por('g1').es_pendiente, true);
+    assert.equal(por('s1').origen, 'en_curso');
+  });
+
+  test("filtro 'en_curso' ignora el período y respeta texto y tarjeta", () => {
+    assert.equal(filtrarMovimientos(movs, { tipo: 'en_curso', modo: 'mes', periodo: '2020-01', enCurso: filas }).length, filas.length);
+    assert.deepEqual(filtrarMovimientos(movs, { tipo: 'en_curso', enCurso: filas, texto: 'steam' }).map((f) => f.id), ['live:m1']);
+    assert.equal(filtrarMovimientos(movs, { tipo: 'en_curso', enCurso: filas, tarjeta: 'VISA Galicia' }).length, 1);
+  });
+
+  test("por resumen, la ficha 'en_curso:<tarjeta>' trae los de esa tarjeta", () => {
+    const r = filtrarMovimientos(movs, { modo: 'resumen', resumenId: 'en_curso:VISA Santander', enCurso: filas });
+    assert.deepEqual(r.map((f) => f.id).sort(), ['live:s1', 'live:s2', 'live:s3', 'live:s4']);
+  });
+
+  test('por mes, los consumos en curso se suman al mes de su fecha', () => {
+    assert.deepEqual(mesesDisponibles(movs, filas), ['2026-09', '2026-08', '2026-07']);
+    const sep = filtrarMovimientos(movs, { modo: 'mes', periodo: '2026-09', enCurso: filas });
+    assert.equal(sep.filter((m) => m.origen === 'en_curso').length, filas.length);
+  });
+
+  test('cabecera: total neto, dólares, % del último cierre y actualización', () => {
+    const santander = filas.filter((f) => f.tarjeta === 'VISA Santander');
+    const r = resumenEnCurso(santander, resumenesEC);
+    assert.equal(r.total, 883600.65);
+    assert.equal(r.cantidad, 4);
+    assert.equal(r.pctUltimoCierre, Math.round((r.total / 800000) * 100));
+    assert.equal(r.actualizado, '2026-09-26T22:46:00.000Z');
+    assert.equal(resumenEnCurso(filas.filter((f) => f.grupoKey === 'Macro|Visa|7788'), resumenesEC).totalUsd, 20);
+  });
+
+  test('historial del comercio incluye la columna en curso', () => {
+    const h = historialComercio([], por('s1'), resumenesEC, { enCurso: filas });
+    assert.equal(h[h.length - 1].resumenId, 'en_curso');
+    assert.equal(h[h.length - 1].actual, true);
+  });
+
+  test('sin consumos en curso nada cambia', () => {
+    assert.deepEqual(movimientosEnCurso({}), []);
+    assert.deepEqual(filtrarMovimientos(movs, { modo: 'mes', periodo: '2026-09', enCurso: [] }).map((m) => m.id),
+      filtrarMovimientos(movs, { modo: 'mes', periodo: '2026-09' }).map((m) => m.id));
+  });
+
+  test('nombreSegunReglas: clave de comercio primero, después regex', () => {
+    const r = [{ patron: 'coto', nombre_limpio: 'Coto' }, { patron: 'merpago coto', es_clave: true, nombre_limpio: 'Coto Palermo', fecha_creacion: '2026-09-01' }];
+    assert.equal(nombreSegunReglas('MERPAGO*COTO SUC 45', []), null);
+    assert.equal(nombreSegunReglas('COTO 123', r), 'Coto');
   });
 });

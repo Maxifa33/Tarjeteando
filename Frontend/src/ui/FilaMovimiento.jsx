@@ -15,10 +15,14 @@ const FilaMovimiento = forwardRef(({ mov, nombre, tipo, plastico, nombreTarjeta 
   const monto = (v, fn) => `${esReint ? '− ' : ''}${fn(Math.abs(v))}`;
   const tipoTxt = { fijo: 'Fijo', cuota: `Cuota ${cuota}`, reintegro: 'Reintegro', variable: '' }[tipo];
 
+  const enCurso = mov.origen === 'en_curso';
   // Celular: 'Fijo · ·4410' (o el nombre de la tarjeta si no hay últimos 4).
-  const segunda = compacto
-    ? [tipoTxt, mov.tarjeta_ult4 ? `·${mov.tarjeta_ult4}` : (nombreTarjeta || mov.tarjeta)].filter(Boolean).join(' · ')
-    : `${mov.referencia_original || ''}${ult4}`;
+  // En curso (Últimos consumos): 'categoría · ·4410'.
+  const segunda = enCurso
+    ? [compacto ? ['En curso', mov.es_pendiente ? 'Pendiente' : ''].filter(Boolean).join(' · ') : '', mov.categoria, mov.tarjeta_ult4 ? `·${mov.tarjeta_ult4}` : (nombreTarjeta || '')].filter(Boolean).join(' · ')
+    : compacto
+      ? [tipoTxt, mov.tarjeta_ult4 ? `·${mov.tarjeta_ult4}` : (nombreTarjeta || mov.tarjeta)].filter(Boolean).join(' · ')
+      : `${mov.referencia_original || ''}${ult4}`;
 
   return (
     <button
@@ -33,6 +37,8 @@ const FilaMovimiento = forwardRef(({ mov, nombre, tipo, plastico, nombreTarjeta 
         <span style={{ fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{nombre}</span>
         <span className="cap" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{segunda}</span>
       </span>
+      {!compacto && enCurso && <span className="tag en-curso">En curso</span>}
+      {!compacto && enCurso && mov.es_pendiente && <span className="tag revisar">Pendiente</span>}
       {!compacto && tipo === 'fijo' && <span className="tag fijo">Fijo</span>}
       {!compacto && tipo === 'cuota' && <span className="tag cuota">Cuota {cuota}</span>}
       {!compacto && esReint && <span className="tag reint">Reintegro</span>}

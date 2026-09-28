@@ -10,11 +10,12 @@
  * 'novedades_version_vista'); la Guía está siempre disponible en el menú.
  */
 
-export const APP_VERSION = '2026.09.4';
+export const APP_VERSION = '2026.09.5';
 
 export const NOVEDADES = [
   {
-    version: '2026.09.4',
+    // 2026.09.5 incluye lo de 2026.09.4 (nunca salió sola): el modal muestra solo la última.
+    version: '2026.09.5',
     fecha: 'septiembre 2026',
     titulo: 'App nueva: Mes, Tarjetas, Movimientos y Cuotas',
     puntos: [
@@ -29,6 +30,10 @@ export const NOVEDADES = [
       {
         titulo: 'Renombrá y clasificá desde el detalle',
         texto: 'Tocá un movimiento para cambiarle el nombre (vale para todos los meses) o marcarlo como Fijo o Variable. Reintegros ahora es un filtro de Movimientos.'
+      },
+      {
+        titulo: 'Últimos consumos ahora está en Movimientos',
+        texto: 'Lo que gastaste desde el último cierre aparece junto con tus movimientos, marcado En curso. Usá el filtro En curso para verlo solo. Cuando llega el resumen, cada consumo queda una sola vez.'
       },
       {
         titulo: 'Resolvé los planes que el banco dejó de facturar',
@@ -88,7 +93,8 @@ export const GUIA = [
       'Si el formato de tu banco es nuevo, la app lo interpreta sola (o te pide indicar las columnas) y lo recuerda para la próxima.',
       'Se leen automáticamente Galicia (Visa y Mastercard), BBVA y Santander. Otros bancos se leen con reconocimiento de imagen.',
       'Si subís el mismo resumen dos veces, se reemplaza: no se duplican los movimientos y se conservan tus cambios.',
-      'Tus datos quedan guardados en este navegador. Exportalos desde Más → Ajustes → Datos para tener un respaldo.'
+      'Tus datos quedan guardados en este navegador. Exportalos desde Más → Ajustes → Datos para tener un respaldo.',
+      'Para borrar los Últimos consumos importados, usá "Borrar Últimos consumos importados" debajo de la zona de carga.'
     ]
   },
   {
@@ -124,7 +130,8 @@ export const GUIA = [
       'Navegá por mes o por resumen, y filtrá con un toque: Variables, Fijos, Cuotas, Reintegros o En dólares. El buscador filtra por nombre o por la descripción del resumen.',
       'Las cuotas del período van juntas, plegadas arriba de la lista.',
       'Tocá un movimiento para ver su detalle: renombrarlo (crea una regla que vale para todos los meses de ese comercio) o marcarlo como Fijo o Variable (vale desde ese resumen en adelante).',
-      'Reintegros muestra las devoluciones, bonificaciones y créditos del último resumen de cada tarjeta; el histórico está en "Ver anteriores".'
+      'Reintegros muestra las devoluciones, bonificaciones y créditos del último resumen de cada tarjeta; el histórico está en "Ver anteriores".',
+      'En curso muestra lo que importaste de Últimos consumos y todavía no está en un resumen: total, cantidad y % del último cierre. Por mes, esos consumos se suman a su mes; por resumen, cada tarjeta tiene su ficha "en curso".'
     ]
   },
   {
@@ -155,8 +162,9 @@ export const GUIA = [
     titulo: 'Últimos consumos',
     icono: 'Zap',
     items: [
-      'Más → Últimos consumos muestra el detalle de lo importado del home banking, con filtros y gasto por día y por categoría.',
-      'No modifica movimientos ni cuotas: cuando llega el resumen del ciclo, lo reemplaza.'
+      'Importalos en Importar, como los resúmenes. Sus consumos aparecen en Movimientos con la etiqueta En curso (filtro En curso para verlos solos).',
+      'Mes y Tarjetas usan los mismos consumos para el total en curso de cada tarjeta.',
+      'Todavía no tienen tipo fijo o variable: se define cuando llega el resumen, que los reemplaza sin duplicar.'
     ]
   },
   {
@@ -164,7 +172,7 @@ export const GUIA = [
     titulo: 'Más, apariencia y ajustes',
     icono: 'Settings',
     items: [
-      'El botón Más (arriba a la derecha) tiene la apariencia (Sistema, Claro u Oscuro, y Reducir transparencia), Ajustes, Reglas de nombres, Últimos consumos y esta guía.',
+      'El botón Más (⋯, arriba a la derecha) tiene Ajustes, Reglas de nombres, esta guía y la apariencia (Sistema, Claro u Oscuro, y Reducir transparencia).',
       'En el celular, las secciones están en el riel de abajo a la derecha; desde Más lo podés pasar a la izquierda.',
       'Ajustes: tarjetas, preferencias, alertas y exportar o importar tus datos.',
       'La lupa busca en Movimientos; en Cuotas filtra los planes.'
