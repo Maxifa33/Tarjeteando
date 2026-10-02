@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import storage from './services/storage';
 import { APP_VERSION } from './novedades';
 import { parseUltimosConsumos, leerHojas, EXTENSIONES_CONSUMOS } from './services/consumos/index.js';
@@ -28,7 +28,7 @@ import {
   periodoDeMovimiento
 } from './services/series';
 import {
-  construirPlanes, formatearParaVista
+  construirPlanes, formatearParaVista, observacionesEnCurso
 } from './services/cuotas';
 import {
   Receipt, CreditCard, Tag, Upload, Calendar, AlertCircle, Sun, Bell, Settings, X, FileText, CheckCircle, XCircle, Sparkles, RefreshCcw, Download, Edit3, Plus, HelpCircle
@@ -711,7 +711,19 @@ const App = () => {
   const [reglas, setReglas] = useState([]);
   const [consumosLive, setConsumosLive] = useState(() => storage.getConsumosLive());
   const [ciclosLive, setCiclosLive] = useState(() => storage.getCiclosLive());
-  const refrescarLive = () => { setConsumosLive(storage.getConsumosLive()); setCiclosLive(storage.getCiclosLive()); };
+  // Planes de cuotas: resúmenes + observaciones en curso de Últimos consumos.
+  const basePlanesRef = useRef(null);
+  const calcularPlanes = ({ movimientosData, resumenesData, tarjetasData }) => construirPlanes(
+    movimientosData, resumenesData, storage.getDecisionesPlanes(),
+    { enCurso: observacionesEnCurso({ consumosLive: storage.getConsumosLive(), ciclosLive: storage.getCiclosLive(), tarjetas: tarjetasData }) }
+  );
+  // Importar, borrar o asignar banco a Últimos consumos cambia los planes: se recalculan
+  // con la última base de fetchData (movimientos ya con sus reglas de nombres).
+  const refrescarLive = () => {
+    setConsumosLive(storage.getConsumosLive());
+    setCiclosLive(storage.getCiclosLive());
+    if (basePlanesRef.current) setCuotasActivas(formatearParaVista(calcularPlanes(basePlanesRef.current)));
+  };
   const [loading, setLoading] = useState(true);
 
   // Cotización USD
@@ -988,7 +1000,10 @@ const App = () => {
       // esa tarjeta no lo factura, viene marcado como `interrumpida`.
       // Las decisiones del usuario sobre planes 'a revisar' (fase 5) entran acá: así
       // cambian Cuotas, la proyección, Mes y el gráfico a la vez.
-      const cuotasActivasData = construirPlanes(movimientosData, resumenesData, storage.getDecisionesPlanes());
+      // Las cuotas de Últimos consumos actualizan el estado de los planes (avanzan los
+      // existentes, aparecen las compras nuevas); los resúmenes no se tocan.
+      basePlanesRef.current = { movimientosData, resumenesData, tarjetasData };
+      const cuotasActivasData = calcularPlanes(basePlanesRef.current);
 
       // Tarjetas con su último resumen (lo usa el campo de luz para el peso de cada mancha).
       const tarjetasEnriquecidas = tarjetasData.map((t, idx) => {

@@ -106,7 +106,13 @@ const CuotasView = ({
   const ids = useMemo(() => identidades(tarjetas), [tarjetas]);
   const idDe = (nombre) => ids.get(nombre) || identidadTarjeta({ nombre }, 0);
   const colorDe = (nombre) => { const i = idDe(nombre); return oscuro ? i.chartOscuro : i.chartClaro; };
-  const nombreTarjeta = (nombre) => { const t = tarjetas.find((x) => x.nombre === nombre); return (t && nombresTarjetas[t.id]) || nombre; };
+  const nombreTarjeta = (nombre) => {
+    const t = tarjetas.find((x) => x.nombre === nombre);
+    if (t) return nombresTarjetas[t.id] || nombre;
+    // Tarjeta que solo existe por Últimos consumos ('live:<grupoKey>'): su nombre
+    // personalizado o banco + red.
+    return nombresTarjetas[nombre] || planes.find((p) => p.tarjeta === nombre)?.tarjeta_label || nombre;
+  };
 
   const q = busqueda.toLowerCase();
   const filas = useMemo(() => ordenarPorFin(datos.filas

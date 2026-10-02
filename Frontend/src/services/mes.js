@@ -193,22 +193,31 @@ export function cuotasDelMes(planes = [], mesKey, { desfase = {}, cotizacionVent
   planes.forEach((p) => {
     // Interrumpido por el banco o terminado por decisión del usuario: no se paga.
     if (!p || p.interrumpida || p.motivo === 'decision_usuario') return;
-    if (tarjetas && !tarjetas.includes(p.tarjeta)) return;
+    // Planes de tarjetas que solo existen por Últimos consumos: 'live:<grupoKey>'. En Mes
+    // esa tarjeta es su grupoKey (cicloDePago), así que los ítems usan ese id.
+    const tarjetaId = String(p.tarjeta || '').startsWith('live:') ? p.tarjeta.slice(5) : p.tarjeta;
+    if (tarjetas && !tarjetas.includes(tarjetaId)) return;
     if (!p.periodo_anio || !p.periodo_mes) return;
     const actual = p.cuota_actual ?? p.cuotas_pagadas;
     const total = p.total_cuotas;
     // Una "cuota" 1/1 es una compra común: va en variables, no en cuotas.
     if (!actual || !total || total <= 1) return;
-    const periodoFacturado = pago - (desfase[p.tarjeta] ?? 1);
-    const diff = periodoFacturado - (p.periodo_anio * 12 + (p.periodo_mes - 1));
-    const numero = actual + diff;
+    const periodoFacturado = pago - (desfase[tarjetaId] ?? 1);
+    let diff = periodoFacturado - (p.periodo_anio * 12 + (p.periodo_mes - 1));
+    let numero = actual + diff;
+    // Plan que avanzó con Últimos consumos: los meses anteriores salen del ancla del
+    // último resumen, como antes (así no cambia lo que ya se pagó).
+    if (diff < 0 && p.cuota_resumen && p.periodo_resumen_anio && p.periodo_resumen_mes) {
+      diff = periodoFacturado - (p.periodo_resumen_anio * 12 + (p.periodo_resumen_mes - 1));
+      numero = p.cuota_resumen + diff;
+    }
     if (diff < 0 || numero > total) return;
     const pesos = p.monto_pesos ?? p.monto_cuota_pesos ?? 0;
     const usd = p.monto_dolares ?? p.monto_cuota_dolares ?? 0;
     items.push({
       id: p.id,
       descripcion: p.descripcion || p.referencia_limpia || p.referencia_original || 'Sin descripción',
-      tarjeta: p.tarjeta,
+      tarjeta: tarjetaId,
       cuota_numero: numero,
       total_cuotas: total,
       monto: r2(pesos || usd * cotizacionVenta),

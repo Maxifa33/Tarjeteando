@@ -17,9 +17,11 @@ import {
   composicionDesdeTarjetas,
   fijosPorTarjeta
 } from './mes.js';
-import { construirPlanes, proyectarCuotas } from './cuotas.js';
+import { construirPlanes, proyectarCuotas, observacionesEnCurso, formatearParaVista } from './cuotas.js';
+import { serieEvolucion } from './evolucion.js';
 
 const HOY = '2026-09-26';
+const r2 = (n) => Math.round(n * 100) / 100;
 
 // Fixture del prototipo: BBVA con resumen cerrado; Santander (2 plásticos), Galicia Visa
 // y Galicia MC en curso con Últimos consumos. Todo vence en octubre.
@@ -326,5 +328,59 @@ describe('composicionPorTarjeta', () => {
   test('tarjeta sin datos: no tiene composición', () => {
     const p = composicionPorTarjeta({ porTarjeta: [{ tarjetaId: 'y', fuente: 'sin_datos', total: 0 }], fijosPorTarjeta: { y: 999 } });
     assert.deepEqual(p, {});
+  });
+});
+
+describe('cuotas de Últimos consumos en el Mes (observaciones en curso)', () => {
+  // VISA Galicia: resumen de septiembre (cierre 04/09, vence 16/09) y el ciclo en curso
+  // de octubre (cierre 02/10, vence 14/10). Desfase 0: cada ciclo se paga en su mes de cierre.
+  const GAL = { id: 'VISA Galicia-2026-9', tarjeta: 'VISA Galicia', anio: 2026, mes: 9, fecha_cierre: '2026-09-04', fecha_vencimiento: '2026-09-16', total_a_pagar_pesos: 380000 };
+  const res = [resumenes[0], GAL];
+  const movs = [{ id: 'h', resumen_id: GAL.id, tarjeta: 'VISA Galicia', referencia_limpia: 'Heladera', cuota_texto: '03/06', monto_pesos: 30000, monto_dolares: 0 }];
+  const GK = 'Galicia|Visa|4410';
+  const consumos = [
+    ...consumosLive,
+    consumo(GK, '2026-10-02', '4410', 30000, { id: 'c1', descripcion: 'HELADERA', es_cuota: true, cuota_actual: 4, total_cuotas: 6 }),
+    consumo(GK, '2026-10-02', '4410', 12000, { id: 'c2', descripcion: 'SODIMAC', es_cuota: true, cuota_actual: 1, total_cuotas: 3 })
+  ];
+  const desfase = desfasePorTarjeta(res);
+  const c = cicloDePago({ hoy: HOY, tarjetas, resumenes: res, ciclosLive, consumosLive: consumos });
+  const enCurso = observacionesEnCurso({ consumosLive: consumos, ciclosLive, tarjetas });
+  const sin = formatearParaVista(construirPlanes(movs, res));
+  const con = formatearParaVista(construirPlanes(movs, res, [], { enCurso }));
+  const compDe = (planes) => {
+    const cuotas = cuotasDelMes(planes, c.mesKey, { desfase }).items;
+    const porT = composicionPorTarjeta({ porTarjeta: c.porTarjeta, cuotas, fijosPorTarjeta: {} });
+    return { porT, total: composicionDesdeTarjetas(porT, { porTarjeta: c.porTarjeta }) };
+  };
+
+  test('el total del Mes NO cambia y cuotas + fijos + variables = total', () => {
+    assert.equal(c.mesKey, '2026-10');
+    const a = compDe(sin).total;
+    const b = compDe(con).total;
+    assert.equal(b.total, a.total);
+    assert.equal(r2(b.cuotas + b.fijos + b.variables), b.total);
+  });
+
+  test('una compra 1/N pasa de variables a cuotas', () => {
+    const a = compDe(sin).porT['VISA Galicia'];
+    const b = compDe(con).porT['VISA Galicia'];
+    assert.equal(r2(b.cuotas - a.cuotas), 12000);
+    assert.equal(r2(a.variables - b.variables), 12000);
+    assert.equal(b.total, a.total);
+  });
+
+  test('la cuota del plan que avanzó se cuenta una sola vez', () => {
+    const items = cuotasDelMes(con, c.mesKey, { desfase }).items.filter((q) => /heladera/i.test(q.descripcion));
+    assert.deepEqual(items.map((q) => [q.cuota_numero, q.monto]), [[4, 30000]]);
+  });
+
+  test('las columnas "pagado" de serieEvolucion no cambian', () => {
+    const serie = (planes) => serieEvolucion({ resumenes: res, movimientos: movs, planes, ciclo: c, composicion: compDe(planes).total, desfase })
+      .filter((col) => col.tipo === 'pagado');
+    const a = serie(sin);
+    // Septiembre pagó la 3/6 de la heladera (lo que cerró el resumen).
+    assert.equal(a.find((col) => col.mesKey === '2026-09').porTipo.cuotas, 30000);
+    assert.deepEqual(serie(con), a);
   });
 });

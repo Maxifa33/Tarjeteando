@@ -17,6 +17,8 @@
  *  - Los consumos en dólares tienen monto_pesos = 0: se pesifican al proyectar.
  */
 
+import { cicloEsDeTarjeta } from './mes.js';
+
 /** Índice absoluto de un mes (año*12 + mes-1), para comparar y restar períodos. */
 export const indiceDeMes = (anio, mes) => anio * 12 + (mes - 1);
 
@@ -72,6 +74,59 @@ export function idDePlan(mov, nums, ocurrencia = 1) {
 }
 
 /**
+ * Cuotas de Últimos consumos como observaciones en curso, con forma de movimiento
+ * (origen 'en_curso'). Solo consumos en cuotas (no pagos, no 1/1) de ciclos que
+ * todavía no concilió un resumen. El período es el mes de CIERRE del ciclo (el mismo
+ * criterio que resumen.anio/mes), tomado del string ciclo.fecha_cierre.
+ * tarjeta: el nombre de la tarjeta de storage que empareja con el ciclo (banco + red);
+ * si ninguna, `live:<grupoKey>` (la misma clave de los nombres personalizados).
+ */
+export function observacionesEnCurso({ consumosLive = [], ciclosLive = {}, tarjetas = [] } = {}) {
+  const out = [];
+  (consumosLive || []).forEach((c) => {
+    if (!c || !c.es_cuota || c.es_pago || !c.cuota_actual || !(c.total_cuotas > 1)) return;
+    const ciclo = ciclosLive?.[c.grupo_key];
+    // Solo el ciclo vigente del grupo: un ciclo viejo ya no está en ciclosLive.
+    if (!ciclo || ciclo.estado === 'conciliado' || ciclo.fecha_cierre !== c.ciclo_cierre) return;
+    const m = /^(\d{4})-(\d{2})-\d{2}/.exec(String(ciclo.fecha_cierre || ''));
+    if (!m) return;
+    const tarjeta = (tarjetas || []).find((t) => cicloEsDeTarjeta(ciclo, t));
+    out.push({
+      id: `live:${c.id}`,
+      origen: 'en_curso',
+      tarjeta: tarjeta ? tarjeta.nombre : `live:${ciclo.grupoKey}`,
+      tarjeta_label: tarjeta ? tarjeta.nombre : `${ciclo.banco || 'Sin banco'} ${ciclo.red || ''}`.trim(),
+      referencia_original: c.descripcion || '',
+      fecha_compra: c.fecha || null,
+      comprobante: c.comprobante || null,
+      es_cuota: true,
+      cuota_actual: c.cuota_actual,
+      total_cuotas: c.total_cuotas,
+      cuota_texto: `${c.cuota_actual}/${c.total_cuotas}`,
+      monto_pesos: Number(c.monto_pesos) || 0,
+      monto_dolares: Number(c.monto_dolares) || 0,
+      anio_resumen: Number(m[1]),
+      mes_resumen: Number(m[2])
+    });
+  });
+  return out;
+}
+
+/** Monto de una observación en curso compatible con el del plan. */
+function mismoMonto(plan, o) {
+  if (o.montoPesos) {
+    return !!plan.monto_pesos && Math.abs(plan.monto_pesos - o.montoPesos) <= Math.max(Math.abs(plan.monto_pesos) * 0.01, 100);
+  }
+  if (o.montoDolares) {
+    return !plan.monto_pesos && Math.abs((plan.monto_dolares || 0) - o.montoDolares) <= 0.01;
+  }
+  return false;
+}
+
+/** Observaciones en curso que no emparejaron con ningún plan (debug). */
+export const sinEmparejarDe = (planes) => planes?.sinEmparejar || [];
+
+/**
  * Arma los planes de cuotas a partir de todos los movimientos y resúmenes.
  *
  * Identidad (idDePlan): por comprobante, o por clave base + ocurrencia. Compatibilidad
@@ -88,10 +143,23 @@ export function idDePlan(mov, nums, ocurrencia = 1) {
  *   'terminado' → el plan pasa a 'terminada' (motivo 'decision_usuario') y no se proyecta.
  *   'vigente'   → deja de estar interrumpido y se proyecta hasta su última cuota.
  *   Sin decisiones, la salida es idéntica a la de antes.
+ * @param {Object} opciones
+ * @param {Array} [opciones.enCurso] - observacionesEnCurso (cuotas de Últimos consumos).
+ *   Actualizan el ESTADO de los planes (cuota actual y período), nunca los resúmenes:
+ *   1) emparejan por comprobante (misma tarjeta); si no, por tarjeta + total de cuotas
+ *      + cuota esperada + monto (pesos ±max(1%, $100); USD ±0,01). Una observación por
+ *      plan y por período: dos observaciones idénticas avanzan dos planes distintos.
+ *   2) Período posterior al del plan → el plan avanza (origen 'en_curso'). Mismo
+ *      período → gana el resumen.
+ *   3) Sin plan: se crea solo si es la cuota 1 o la tarjeta no tiene resúmenes; si
+ *      no, va a `sinEmparejar` (propiedad no enumerable del resultado) y no se proyecta.
+ *   Un plan que no aparece en Últimos consumos no pasa a interrumpido: el último
+ *   período de cada tarjeta sale solo de los resúmenes. Sin enCurso, la salida es la
+ *   de antes.
  * @returns {Array} planes, cada uno con cuota_actual, total_cuotas, monto_pesos,
  *   monto_dolares, periodo_anio, periodo_mes e `interrumpida`.
  */
-export function construirPlanes(movimientos = [], resumenes = [], decisiones = []) {
+export function construirPlanes(movimientos = [], resumenes = [], decisiones = [], { enCurso = [] } = {}) {
   const resumenPorId = {};
   const ultimoPeriodoPorTarjeta = {};
   resumenes.forEach(r => {
@@ -154,7 +222,7 @@ export function construirPlanes(movimientos = [], resumenes = [], decisiones = [
       plan = planes.find(p => empalma(p, o) && (o.comp ? !p.comp : p.comp));
     }
     if (!plan) {
-      plan = { alias: [], primerOrden: o.orden, periodo: -Infinity };
+      plan = { alias: [], primerOrden: o.orden, periodo: -Infinity, absorbidas: new Set() };
       planes.push(plan);
     }
     if (!plan.alias.includes(o.id)) {
@@ -170,6 +238,7 @@ export function construirPlanes(movimientos = [], resumenes = [], decisiones = [
     if (!gana) return;
     Object.assign(plan, {
       datos: o.mov,
+      tarjeta: o.mov.tarjeta,
       clave: o.id,
       base: o.base,
       cuota_actual: o.nums.actual,
@@ -180,6 +249,92 @@ export function construirPlanes(movimientos = [], resumenes = [], decisiones = [
       periodo_anio: o.resumen.anio,
       periodo_mes: o.resumen.mes,
       ultimaObs: o.periodo
+    });
+  });
+
+  // 4) Observaciones en curso (Últimos consumos): avanzan planes o crean los nuevos.
+  const sinEmparejar = [];
+  const enCursoObs = (enCurso || []).map((mov, i) => {
+    const nums = numerosDeCuota(mov);
+    const periodo = mov && mov.anio_resumen && mov.mes_resumen ? indiceDeMes(mov.anio_resumen, mov.mes_resumen) : null;
+    if (!nums || periodo === null) return null;
+    const montoPesos = mov.monto_pesos || 0;
+    const montoDolares = mov.monto_dolares || 0;
+    return {
+      mov, nums, periodo, orden: movimientos.length + i, montoPesos, montoDolares,
+      resumen: { anio: mov.anio_resumen, mes: mov.mes_resumen },
+      base: claveDePlan(mov, nums.total, montoPesos, montoDolares),
+      comp: normalizarComprobante(mov.comprobante)
+    };
+  }).filter(Boolean).sort((a, b) => a.periodo - b.periodo
+    || String(a.mov.fecha_compra || '').localeCompare(String(b.mov.fecha_compra || ''))
+    || String(a.comp || '').localeCompare(String(b.comp || ''))
+    || String(a.mov.referencia_original || '').localeCompare(String(b.mov.referencia_original || ''))
+    || a.montoPesos - b.montoPesos || a.montoDolares - b.montoDolares
+    || String(a.mov.id ?? '').localeCompare(String(b.mov.id ?? '')));
+
+  const ocurrenciasEnCurso = {};
+  enCursoObs.forEach(o => {
+    const libre = (p) => p.tarjeta === o.mov.tarjeta && !p.absorbidas.has(o.periodo);
+    let plan = o.comp ? planes.find(p => libre(p) && p.comp === o.comp) : null;
+    if (!plan) {
+      plan = planes.find(p => libre(p)
+        && p.total_cuotas === o.nums.total
+        && p.cuota_actual + (o.periodo - p.periodo) === o.nums.actual
+        && (!p.comp || !o.comp || p.comp === o.comp)
+        && mismoMonto(p, o));
+    }
+    if (plan) {
+      plan.absorbidas.add(o.periodo);
+      if (o.comp && !plan.comp) plan.comp = o.comp;
+      // Mismo período: gana el resumen. Período posterior: el plan avanza.
+      if (o.periodo > plan.periodo) {
+        // Lo que cerró el resumen queda como estaba: los meses pagados se siguen
+        // calculando desde esta ancla (cuotasDelMes).
+        if (!plan.origen) {
+          Object.assign(plan, {
+            cuota_resumen: plan.cuota_actual,
+            periodo_resumen_anio: plan.periodo_anio,
+            periodo_resumen_mes: plan.periodo_mes
+          });
+        }
+        Object.assign(plan, {
+          cuota_actual: o.nums.actual,
+          periodo: o.periodo,
+          periodo_anio: o.resumen.anio,
+          periodo_mes: o.resumen.mes,
+          origen: 'en_curso'
+        });
+      }
+      return;
+    }
+    const ultimo = ultimoPeriodoPorTarjeta[o.mov.tarjeta];
+    const sinResumenes = ultimo === undefined;
+    // Si un resumen ya cubre ese período, gana el resumen: nunca un plan duplicado.
+    if ((o.nums.actual !== 1 && !sinResumenes) || ultimo >= o.periodo) {
+      sinEmparejar.push(o.mov);
+      return;
+    }
+    const k = `${o.mov.tarjeta}|${o.periodo}|${o.base}`;
+    ocurrenciasEnCurso[k] = (ocurrenciasEnCurso[k] || 0) + 1;
+    const clave = idDePlan(o.mov, o.nums, ocurrenciasEnCurso[k]);
+    planes.push({
+      alias: [clave],
+      primerOrden: o.orden,
+      absorbidas: new Set([o.periodo]),
+      comp: o.comp,
+      datos: o.mov,
+      tarjeta: o.mov.tarjeta,
+      clave,
+      base: o.base,
+      cuota_actual: o.nums.actual,
+      total_cuotas: o.nums.total,
+      monto_pesos: o.montoPesos,
+      monto_dolares: o.montoDolares,
+      periodo: o.periodo,
+      periodo_anio: o.resumen.anio,
+      periodo_mes: o.resumen.mes,
+      origen: 'en_curso'
     });
   });
 
@@ -194,9 +349,11 @@ export function construirPlanes(movimientos = [], resumenes = [], decisiones = [
     .reduce((m, d) => (!m || String(d.fecha || '') >= String(m.fecha || '') ? d : m), null);
 
   // El orden de salida es el de antes: el del primer movimiento de cada plan.
-  return planes.sort((a, b) => a.primerOrden - b.primerOrden).map(p => {
+  const resultado = planes.sort((a, b) => a.primerOrden - b.primerOrden).map(p => {
     const plan = {
       ...p.datos,
+      ...(p.origen ? { origen: p.origen } : {}),
+      ...(p.cuota_resumen ? { cuota_resumen: p.cuota_resumen, periodo_resumen_anio: p.periodo_resumen_anio, periodo_resumen_mes: p.periodo_resumen_mes } : {}),
       clave: p.clave,
       alias: p.alias,
       es_cuota: true,
@@ -219,8 +376,11 @@ export function construirPlanes(movimientos = [], resumenes = [], decisiones = [
     if (decision?.decision === 'vigente') {
       return { ...plan, interrumpida: false, estado: 'vigente', decision: 'vigente' };
     }
-    return { ...plan, interrumpida, estado: estadoDePlan({ quedanCuotas, interrumpida, esUltimoPeriodo: plan.periodo === ultimoPeriodo }) };
+    // >=: un plan que avanzó con Últimos consumos queda después del último resumen.
+    return { ...plan, interrumpida, estado: estadoDePlan({ quedanCuotas, interrumpida, esUltimoPeriodo: plan.periodo >= ultimoPeriodo }) };
   });
+  Object.defineProperty(resultado, 'sinEmparejar', { value: sinEmparejar, enumerable: false });
+  return resultado;
 }
 
 /**
@@ -371,6 +531,11 @@ export function formatearParaVista(planes = []) {
     periodo_mes: plan.periodo_mes,
     clave: plan.clave,
     alias: plan.alias || [plan.clave],
+    origen: plan.origen || null,
+    tarjeta_label: plan.tarjeta_label || null,
+    cuota_resumen: plan.cuota_resumen || null,
+    periodo_resumen_anio: plan.periodo_resumen_anio || null,
+    periodo_resumen_mes: plan.periodo_resumen_mes || null,
     motivo: plan.motivo || null,
     decision: plan.decision || null
   }));

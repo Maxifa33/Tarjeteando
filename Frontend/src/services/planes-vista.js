@@ -31,7 +31,8 @@ export function cuotaEnPesos(p, cotizacionVenta = 0) {
 /** Meses de pago (índices absolutos) de la primera y la última cuota del plan. */
 export function rangoDePlan(p, { desfase = {} } = {}) {
   if (!p?.periodo_anio || !p?.periodo_mes) return null;
-  const pagoActual = p.periodo_anio * 12 + (p.periodo_mes - 1) + (desfase[p.tarjeta] ?? 1);
+  const tarjetaId = String(p.tarjeta || '').startsWith('live:') ? p.tarjeta.slice(5) : p.tarjeta;
+  const pagoActual = p.periodo_anio * 12 + (p.periodo_mes - 1) + (desfase[tarjetaId] ?? 1);
   const inicio = pagoActual - (actualDe(p) - 1);
   return { inicio, fin: inicio + p.total_cuotas - 1 };
 }
