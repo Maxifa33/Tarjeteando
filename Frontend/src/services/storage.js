@@ -5,7 +5,7 @@
 
 import { asignarIds } from './series.js';
 import { configConDefaults } from './apariencia.js';
-import { migrarA140 } from './migraciones.js';
+import { migrarA140, migrarPeriodoResumenes } from './migraciones.js';
 
 const STORAGE_KEYS = {
   RESUMENES: 'tarjetas_resumenes',
@@ -53,6 +53,16 @@ class StorageService {
       this.migrateData(version);
       localStorage.setItem(STORAGE_KEYS.VERSION, CURRENT_VERSION);
     }
+    this.migracionesIdempotentes();
+  }
+
+  /**
+   * Correcciones que corren en cada carga (y después de importar un backup): no
+   * dependen de la versión porque un backup viejo puede traer el dato sin corregir.
+   */
+  migracionesIdempotentes() {
+    const { corregidos } = migrarPeriodoResumenes(localStorage);
+    if (corregidos.length) console.log(`[Storage] Período de resumen corregido: ${corregidos.join(', ')}`);
   }
 
   /**
@@ -508,6 +518,7 @@ class StorageService {
         if (config) this.setItem(STORAGE_KEYS.CONFIG, config);
       }
 
+      this.migracionesIdempotentes();
       return { success: true };
     } catch (error) {
       console.error('[Storage] Error importando:', error);
