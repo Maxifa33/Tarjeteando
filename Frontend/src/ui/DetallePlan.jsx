@@ -71,6 +71,9 @@ const DetallePlan = ({ fila, identidad, color, nombreTarjeta, cuotas = [], proxi
         <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
           <span style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-.01em', overflowWrap: 'anywhere' }}>{p.descripcion}</span>
           <span className="cap" style={{ fontSize: 13 }}>{nombreTarjeta} · compra en {compra}</span>
+          {p.origen === 'en_curso' && (
+            <span style={{ fontSize: 13, color: 'var(--label2)', paddingTop: 2 }}>Actualizado con Últimos consumos · se confirma con el próximo resumen</span>
+          )}
         </span>
       </div>
       {aviso}

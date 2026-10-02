@@ -43,13 +43,13 @@ tarjetas-proyecto/
 │       │                         PilaWallet, FilaMovimiento, DetalleMovimiento, LineaDeTiempoPlanes,
 │       │                         DetallePlan, identidad.js, formato.js, useCompacto.js
 │       └── services/          ← cálculos puros con tests (`npm test`)
-│           ├── storage.js         ← localStorage (versión 1.4.0) + migraciones.js
+│           ├── storage.js         ← localStorage (versión 1.4.0) + migraciones.js (idempotentes en cada carga)
 │           ├── mes.js             ← ciclo de pago, composición, tope, próximo mes
 │           ├── evolucion.js       ← gráfico Evolución y proyección
 │           ├── tarjetas.js        ← qué muestra cada plástico, nombres personalizados
 │           ├── movimientos-vista.js ← filtros, días, historial de comercio, consumos en curso
 │           ├── planes-vista.js    ← línea de tiempo y cifras de Cuotas
-│           ├── cuotas.js          ← planes y proyección (única calculadora de cuotas)
+│           ├── cuotas.js          ← planes, identidad (comprobante/ocurrencia) y cuotas en curso (única calculadora)
 │           ├── series.js          ← gastos fijos (cadenas por ID de movimiento)
 │           ├── apariencia.js      ← modo de color / reducir transparencia
 │           └── consumos/          ← lectores de Últimos consumos y ciclos (Card/SuperCard)
@@ -135,6 +135,18 @@ Para otros bancos, el backend usa Claude Vision API como fallback automático (r
 
 ---
 
+## Cambios recientes (02/10/2026) — identidad de planes y cuotas de Últimos consumos
+
+Spec: `rediseno-2026/specs/fix-cuotas-identidad-y-ultimos-consumos.json`. Detalle en `references/contexto-tarjeteando.md` (Gotchas 1–1c).
+
+- **Período del resumen = mes de CIERRE**, del string `fecha_cierre` (el parser ya no usa `new Date`: un cierre del día 1 caía en el mes anterior). Storage lo corrige en los resúmenes guardados (`migrarPeriodoResumenes`, idempotente, no cambia ids).
+- **Comprobante:** el parser lo devuelve crudo en cada movimiento (`'008547'`; null si no hay). No entra en el hash del id. Se compara siempre con `normalizarComprobante` (solo dígitos, sin ceros a la izquierda).
+- **Identidad del plan** (`services/cuotas.js`): `tarjeta|c:<comprobante>`, o clave base + ocurrencia `#k` dentro del resumen. Compras idénticas son planes distintos. Viejo sin comprobante + nuevo con comprobante de la misma compra = un plan (`alias`). Nunca emparejar por nombre. Decisiones con clave vieja → `<clave>#1` (`migrarDecisionesPlanes`).
+- **Cuotas de Últimos consumos** (`observacionesEnCurso` → `construirPlanes(..., { enCurso })`): avanzan los planes existentes (comprobante, o tarjeta + total + cuota esperada + monto) y crean los nuevos solo si son cuota 1 o la tarjeta no tiene resúmenes (`live:<grupoKey>`); el resto va a `sinEmparejar`. Mismo período: gana el resumen. Interrumpidos solo desde resúmenes. El total del Mes y las columnas "pagado" no cambian (el plan guarda su ancla del resumen).
+- `refrescarLive` recalcula los planes. DetallePlan avisa "Actualizado con Últimos consumos · se confirma con el próximo resumen".
+
+---
+
 ## Cambios recientes (27/09/2026) — Rediseño B+C (fases 0 a 7)
 
 Rama `feat/rediseno-bc` (fases 0 a 7, specs en `rediseno-2026/specs/`, prototipos en `rediseno-2026/prototipos/`).
@@ -146,7 +158,7 @@ Rama `feat/rediseno-bc` (fases 0 a 7, specs en `rediseno-2026/specs/`, prototipo
 - **Cuotas del mes**: cada tarjeta factura en su mes de cierre y paga `desfase` meses después (del último resumen: vto − cierre, default 1). `cuotasDelMes` elige por mes, nunca por posición en `proyectarCuotas`. Las cuotas en USD van aparte. Una "cuota" 1/1 es compra común (no cuenta como cuota).
 - **Variables = total − cuotas − fijos**, calculado por tarjeta (`composicionPorTarjeta`) y sumado (`composicionDesdeTarjetas`): la cápsula de Mes = suma de "Esta tarjeta en el mes". Si cuotas + fijos superan lo importado, el total de esa tarjeta sube a lo comprometido y hay aviso. Nunca sumar cuotas al total de Últimos consumos.
 - **Evolución** (`services/evolucion.js`): pagado por mes de vencimiento; comprometido = solo cuotas + fijos (no se inventa gasto variable).
-- **Cuotas** (`services/planes-vista.js`): los meses de la línea de tiempo son meses de pago, así "Este mes" coincide con Mes. `construirPlanes(movs, resumenes, decisiones)`: 'terminado' → `estado 'terminada'`, `motivo 'decision_usuario'` (no se proyecta); 'vigente' → deja de estar interrumpido. Sin decisiones, la salida es idéntica a la de antes.
+- **Cuotas** (`services/planes-vista.js`): los meses de la línea de tiempo son meses de pago, así "Este mes" coincide con Mes. `construirPlanes(movs, resumenes, decisiones, { enCurso })`: 'terminado' → `estado 'terminada'`, `motivo 'decision_usuario'` (no se proyecta); 'vigente' → deja de estar interrumpido. Sin decisiones, la salida es idéntica a la de antes.
 - **Identidad de tarjeta** (`ui/identidad.js`): plástico y color de gráfico por banco + red, nunca por orden ni por monto. Orden de apilado: Santander → BBVA → Galicia Visa → Galicia MC → otros (por alta).
 - **Nombres personalizados** (`nombresTarjetas`): por id de tarjeta o `live:<grupoKey>` para tarjetas que solo existen por Últimos consumos; se muestran en todas las vistas (`nombreVisible`) y se mudan a la tarjeta cuando llega su resumen (`migrarNombresLive`).
 - **Accesibilidad** es criterio de aceptación: foco visible, `aria-label` en íconos, áreas táctiles ≥ 44 px en celular, `prefers-reduced-motion`, `prefers-reduced-transparency` y `prefers-contrast` respetados. Ningún texto usa el color de una serie.
