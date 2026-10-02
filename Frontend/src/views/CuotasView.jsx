@@ -115,7 +115,7 @@ const CuotasView = ({
   [datos, filtro, q]);
 
   const sel = filas.find((f) => f.planId === elegido) || (usarHoja ? null : filas[0] || null);
-  const decisionDe = (f) => decisiones.filter((d) => d.claveDePlan === f.plan.clave).sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)))[0] || null;
+  const decisionDe = (f) => decisiones.filter((d) => d.claveDePlan === f.plan.clave || f.plan.alias?.includes(d.claveDePlan)).sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)))[0] || null;
 
   const elegir = (id) => { setElegido(id); if (usarHoja) setHoja(true); };
   const cerrarHoja = () => {

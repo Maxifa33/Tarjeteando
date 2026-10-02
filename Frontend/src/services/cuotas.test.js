@@ -26,7 +26,9 @@ import {
   totalPendiente,
   numerosDeCuota,
   estaVigente,
-  estaEnCurso
+  estaEnCurso,
+  normalizarComprobante,
+  claveDePlan
 } from './cuotas.js';
 
 const aquí = path.dirname(fileURLToPath(import.meta.url));
@@ -261,13 +263,13 @@ describe('Independencia del orden de subida (PDFs reales)', { skip: !HAY_PDFS &&
   const require = createRequire(import.meta.url);
   const PDFParserService = require(path.join(RAIZ, 'Backend/src/services/pdf-parser.service.js'));
 
-  const parsearTodo = async () => {
+  const parsearTodo = async (archivos = ARCHIVOS) => {
     const log = console.log;
     console.log = () => {};
     try {
       const movimientos = [];
       const resumenes = [];
-      for (const archivo of ARCHIVOS) {
+      for (const archivo of archivos) {
         const r = await new PDFParserService().parsearPDF(fs.readFileSync(path.join(PDF_DIR, archivo)), archivo);
         if (!r.exito) continue;
         const id = `${r.tarjeta}-${r.resumen.anio}-${r.resumen.mes}`;
@@ -307,6 +309,40 @@ describe('Independencia del orden de subida (PDFs reales)', { skip: !HAY_PDFS &&
       JSON.stringify(proyectarCuotas(construirPlanes(movimientos, resumenes, []), { meses: 6, resumenes })),
       JSON.stringify(proyectarCuotas(antes, { meses: 6, resumenes }))
     );
+  });
+
+  test('con comprobante: cada compra es un plan; la proyección no cambia', async () => {
+    const { movimientos, resumenes } = await parsearTodo();
+    // Los mismos movimientos sin comprobante (como los guardados antes del paso 1).
+    const sinComprobante = movimientos.map(({ comprobante, ...m }) => m);
+    const conComp = construirPlanes(movimientos, resumenes);
+    const sinComp = construirPlanes(sinComprobante, resumenes);
+    const totales = (planes) => proyectarCuotas(planes, { meses: 12, resumenes }).map(b => b.total);
+    // Snapshot de la proyección con las fixtures, idéntica a la de antes del cambio de identidad.
+    const SNAPSHOT = [401687.15, 149166.54, 117499.88, 117499.88, 44166.55, 44166.55, 44166.55, 44166.55, 44166.55, 44166.55, 0, 0];
+    assert.deepEqual(totales(conComp), SNAPSHOT);
+    assert.deepEqual(totales(sinComp), SNAPSHOT);
+    assert.equal(conComp.length, 23);
+    assert.equal(sinComp.length, 23);
+    // Ninguna compra con comprobante queda en dos planes.
+    const vistos = new Set();
+    conComp.filter(p => p.clave.includes('|c:')).forEach(p => {
+      assert.ok(!vistos.has(p.clave), p.clave);
+      vistos.add(p.clave);
+    });
+  });
+
+  test('Brooksfield y Sodimac (VISA Galicia jul–sep 2025): un plan cada uno, terminan en 03/03', async () => {
+    const archivos = ['VISA GAL - Julio 2025.pdf', 'VISA GAL - Agosto 2025.pdf', 'VISA GAL - Septiembre 2025.pdf'];
+    if (!archivos.every(f => fs.existsSync(path.join(PDF_DIR, f)))) return;
+    const { movimientos, resumenes } = await parsearTodo(archivos);
+    const planes = construirPlanes(movimientos, resumenes);
+    for (const [re, comp] of [[/^brooksfield/i, 'VISA Galicia|c:8547'], [/^sodimac/i, 'VISA Galicia|c:990054']]) {
+      const p = planes.filter(x => re.test(x.referencia_original));
+      assert.equal(p.length, 1, String(re));
+      assert.equal(p[0].clave, comp);
+      assert.deepEqual([p[0].cuota_actual, p[0].total_cuotas, p[0].periodo_mes], [3, 3, 9]);
+    }
   });
 
   test('cada cuota proyectada lleva el número correcto respecto de su período', async () => {
@@ -423,5 +459,95 @@ describe('Decisiones sobre planes a revisar', () => {
       { claveDePlan: easyClave, decision: 'vigente', fecha: '2026-09-02' }
     ]);
     assert.equal(planes.find(p => p.referencia_limpia === 'Easy').estado, 'vigente');
+  });
+});
+
+// ──────── 5. identidad del plan: comprobante u ocurrencia ────────
+describe('normalizarComprobante', () => {
+  test('solo dígitos, sin ceros a la izquierda', () => {
+    assert.equal(normalizarComprobante('009872'), '9872');
+    assert.equal(normalizarComprobante('00009872'), '9872');
+    assert.equal(normalizarComprobante('009 872'), '9872');
+  });
+  test('vacío o solo ceros = sin comprobante', () => {
+    for (const c of ['000000', '', null, undefined]) assert.equal(normalizarComprobante(c), null);
+  });
+});
+
+describe('Identidad de planes', () => {
+  const R1 = resumen('VISA', 2026, 3);
+  const R2 = resumen('VISA', 2026, 4);
+  const conComp = (r, ref, cuota, pesos, comprobante, n = '') => ({ ...mov(r, ref, cuota, pesos), id: `${r.id}-${ref}-${cuota}-${comprobante}${n}`, comprobante });
+  const dos = (r, cuota) => [
+    { ...mov(r, 'Zapatillas', cuota, 20000), id: `${r.id}-a`, fecha_compra: '2026-01-10' },
+    { ...mov(r, 'Zapatillas', cuota, 20000), id: `${r.id}-b`, fecha_compra: '2026-01-10' }
+  ];
+
+  test('dos compras idénticas en el mismo resumen son 2 planes y la proyección es doble', () => {
+    const planes = construirPlanes(dos(R1, '03/06'), [R1]);
+    assert.equal(planes.length, 2);
+    assert.deepEqual(planes.map(p => p.clave).sort(), [`${claveDePlan({ tarjeta: 'VISA', referencia_limpia: 'Zapatillas' }, 6, 20000, 0)}#1`, `${claveDePlan({ tarjeta: 'VISA', referencia_limpia: 'Zapatillas' }, 6, 20000, 0)}#2`]);
+    assert.equal(proyectarCuotas(planes, { meses: 1, resumenes: [R1] })[0].total, 40000);
+  });
+
+  test('en el resumen siguiente como 4/6 siguen siendo 2 (no 4)', () => {
+    const planes = construirPlanes([...dos(R1, '03/06'), ...dos(R2, '04/06')], [R1, R2]);
+    assert.equal(planes.length, 2);
+    assert.ok(planes.every(p => p.cuota_actual === 4 && p.periodo_mes === 4 && !p.interrumpida));
+  });
+
+  test('con comprobantes distintos → 2 planes; mismo comprobante en dos tarjetas → 2 planes', () => {
+    assert.equal(construirPlanes([conComp(R1, 'Zapatillas', '03/06', 20000, '000111'), conComp(R1, 'Zapatillas', '03/06', 20000, '000222')], [R1]).length, 2);
+    const M1 = resumen('MASTER', 2026, 3);
+    const planes = construirPlanes([conComp(R1, 'Zapatillas', '03/06', 20000, '000111'), conComp(M1, 'Zapatillas', '03/06', 20000, '000111')], [R1, M1]);
+    assert.equal(planes.length, 2);
+    assert.deepEqual(planes.map(p => p.clave).sort(), ['MASTER|c:111', 'VISA|c:111']);
+  });
+
+  test('el comprobante identifica aunque cambie el nombre (regla de nombres nueva)', () => {
+    const planes = construirPlanes([conComp(R1, 'WWW.FRAVEGA', '03/18', 44166.55, '009872'), conComp(R2, 'Fravega', '04/18', 44166.55, '00009872')], [R1, R2]);
+    assert.equal(planes.length, 1);
+    assert.equal(planes[0].cuota_actual, 4);
+  });
+
+  test('resumen viejo sin comprobante + nuevo con comprobante de la misma compra → 1 plan', () => {
+    const viejo = mov(R1, 'Heladera', '02/06', 30000);
+    const nuevo = conComp(R2, 'Heladera', '03/06', 30000, '004455');
+    for (const orden of [[viejo, nuevo], [nuevo, viejo]]) {
+      const planes = construirPlanes(orden, [R1, R2]);
+      assert.equal(planes.length, 1);
+      assert.equal(planes[0].cuota_actual, 3);
+      assert.equal(planes[0].clave, 'VISA|c:4455');
+      assert.ok(planes[0].alias.includes(`${claveDePlan(viejo, 6, 30000, 0)}#1`));
+    }
+    // Y al revés: resumen viejo re-subido con comprobante, el nuevo sin.
+    const planes = construirPlanes([conComp(R1, 'Heladera', '02/06', 30000, '004455'), mov(R2, 'Heladera', '03/06', 30000)], [R1, R2]);
+    assert.equal(planes.length, 1);
+    assert.equal(planes[0].cuota_actual, 3);
+  });
+
+  test('la misma compra dos veces en un resumen (puesta al día): gana la cuota más alta', () => {
+    const planes = construirPlanes([conComp(R1, 'Sony', '02/03', 39235.58, '007860'), conComp(R1, 'Sony', '03/03', 39235.58, '007860')], [R1]);
+    assert.equal(planes.length, 1);
+    assert.equal(planes[0].cuota_actual, 3);
+  });
+
+  test('una decisión sobre el plan sin comprobante sigue valiendo cuando empalma con uno con comprobante', () => {
+    const R3 = resumen('VISA', 2026, 5);
+    const viejo = mov(R1, 'Heladera', '02/06', 30000);
+    const nuevo = conComp(R2, 'Heladera', '03/06', 30000, '004455');
+    const otro = mov(R3, 'Otra', '01/02', 1000);
+    const clave = `${claveDePlan(viejo, 6, 30000, 0)}#1`;
+    const planes = construirPlanes([viejo, nuevo, otro], [R1, R2, R3], [{ claveDePlan: clave, decision: 'terminado', fecha: '2026-06-01' }]);
+    const heladera = planes.find(p => p.referencia_limpia === 'Heladera');
+    assert.equal(heladera.motivo, 'decision_usuario');
+  });
+
+  test('el orden de subida no cambia la identidad (ocurrencias por fecha e id)', () => {
+    const movs = [...dos(R1, '03/06'), ...dos(R2, '04/06'), mov(R1, 'Otra', '01/02', 500)];
+    const ref = JSON.stringify(construirPlanes(movs, [R1, R2]).map(p => p.clave).sort());
+    for (const semilla of [3, 17, 4242]) {
+      assert.equal(JSON.stringify(construirPlanes(mezclar(movs, semilla), [R1, R2]).map(p => p.clave).sort()), ref);
+    }
   });
 });

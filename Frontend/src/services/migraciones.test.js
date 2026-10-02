@@ -5,7 +5,7 @@
  */
 import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { migrarA140, migrarPeriodoResumenes } from './migraciones.js';
+import { migrarA140, migrarPeriodoResumenes, migrarDecisionesPlanes } from './migraciones.js';
 
 const almacenFalso = (inicial = {}) => {
   const datos = new Map(Object.entries(inicial));
@@ -160,5 +160,34 @@ describe('migrarPeriodoResumenes (período = mes de cierre, del string)', () => 
     assert.deepEqual(migrarPeriodoResumenes(almacenFalso()).corregidos, []);
     const a = almacenFalso({ tarjetas_resumenes: JSON.stringify([{ id: 'x', anio: 2025, mes: 3 }]) });
     assert.deepEqual(migrarPeriodoResumenes(a).corregidos, []);
+  });
+});
+
+describe('migrarDecisionesPlanes (clave vieja → clave base #1)', () => {
+  const decisiones = [
+    { id: 'dp_1', claveDePlan: 'VISA Galicia|easy|3|54', decision: 'terminado', fecha: '2026-09-01' },
+    { id: 'dp_2', claveDePlan: 'VISA Galicia|puma|3|53#1', decision: 'vigente', fecha: '2026-09-02' },
+    { id: 'dp_3', claveDePlan: 'VISA Galicia|c:8547', decision: 'vigente', fecha: '2026-09-03' }
+  ];
+
+  test('agrega la copia con #1 y conserva la original', () => {
+    const a = almacenFalso({ tarjetas_decisiones_planes: JSON.stringify(decisiones) });
+    assert.equal(migrarDecisionesPlanes(a).migradas, 1);
+    const ds = JSON.parse(a.getItem('tarjetas_decisiones_planes'));
+    assert.equal(ds.length, 4);
+    assert.deepEqual(ds.slice(0, 3), decisiones);
+    assert.deepEqual(ds[3], { id: 'dp_1#1', claveDePlan: 'VISA Galicia|easy|3|54#1', decision: 'terminado', fecha: '2026-09-01', migrada_de: 'dp_1' });
+  });
+
+  test('idempotente: la segunda vez no cambia nada', () => {
+    const a = almacenFalso({ tarjetas_decisiones_planes: JSON.stringify(decisiones) });
+    migrarDecisionesPlanes(a);
+    const despues = a.getItem('tarjetas_decisiones_planes');
+    assert.equal(migrarDecisionesPlanes(a).migradas, 0);
+    assert.equal(a.getItem('tarjetas_decisiones_planes'), despues);
+  });
+
+  test('sin decisiones: no hace nada', () => {
+    assert.equal(migrarDecisionesPlanes(almacenFalso()).migradas, 0);
   });
 });

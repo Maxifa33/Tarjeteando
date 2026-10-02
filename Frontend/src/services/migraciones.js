@@ -83,3 +83,24 @@ export function migrarPeriodoResumenes(almacen) {
   }
   return { corregidos: [...periodoPorId.keys()] };
 }
+
+/**
+ * Decisiones sobre planes guardadas con la clave vieja (tarjeta|nombre|total|monto,
+ * sin '#' ni '|c:'): desde la identidad por comprobante/ocurrencia, esa compra es el
+ * plan `<clave>#1` (y lo que empalme con él). Se agrega una copia con la clave nueva
+ * y se conserva la original. Idempotente: corre en cada carga.
+ * @returns {{ migradas: number }}
+ */
+export function migrarDecisionesPlanes(almacen) {
+  const decisiones = leer(almacen, 'tarjetas_decisiones_planes');
+  if (!Array.isArray(decisiones)) return { migradas: 0 };
+  const claveVieja = (c) => typeof c === 'string' && c && !c.includes('#') && !c.includes('|c:');
+  const ids = new Set(decisiones.map((d) => d?.id).filter(Boolean));
+  const nuevas = decisiones
+    .filter((d) => d && claveVieja(d.claveDePlan))
+    .map((d) => ({ ...d, id: `${d.id ?? d.claveDePlan}#1`, claveDePlan: `${d.claveDePlan}#1`, migrada_de: d.id ?? null }))
+    .filter((d) => !ids.has(d.id));
+  if (!nuevas.length) return { migradas: 0 };
+  try { almacen.setItem('tarjetas_decisiones_planes', JSON.stringify([...decisiones, ...nuevas])); } catch { /* sin storage */ }
+  return { migradas: nuevas.length };
+}

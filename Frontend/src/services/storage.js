@@ -5,7 +5,7 @@
 
 import { asignarIds } from './series.js';
 import { configConDefaults } from './apariencia.js';
-import { migrarA140, migrarPeriodoResumenes } from './migraciones.js';
+import { migrarA140, migrarPeriodoResumenes, migrarDecisionesPlanes } from './migraciones.js';
 
 const STORAGE_KEYS = {
   RESUMENES: 'tarjetas_resumenes',
@@ -63,6 +63,8 @@ class StorageService {
   migracionesIdempotentes() {
     const { corregidos } = migrarPeriodoResumenes(localStorage);
     if (corregidos.length) console.log(`[Storage] Período de resumen corregido: ${corregidos.join(', ')}`);
+    const { migradas } = migrarDecisionesPlanes(localStorage);
+    if (migradas) console.log(`[Storage] Decisiones de planes con clave nueva: ${migradas}`);
   }
 
   /**
