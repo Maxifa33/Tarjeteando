@@ -1,0 +1,90 @@
+{
+  "proyecto": "tarjeteando",
+  "feature": "fix-cuotas-identidad-y-ultimos-consumos",
+  "objective": "1) Que cada compra en cuotas sea un plan propio, identificado por su comprobante (o por ocurrencia si no hay), para que dos compras idénticas no se cuenten como una. 2) Que las cuotas de Últimos consumos actualicen los planes (avanzan los existentes y aparecen las compras nuevas) sin tocar lo que cerró cada resumen.",
+  "analysis": [
+    "construirPlanes (Frontend/src/services/cuotas.js) arma los planes SOLO con movimientos de resúmenes. Las cuotas de Últimos consumos solo suman al total en curso (resumenCard): no crean planes (ej.: Sodimac 1 de 9), no hacen avanzar los existentes (Fravega 14 de 18) y no llegan a la proyección. Macro y Santander Amex (solo Últimos consumos) no tienen ningún plan.",
+    "La clave del plan (tarjeta|nombre|total|monto) colapsa dos compras idénticas del mismo resumen: la segunda se descarta en construirPlanes y la proyección cuenta de menos.",
+    "El comprobante es estable entre cuotas de la misma compra y distinto entre compras. Verificado: Visa Galicia Brooksfield 008547 en 01/03, 02/03 y 03/03 (jul–sep 2025); Master Galicia Vital 02550 en 01/03 y 02/03 (oct–nov 2025); Santander Visa Fravega 009872 (resumen oct-25, C.03/18) = 00009872 (Últimos consumos sep-26, 14 de 18). El parser de PDFs hoy lo descarta.",
+    "Verificado: pdf-parser.service.js calculaba anio/mes con new Date('YYYY-MM-DD').getMonth(); en hora argentina un cierre del día 1 quedaba en el mes anterior (TZ=America/Argentina/Buenos_Aires: '2025-10-01' → mes 9). Ninguna fixture cierra el día 1, así que los 40 PDFs dan igual antes y después del fix (ya aplicado). El período del resumen es el mes de CIERRE: el paso 4 usa ciclo.fecha_cierre (slice del string, sin new Date)."
+  ],
+  "reglas": [
+    "El mes cerrado queda como lo cerró el resumen: no se modifican resúmenes, movimientos guardados ni las columnas 'pagado' de Evolución.",
+    "Lo que se 'pisa' con el dato más nuevo es el ESTADO de cada plan (cuota actual y período).",
+    "Mismo período en resumen y en Últimos consumos: gana el resumen.",
+    "Un plan que NO aparece en Últimos consumos no se marca interrumpido: ultimoPeriodoPorTarjeta sale solo de resúmenes.",
+    "Comprobante: se guarda crudo y se compara SIEMPRE normalizado (solo dígitos, sin ceros a la izquierda). Vacío o solo ceros = sin comprobante.",
+    "ID de plan = tarjeta + comprobante normalizado. Sin comprobante: clave base + número de ocurrencia (#k) dentro del mismo resumen.",
+    "Nunca emparejar por nombre de comercio: las reglas de nombres lo cambian."
+  ],
+  "orden_implementacion": [
+    "0. HECHO: commit d80a83b (fix del Mes). Commit aparte del fix ya aplicado en Backend/src/services/pdf-parser.service.js (anio/mes del resumen desde el string de fecha_cierre, sin new Date) → 'fix(parser): mes del resumen sin corrimiento por zona horaria en cierres del día 1'.",
+    "0b. Migración de storage para resúmenes ya guardados (paso 1b).",
+    "1. Backend: comprobante en los movimientos (paso 1).",
+    "2. Frontend: normalizarComprobante + identidad de planes con comprobante / ocurrencia + migración de decisiones (pasos 2 y 3). Commit.",
+    "3. Frontend: cuotas de Últimos consumos como observaciones en curso (pasos 4 y 5). Commit.",
+    "4. UI mínima (paso 6) y contexto (paso 7). Commit y push."
+  ],
+  "changes": [
+    {
+      "paso": 1,
+      "file": "Backend/src/services/pdf-parser.service.js + Backend/src/app.js",
+      "action": "modify",
+      "code": "Devolver en cada movimiento el campo comprobante (string crudo, tal cual viene: '008547'). El parser ya lo separa del monto (ver el test 'Monto con comprobante pegado' en pdf-parser.test.js) pero no lo devuelve. Galicia Visa: 6 dígitos; Galicia Master: 5; Santander: 6 (columna antes del '*'/'K'). Verificar BBVA y Amex con tests/fixtures/pdfs/; si un banco no lo trae, comprobante: null. Macro (Vision): null salvo que venga en la respuesta. En app.js, propagarlo al objeto que va al frontend. NO incluirlo en el hash del id del movimiento (no cambiar ids guardados). No cambiar nada más del parsing: tests/fixtures-regresion.test.js tiene que seguir cuadrando al centavo."
+    },
+    {
+      "paso": "1b",
+      "file": "Frontend/src/services/storage.js",
+      "action": "modify",
+      "code": "Migración idempotente al cargar: para cada resumen con fecha_cierre 'YYYY-MM-DD', si Number(fecha_cierre.slice(5,7)) !== resumen.mes o el año no coincide, corregir resumen.anio/mes desde el string y también anio_resumen/mes_resumen de sus movimientos (resumen_id === resumen.id). NO cambiar ids (resumen.id y movimiento.id quedan igual). Test: un resumen con fecha_cierre '2025-10-01' y mes 9 queda con mes 10; uno correcto no cambia; correr dos veces no cambia nada."
+    },
+    {
+      "paso": 2,
+      "file": "Frontend/src/services/cuotas.js",
+      "action": "modify",
+      "code": "A) export function normalizarComprobante(c) { const d = String(c ?? '').replace(/\\D/g, '').replace(/^0+/, ''); return d || null; }\nB) export function idDePlan(mov, nums, ocurrencia): const comp = normalizarComprobante(mov.comprobante); si comp → `${mov.tarjeta}|c:${comp}`; si no → `${claveDePlan(mov, nums.total, mov.monto_pesos || 0, mov.monto_dolares || 0)}#${ocurrencia}`.\nC) En construirPlanes, antes de recorrer: agrupar los movimientos en cuotas por (resumen, claveDePlan base) y, dentro de cada grupo SIN comprobante, numerar la ocurrencia 1..n en orden determinístico (fecha_compra, id). Usar idDePlan como clave del Map. La regla 'gana el período más reciente' se mantiene por clave. Así N compras idénticas en un resumen son N planes, y el #k de un mes empalma con el #k del siguiente.\nD) Compatibilidad (resúmenes viejos sin comprobante + nuevos con comprobante de la misma compra): unir en un solo plan con este orden: mismo comprobante → misma clave base con la cuota esperada (cuota_actual + diferencia de períodos) → ocurrencia. Nunca dos planes para la misma compra.\nE) Guardar en cada plan la clave usada (plan.clave) como hoy."
+    },
+    {
+      "paso": 3,
+      "file": "Frontend/src/services/storage.js",
+      "action": "modify",
+      "code": "Las decisiones (tarjetas_decisiones_planes) usan claveDePlan como id. Migración idempotente al cargar: una decisión cuya claveDePlan no contenga '#' ni '|c:' se aplica al plan con clave base#1 (y a lo que empalme con él en el paso 2D). No borrar la decisión original. Test incluido."
+    },
+    {
+      "paso": 4,
+      "file": "Frontend/src/services/cuotas.js",
+      "action": "modify",
+      "code": "export function observacionesEnCurso({ consumosLive, ciclosLive, tarjetas }): toma los consumos con es_cuota && !es_pago cuyos ciclos (c.grupo_key + c.ciclo_cierre → ciclosLive) NO estén en estado 'conciliado'. Devuelve objetos con forma de movimiento: { origen: 'en_curso', tarjeta: <nombre de la tarjeta de storage que empareja cicloEsDeTarjeta(ciclo, t) de services/mes.js; si ninguna, `live:${ciclo.grupoKey}` (misma clave que usa TarjetasView)>, referencia_original: c.descripcion, fecha_compra: c.fecha, comprobante: c.comprobante || null, es_cuota: true, cuota_actual: c.cuota_actual, total_cuotas: c.total_cuotas, cuota_texto: `${c.cuota_actual}/${c.total_cuotas}`, monto_pesos: c.monto_pesos || 0, monto_dolares: c.monto_dolares || 0, anio_resumen / mes_resumen: año y mes del período que va a facturar ese ciclo }.\nANTES de escribir esto: verificar con los resúmenes reales si resumen.anio/mes es el mes de CIERRE o el de VENCIMIENTO, y usar el mismo criterio con ciclo.fecha_cierre o ciclo.fecha_vencimiento. Si se usa el equivocado, todos los números de cuota quedan corridos un mes."
+    },
+    {
+      "paso": 5,
+      "file": "Frontend/src/services/cuotas.js",
+      "action": "modify",
+      "code": "construirPlanes(movimientos, resumenes, decisiones = [], { enCurso = [] } = {}). Después de armar los planes con resúmenes (paso 2) y ANTES de calcular estados, para cada observación en curso con período P:\n 1) Buscar plan por comprobante normalizado (misma tarjeta).\n 2) Si no hay comprobante o no aparece: buscar plan con la misma tarjeta y el mismo total_cuotas donde cuota_actual + (P − plan.periodo) === obs.cuota_actual y el monto coincida (pesos: |dif| ≤ max(1%, $100); USD: ≤ 0.01), que todavía no haya absorbido otra observación en P (así dos observaciones idénticas avanzan dos planes distintos).\n 3) Con match y P > plan.periodo: actualizar cuota_actual, periodo, periodo_anio, periodo_mes, origen: 'en_curso' (mantener referencia y nombre del resumen). Con P === plan.periodo: gana el resumen, no tocar.\n 4) Sin match: crear el plan (clave con idDePlan, origen 'en_curso') SOLO si obs.cuota_actual === 1 o la tarjeta no tiene ningún resumen. Si no, agregarlo a una lista sinEmparejar (exportarla para debug) y NO proyectarlo.\n 5) ultimoPeriodoPorTarjeta sigue saliendo solo de resúmenes.\n 6) Sin enCurso y sin compras duplicadas, la salida es idéntica a la de hoy.\nEn App.jsx, donde se llama construirPlanes(movimientosData, resumenesData, storage.getDecisionesPlanes()) (≈ línea 991): pasar { enCurso: observacionesEnCurso({ consumosLive: storage.getConsumosLive(), ciclosLive: storage.getCiclosLive(), tarjetas: tarjetasData }) }. Si refrescarLive (después de importar Últimos consumos) no llama a fetchData, recalcular los planes ahí también."
+    },
+    {
+      "paso": 6,
+      "file": "Frontend/src/ui/DetallePlan.jsx",
+      "action": "modify",
+      "code": "Si plan.origen === 'en_curso': debajo del subtítulo, en --label2: 'Actualizado con Últimos consumos · se confirma con el próximo resumen'. Ningún otro cambio de UI."
+    },
+    {
+      "paso": 7,
+      "file": "references/contexto-tarjeteando.md + CLAUDE.md",
+      "action": "modify",
+      "code": "references/contexto-tarjeteando.md está desactualizado (DashboardView, ConsumosLiveView, proyección en fetchData). Reescribir la sección Cuotas: fuente única services/cuotas.js; identidad del plan = tarjeta + comprobante normalizado, o clave base + ocurrencia #k; compras idénticas son planes distintos; observaciones en curso de Últimos consumos (reglas de emparejamiento, sinEmparejar, gana el resumen en el mismo período); interrumpidos solo desde resúmenes. Agregar comprobante a la forma del Movimiento. Actualizar la estructura de archivos post-rediseño (src/ui, src/views, services/mes, evolucion, movimientos-vista, planes-vista). Reflejar lo mismo, resumido, en CLAUDE.md."
+    }
+  ],
+  "tests": [
+    "cuotas.test.js — normalizarComprobante: '009872' y '00009872' → '9872'; '000000', '', null, undefined → null; '009 872' → '9872'.",
+    "cuotas.test.js — identidad: dos movimientos idénticos 3/6 en el mismo resumen → 2 planes y proyección doble; en el resumen siguiente como 4/6 → siguen siendo 2 (no 4); con comprobantes distintos → 2 planes; mismo comprobante en dos tarjetas → 2 planes; resumen viejo sin comprobante + nuevo con comprobante de la misma compra → 1 plan.",
+    "cuotas.test.js — en curso: plan 13/18 (resumen de agosto) + observación 14/18 → plan en 14/18 con origen 'en_curso' y proyección corrida un mes; observación 1/9 sin plan → plan nuevo; observación 5/24 que no empareja en tarjeta con resúmenes → sinEmparejar, sin plan nuevo; plan renombrado por regla igual empareja; plan que no aparece en Últimos consumos NO pasa a interrumpido; ciclo conciliado (llegó el resumen) → gana el resumen, sin duplicado; dos observaciones idénticas 4/6 → avanzan los 2 planes; una sola → avanza uno y el otro queda en su período; cuota USD empareja por monto_dolares; tarjeta sin resúmenes (Macro) → planes con tarjeta 'live:<grupoKey>'.",
+    "cuotas.test.js — sin enCurso ni duplicados: snapshot idéntico al actual con las fixtures.",
+    "storage.test — migración de decisiones idempotente.",
+    "mes.test.js — con un ciclo en curso que tiene cuotas: el total del Mes NO cambia y cuotas + fijos + variables = total; una compra 1/N pasa de variables a cuotas; las columnas 'pagado' de serieEvolucion no cambian.",
+    "Backend — tests/fixtures-regresion.test.js en verde; los movimientos de VISA GAL Jul/Ago/Sep 2025 traen comprobante (Brooksfield 008547, Sodimac 990054).",
+    "Manual con datos reales: subir VISA GAL Jul–Sep 2025 → Brooksfield y Sodimac un plan cada uno, terminan en 03/03. Subir los resúmenes de Santander Visa y después 'Últimos consumos - Visa 3327.xlsx' → Fravega avanza a 14/18 y Sodimac 1/9 aparece; comparar la proyección al centavo con el bloque 'Cuotas a vencer' de un resumen posterior si existe."
+  ],
+  "risk": "Alto: lógica de plata e identidad de los planes. 1) Doble conteo si el emparejamiento falla: por eso los planes nuevos desde Últimos consumos quedan restringidos (1/N o tarjeta sin resúmenes) y lo que no empareja va a sinEmparejar. 2) Período de cierre vs vencimiento (paso 4): verificar antes de codear. 3) Los resúmenes ya guardados no tienen comprobante: siguen funcionando por ocurrencia; para tener comprobante hay que volver a subirlos (opcional). 4) Las decisiones 'terminado/vigente' guardadas dependen de la migración del paso 3.",
+  "notas_para_claude_code": "Trabajar en feat/rediseno-bc. Un commit por bloque del orden_implementacion. Correr npm test (Frontend) y los tests del Backend después de cada bloque. No mergear."
+}

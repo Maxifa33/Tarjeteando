@@ -405,6 +405,7 @@ Si no puedes leer algún dato, usa null. NO inventes datos.`;
         cuota_actual: mov.cuota_actual,
         total_cuotas: mov.total_cuotas,
         cuota_texto: esCuota ? `${mov.cuota_actual || 1}/${mov.total_cuotas}` : null,
+        comprobante: mov.comprobante ? String(mov.comprobante) : null,
         es_cuota: esCuota
       };
     });

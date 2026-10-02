@@ -26,7 +26,11 @@ import {
   totalPendiente,
   numerosDeCuota,
   estaVigente,
-  estaEnCurso
+  estaEnCurso,
+  normalizarComprobante,
+  claveDePlan,
+  observacionesEnCurso,
+  sinEmparejarDe
 } from './cuotas.js';
 
 const aquí = path.dirname(fileURLToPath(import.meta.url));
@@ -261,13 +265,13 @@ describe('Independencia del orden de subida (PDFs reales)', { skip: !HAY_PDFS &&
   const require = createRequire(import.meta.url);
   const PDFParserService = require(path.join(RAIZ, 'Backend/src/services/pdf-parser.service.js'));
 
-  const parsearTodo = async () => {
+  const parsearTodo = async (archivos = ARCHIVOS) => {
     const log = console.log;
     console.log = () => {};
     try {
       const movimientos = [];
       const resumenes = [];
-      for (const archivo of ARCHIVOS) {
+      for (const archivo of archivos) {
         const r = await new PDFParserService().parsearPDF(fs.readFileSync(path.join(PDF_DIR, archivo)), archivo);
         if (!r.exito) continue;
         const id = `${r.tarjeta}-${r.resumen.anio}-${r.resumen.mes}`;
@@ -294,6 +298,52 @@ describe('Independencia del orden de subida (PDFs reales)', { skip: !HAY_PDFS &&
         { meses: 6, resumenes: mezclar(resumenes, semilla) }
       );
       assert.equal(JSON.stringify(revuelto), referencia, `el orden ${semilla} cambió el resultado`);
+    }
+  });
+
+  test('sin decisiones, la salida es idéntica a la de antes (fase 5)', async () => {
+    const { movimientos, resumenes } = await parsearTodo();
+    const antes = construirPlanes(movimientos, resumenes);
+    assert.deepEqual(construirPlanes(movimientos, resumenes, []), antes);
+    // Una decisión sobre un plan que no existe (resumen borrado) se ignora sin error.
+    assert.deepEqual(construirPlanes(movimientos, resumenes, [{ claveDePlan: 'no|existe|3|1', decision: 'terminado', fecha: '2026-01-01' }]), antes);
+    assert.equal(
+      JSON.stringify(proyectarCuotas(construirPlanes(movimientos, resumenes, []), { meses: 6, resumenes })),
+      JSON.stringify(proyectarCuotas(antes, { meses: 6, resumenes }))
+    );
+  });
+
+  test('con comprobante: cada compra es un plan; la proyección no cambia', async () => {
+    const { movimientos, resumenes } = await parsearTodo();
+    // Los mismos movimientos sin comprobante (como los guardados antes del paso 1).
+    const sinComprobante = movimientos.map(({ comprobante, ...m }) => m);
+    const conComp = construirPlanes(movimientos, resumenes);
+    const sinComp = construirPlanes(sinComprobante, resumenes);
+    const totales = (planes) => proyectarCuotas(planes, { meses: 12, resumenes }).map(b => b.total);
+    // Snapshot de la proyección con las fixtures, idéntica a la de antes del cambio de identidad.
+    const SNAPSHOT = [401687.15, 149166.54, 117499.88, 117499.88, 44166.55, 44166.55, 44166.55, 44166.55, 44166.55, 44166.55, 0, 0];
+    assert.deepEqual(totales(conComp), SNAPSHOT);
+    assert.deepEqual(totales(sinComp), SNAPSHOT);
+    assert.equal(conComp.length, 23);
+    assert.equal(sinComp.length, 23);
+    // Ninguna compra con comprobante queda en dos planes.
+    const vistos = new Set();
+    conComp.filter(p => p.clave.includes('|c:')).forEach(p => {
+      assert.ok(!vistos.has(p.clave), p.clave);
+      vistos.add(p.clave);
+    });
+  });
+
+  test('Brooksfield y Sodimac (VISA Galicia jul–sep 2025): un plan cada uno, terminan en 03/03', async () => {
+    const archivos = ['VISA GAL - Julio 2025.pdf', 'VISA GAL - Agosto 2025.pdf', 'VISA GAL - Septiembre 2025.pdf'];
+    if (!archivos.every(f => fs.existsSync(path.join(PDF_DIR, f)))) return;
+    const { movimientos, resumenes } = await parsearTodo(archivos);
+    const planes = construirPlanes(movimientos, resumenes);
+    for (const [re, comp] of [[/^brooksfield/i, 'VISA Galicia|c:8547'], [/^sodimac/i, 'VISA Galicia|c:990054']]) {
+      const p = planes.filter(x => re.test(x.referencia_original));
+      assert.equal(p.length, 1, String(re));
+      assert.equal(p[0].clave, comp);
+      assert.deepEqual([p[0].cuota_actual, p[0].total_cuotas, p[0].periodo_mes], [3, 3, 9]);
     }
   });
 
@@ -366,5 +416,288 @@ describe('Caso Easy Warnes contra "Cuotas a vencer" del resumen', () => {
     const enOrden = proyectarCuotas(construirPlanes([...movsJulio, ...movsAgosto], [JUL, AGO]), { meses: 3, resumenes: [JUL, AGO] });
     const invertido = proyectarCuotas(construirPlanes([...movsAgosto, ...movsJulio], [AGO, JUL]), { meses: 3, resumenes: [AGO, JUL] });
     assert.equal(JSON.stringify(invertido), JSON.stringify(enOrden));
+  });
+});
+
+// ───────────── 4. decisiones del usuario sobre planes interrumpidos (fase 5) ─────────────
+describe('Decisiones sobre planes a revisar', () => {
+  const JUL = resumen('VISA Galicia', 2026, 7);
+  const AGO = resumen('VISA Galicia', 2026, 8);
+  const movs = [mov(JUL, 'Easy', '01/03', 53745), mov(AGO, 'Puma', '01/03', 53333)];
+  const easyClave = construirPlanes(movs, [JUL, AGO]).find(p => p.referencia_limpia === 'Easy').clave;
+
+  test('"terminado": pasa a terminada por decisión del usuario y no se proyecta', () => {
+    const planes = construirPlanes(movs, [JUL, AGO], [{ claveDePlan: easyClave, decision: 'terminado', fecha: '2026-09-01' }]);
+    const easy = planes.find(p => p.referencia_limpia === 'Easy');
+    assert.equal(easy.estado, 'terminada');
+    assert.equal(easy.motivo, 'decision_usuario');
+    assert.equal(easy.interrumpida, false);
+    const proy = proyectarCuotas(planes, { meses: 3, resumenes: [JUL, AGO] });
+    assert.ok(proy.every(m => !m.detalles.some(d => d.descripcion === 'Easy')));
+    assert.equal(totalPendiente(planes), 53333 * 2);
+    assert.equal(formatearParaVista(planes).find(v => v.descripcion === 'Easy').motivo, 'decision_usuario');
+  });
+
+  test('"vigente": deja de estar interrumpido y se proyecta hasta su última cuota', () => {
+    const planes = construirPlanes(movs, [JUL, AGO], [{ claveDePlan: easyClave, decision: 'vigente', fecha: '2026-09-01' }]);
+    const easy = planes.find(p => p.referencia_limpia === 'Easy');
+    assert.equal(easy.estado, 'vigente');
+    assert.equal(easy.interrumpida, false);
+    // Anclado a julio (1/3): la 3/3 cae en septiembre.
+    const proy = proyectarCuotas(planes, { meses: 2, resumenes: [JUL, AGO] });
+    assert.ok(proy[0].detalles.some(d => d.descripcion === 'Easy' && d.cuota_numero === 3));
+  });
+
+  test('"vigente" y el banco lo vuelve a facturar: no queda duplicado', () => {
+    const SEP = resumen('VISA Galicia', 2026, 9);
+    const planes = construirPlanes([...movs, mov(SEP, 'Easy', '03/03', 53745)], [JUL, AGO, SEP],
+      [{ claveDePlan: easyClave, decision: 'vigente', fecha: '2026-09-01' }]);
+    assert.equal(planes.filter(p => p.referencia_limpia === 'Easy').length, 1);
+  });
+
+  test('gana la decisión más reciente', () => {
+    const planes = construirPlanes(movs, [JUL, AGO], [
+      { claveDePlan: easyClave, decision: 'terminado', fecha: '2026-09-01' },
+      { claveDePlan: easyClave, decision: 'vigente', fecha: '2026-09-02' }
+    ]);
+    assert.equal(planes.find(p => p.referencia_limpia === 'Easy').estado, 'vigente');
+  });
+});
+
+// ──────── 5. identidad del plan: comprobante u ocurrencia ────────
+describe('normalizarComprobante', () => {
+  test('solo dígitos, sin ceros a la izquierda', () => {
+    assert.equal(normalizarComprobante('009872'), '9872');
+    assert.equal(normalizarComprobante('00009872'), '9872');
+    assert.equal(normalizarComprobante('009 872'), '9872');
+  });
+  test('vacío o solo ceros = sin comprobante', () => {
+    for (const c of ['000000', '', null, undefined]) assert.equal(normalizarComprobante(c), null);
+  });
+});
+
+describe('Identidad de planes', () => {
+  const R1 = resumen('VISA', 2026, 3);
+  const R2 = resumen('VISA', 2026, 4);
+  const conComp = (r, ref, cuota, pesos, comprobante, n = '') => ({ ...mov(r, ref, cuota, pesos), id: `${r.id}-${ref}-${cuota}-${comprobante}${n}`, comprobante });
+  const dos = (r, cuota) => [
+    { ...mov(r, 'Zapatillas', cuota, 20000), id: `${r.id}-a`, fecha_compra: '2026-01-10' },
+    { ...mov(r, 'Zapatillas', cuota, 20000), id: `${r.id}-b`, fecha_compra: '2026-01-10' }
+  ];
+
+  test('dos compras idénticas en el mismo resumen son 2 planes y la proyección es doble', () => {
+    const planes = construirPlanes(dos(R1, '03/06'), [R1]);
+    assert.equal(planes.length, 2);
+    assert.deepEqual(planes.map(p => p.clave).sort(), [`${claveDePlan({ tarjeta: 'VISA', referencia_limpia: 'Zapatillas' }, 6, 20000, 0)}#1`, `${claveDePlan({ tarjeta: 'VISA', referencia_limpia: 'Zapatillas' }, 6, 20000, 0)}#2`]);
+    assert.equal(proyectarCuotas(planes, { meses: 1, resumenes: [R1] })[0].total, 40000);
+  });
+
+  test('en el resumen siguiente como 4/6 siguen siendo 2 (no 4)', () => {
+    const planes = construirPlanes([...dos(R1, '03/06'), ...dos(R2, '04/06')], [R1, R2]);
+    assert.equal(planes.length, 2);
+    assert.ok(planes.every(p => p.cuota_actual === 4 && p.periodo_mes === 4 && !p.interrumpida));
+  });
+
+  test('con comprobantes distintos → 2 planes; mismo comprobante en dos tarjetas → 2 planes', () => {
+    assert.equal(construirPlanes([conComp(R1, 'Zapatillas', '03/06', 20000, '000111'), conComp(R1, 'Zapatillas', '03/06', 20000, '000222')], [R1]).length, 2);
+    const M1 = resumen('MASTER', 2026, 3);
+    const planes = construirPlanes([conComp(R1, 'Zapatillas', '03/06', 20000, '000111'), conComp(M1, 'Zapatillas', '03/06', 20000, '000111')], [R1, M1]);
+    assert.equal(planes.length, 2);
+    assert.deepEqual(planes.map(p => p.clave).sort(), ['MASTER|c:111', 'VISA|c:111']);
+  });
+
+  test('el comprobante identifica aunque cambie el nombre (regla de nombres nueva)', () => {
+    const planes = construirPlanes([conComp(R1, 'WWW.FRAVEGA', '03/18', 44166.55, '009872'), conComp(R2, 'Fravega', '04/18', 44166.55, '00009872')], [R1, R2]);
+    assert.equal(planes.length, 1);
+    assert.equal(planes[0].cuota_actual, 4);
+  });
+
+  test('resumen viejo sin comprobante + nuevo con comprobante de la misma compra → 1 plan', () => {
+    const viejo = mov(R1, 'Heladera', '02/06', 30000);
+    const nuevo = conComp(R2, 'Heladera', '03/06', 30000, '004455');
+    for (const orden of [[viejo, nuevo], [nuevo, viejo]]) {
+      const planes = construirPlanes(orden, [R1, R2]);
+      assert.equal(planes.length, 1);
+      assert.equal(planes[0].cuota_actual, 3);
+      assert.equal(planes[0].clave, 'VISA|c:4455');
+      assert.ok(planes[0].alias.includes(`${claveDePlan(viejo, 6, 30000, 0)}#1`));
+    }
+    // Y al revés: resumen viejo re-subido con comprobante, el nuevo sin.
+    const planes = construirPlanes([conComp(R1, 'Heladera', '02/06', 30000, '004455'), mov(R2, 'Heladera', '03/06', 30000)], [R1, R2]);
+    assert.equal(planes.length, 1);
+    assert.equal(planes[0].cuota_actual, 3);
+  });
+
+  test('la misma compra dos veces en un resumen (puesta al día): gana la cuota más alta', () => {
+    const planes = construirPlanes([conComp(R1, 'Sony', '02/03', 39235.58, '007860'), conComp(R1, 'Sony', '03/03', 39235.58, '007860')], [R1]);
+    assert.equal(planes.length, 1);
+    assert.equal(planes[0].cuota_actual, 3);
+  });
+
+  test('una decisión sobre el plan sin comprobante sigue valiendo cuando empalma con uno con comprobante', () => {
+    const R3 = resumen('VISA', 2026, 5);
+    const viejo = mov(R1, 'Heladera', '02/06', 30000);
+    const nuevo = conComp(R2, 'Heladera', '03/06', 30000, '004455');
+    const otro = mov(R3, 'Otra', '01/02', 1000);
+    const clave = `${claveDePlan(viejo, 6, 30000, 0)}#1`;
+    const planes = construirPlanes([viejo, nuevo, otro], [R1, R2, R3], [{ claveDePlan: clave, decision: 'terminado', fecha: '2026-06-01' }]);
+    const heladera = planes.find(p => p.referencia_limpia === 'Heladera');
+    assert.equal(heladera.motivo, 'decision_usuario');
+  });
+
+  test('el orden de subida no cambia la identidad (ocurrencias por fecha e id)', () => {
+    const movs = [...dos(R1, '03/06'), ...dos(R2, '04/06'), mov(R1, 'Otra', '01/02', 500)];
+    const ref = JSON.stringify(construirPlanes(movs, [R1, R2]).map(p => p.clave).sort());
+    for (const semilla of [3, 17, 4242]) {
+      assert.equal(JSON.stringify(construirPlanes(mezclar(movs, semilla), [R1, R2]).map(p => p.clave).sort()), ref);
+    }
+  });
+});
+
+// ──────── 6. cuotas de Últimos consumos como observaciones en curso ────────
+describe('observacionesEnCurso', () => {
+  const ciclos = {
+    'Santander|Visa|3327': { grupoKey: 'Santander|Visa|3327', banco: 'Santander', red: 'Visa', fecha_cierre: '2026-10-01', fecha_vencimiento: '2026-10-09', estado: 'provisional' },
+    'Macro|Visa|1111': { grupoKey: 'Macro|Visa|1111', banco: 'Macro', red: 'Visa', fecha_cierre: '2026-09-25', fecha_vencimiento: '2026-10-07', estado: 'provisional' },
+    'Galicia|Visa|4410': { grupoKey: 'Galicia|Visa|4410', banco: 'Galicia', red: 'Visa', fecha_cierre: '2026-09-04', fecha_vencimiento: '2026-09-16', estado: 'conciliado' }
+  };
+  const tarjetas = [{ nombre: 'VISA Santander', banco: 'Santander', tipo: 'VISA' }, { nombre: 'VISA Galicia', banco: 'Galicia', tipo: 'VISA' }];
+  const c = (grupo_key, ciclo_cierre, extra) => ({ id: `${grupo_key}-${extra.descripcion}`, grupo_key, ciclo_cierre, tarjeta_ult4: '3327', fecha: '2026-09-10', monto_dolares: 0, es_cuota: true, ...extra });
+  const consumos = [
+    c('Santander|Visa|3327', '2026-10-01', { descripcion: 'WWW.FRAVEGA.COM', cuota_actual: 14, total_cuotas: 18, monto_pesos: 44166.55, comprobante: '00009872' }),
+    c('Santander|Visa|3327', '2026-10-01', { descripcion: 'Super', es_cuota: false, monto_pesos: 5000 }),
+    c('Santander|Visa|3327', '2026-10-01', { descripcion: 'Pago', es_pago: true, cuota_actual: 1, total_cuotas: 3, monto_pesos: -100 }),
+    c('Santander|Visa|3327', '2026-10-01', { descripcion: 'Una', cuota_actual: 1, total_cuotas: 1, monto_pesos: 100 }),
+    c('Santander|Visa|3327', '2026-09-01', { descripcion: 'CicloViejo', cuota_actual: 2, total_cuotas: 3, monto_pesos: 100 }),
+    c('Macro|Visa|1111', '2026-09-25', { descripcion: 'Notebook', cuota_actual: 2, total_cuotas: 6, monto_pesos: 90000 }),
+    c('Galicia|Visa|4410', '2026-09-04', { descripcion: 'Conciliado', cuota_actual: 2, total_cuotas: 3, monto_pesos: 100 })
+  ];
+  const obs = observacionesEnCurso({ consumosLive: consumos, ciclosLive: ciclos, tarjetas });
+
+  test('solo cuotas (no pagos ni 1/1) del ciclo vigente y no conciliado', () => {
+    assert.deepEqual(obs.map(o => o.referencia_original), ['WWW.FRAVEGA.COM', 'Notebook']);
+  });
+
+  test('período = mes de cierre del ciclo, del string', () => {
+    const f = obs[0];
+    assert.deepEqual([f.anio_resumen, f.mes_resumen], [2026, 10]);
+    assert.deepEqual([obs[1].anio_resumen, obs[1].mes_resumen], [2026, 9]);
+  });
+
+  test('forma de movimiento: tarjeta de storage o live:<grupoKey>', () => {
+    assert.equal(obs[0].tarjeta, 'VISA Santander');
+    assert.equal(obs[0].origen, 'en_curso');
+    assert.equal(obs[0].comprobante, '00009872');
+    assert.equal(obs[0].cuota_texto, '14/18');
+    assert.equal(obs[1].tarjeta, 'live:Macro|Visa|1111');
+    assert.equal(obs[1].tarjeta_label, 'Macro Visa');
+  });
+});
+
+describe('construirPlanes con observaciones en curso', () => {
+  const AGO = { ...resumen('VISA Santander', 2026, 8), fecha_cierre: '2026-08-28' };
+  const SEP = { ...resumen('VISA Santander', 2026, 9), fecha_cierre: '2026-09-25' };
+  const enCurso = (ref, cuota, pesos, extra = {}) => {
+    const [a, t] = cuota.split('/').map(Number);
+    return { id: `live:${ref}-${cuota}-${extra.n || ''}`, origen: 'en_curso', tarjeta: 'VISA Santander', referencia_original: ref, fecha_compra: '2026-09-10', es_cuota: true, cuota_actual: a, total_cuotas: t, cuota_texto: cuota, monto_pesos: pesos, monto_dolares: 0, comprobante: null, anio_resumen: 2026, mes_resumen: 10, ...extra };
+  };
+  const fravega = { ...mov(SEP, 'Fravega', '13/18', 44166.55), referencia_original: 'WWW.FRAVEGA.COM-SANT' };
+  const base = [mov(AGO, 'Fravega', '12/18', 44166.55), fravega, mov(SEP, 'Heladera', '03/06', 30000)];
+
+  test('plan 13/18 + observación 14/18 → 14/18 en curso y la proyección se corre un mes', () => {
+    const antes = construirPlanes(base, [AGO, SEP]);
+    const planes = construirPlanes(base, [AGO, SEP], [], { enCurso: [enCurso('WWW.FRAVEGA.COM', '14/18', 44166.55)] });
+    const f = planes.find(p => p.referencia_limpia === 'Fravega');
+    assert.deepEqual([f.cuota_actual, f.periodo_anio, f.periodo_mes, f.origen], [14, 2026, 10, 'en_curso']);
+    assert.equal(f.referencia_original, 'WWW.FRAVEGA.COM-SANT', 'mantiene la referencia del resumen');
+    assert.equal(f.estado, 'vigente');
+    assert.equal(f.interrumpida, false);
+    // Misma cuota en el mismo mes: el plan es uno solo, ahora anclado en octubre.
+    const proyAntes = proyectarCuotas(antes, { meses: 2, resumenes: [AGO, SEP] });
+    const proy = proyectarCuotas(planes, { meses: 2, resumenes: [AGO, SEP] });
+    const cuotaFravega = (pr, i) => pr[i].detalles.find(d => d.descripcion === 'Fravega');
+    assert.equal(cuotaFravega(proyAntes, 0).cuota_numero, 14);
+    assert.equal(cuotaFravega(proy, 0), undefined, 'octubre ya está observado: se proyecta desde noviembre');
+    assert.equal(cuotaFravega(proy, 1).cuota_numero, 15);
+    assert.equal(planes.length, antes.length);
+  });
+
+  test('observación 1/9 sin plan → plan nuevo', () => {
+    const planes = construirPlanes(base, [AGO, SEP], [], { enCurso: [enCurso('SODIMAC', '01/09', 12000)] });
+    const s = planes.find(p => p.referencia_original === 'SODIMAC');
+    assert.deepEqual([s.cuota_actual, s.total_cuotas, s.origen, s.periodo_mes], [1, 9, 'en_curso', 10]);
+    assert.equal(planes.length, construirPlanes(base, [AGO, SEP]).length + 1);
+  });
+
+  test('observación 5/24 que no empareja en tarjeta con resúmenes → sinEmparejar, sin plan nuevo', () => {
+    const planes = construirPlanes(base, [AGO, SEP], [], { enCurso: [enCurso('RARO', '05/24', 7000)] });
+    assert.equal(planes.find(p => p.referencia_original === 'RARO'), undefined);
+    assert.deepEqual(sinEmparejarDe(planes).map(o => o.referencia_original), ['RARO']);
+    assert.deepEqual(sinEmparejarDe(construirPlanes(base, [AGO, SEP])), []);
+  });
+
+  test('empareja por comprobante aunque el monto cambie', () => {
+    const conComp = [{ ...fravega, comprobante: '009872' }];
+    const planes = construirPlanes(conComp, [SEP], [], { enCurso: [enCurso('Otra cosa', '14/18', 50000, { comprobante: '00009872' })] });
+    assert.equal(planes.length, 1);
+    assert.equal(planes[0].cuota_actual, 14);
+  });
+
+  test('un plan renombrado por una regla igual empareja (nunca por nombre)', () => {
+    const renombrado = { ...fravega, referencia_limpia: 'Lavarropas del living' };
+    const planes = construirPlanes([renombrado], [SEP], [], { enCurso: [enCurso('WWW.FRAVEGA.COM', '14/18', 44200)] });
+    assert.equal(planes.length, 1);
+    assert.equal(planes[0].cuota_actual, 14);
+    assert.equal(planes[0].referencia_limpia, 'Lavarropas del living');
+  });
+
+  test('un plan que no aparece en Últimos consumos NO pasa a interrumpido', () => {
+    const planes = construirPlanes(base, [AGO, SEP], [], { enCurso: [enCurso('WWW.FRAVEGA.COM', '14/18', 44166.55)] });
+    const h = planes.find(p => p.referencia_limpia === 'Heladera');
+    assert.equal(h.interrumpida, false);
+    assert.equal(h.estado, 'vigente');
+    assert.equal(h.periodo_mes, 9);
+  });
+
+  test('mismo período que el resumen (ciclo ya facturado) → gana el resumen, sin duplicado', () => {
+    const sep = enCurso('WWW.FRAVEGA.COM', '13/18', 44166.55, { mes_resumen: 9 });
+    const nueva = enCurso('NUEVA', '01/03', 1000, { mes_resumen: 9 });
+    const planes = construirPlanes(base, [AGO, SEP], [], { enCurso: [sep, nueva] });
+    assert.deepEqual(planes, construirPlanes(base, [AGO, SEP]));
+    assert.deepEqual(sinEmparejarDe(planes).map(o => o.referencia_original), ['NUEVA']);
+  });
+
+  test('dos observaciones idénticas 4/6 → avanzan los 2 planes; una sola → avanza uno', () => {
+    const dosSep = [
+      { ...mov(SEP, 'Zapas', '03/06', 20000), id: 'a', fecha_compra: '2026-07-01' },
+      { ...mov(SEP, 'Zapas', '03/06', 20000), id: 'b', fecha_compra: '2026-07-01' }
+    ];
+    const dos = construirPlanes(dosSep, [SEP], [], { enCurso: [enCurso('ZAPAS', '04/06', 20000, { n: 1 }), enCurso('ZAPAS', '04/06', 20000, { n: 2 })] });
+    assert.deepEqual(dos.map(p => p.cuota_actual), [4, 4]);
+    const uno = construirPlanes(dosSep, [SEP], [], { enCurso: [enCurso('ZAPAS', '04/06', 20000)] });
+    assert.deepEqual(uno.map(p => [p.cuota_actual, p.periodo_mes]).sort(), [[3, 9], [4, 10]]);
+    assert.ok(uno.every(p => !p.interrumpida));
+  });
+
+  test('cuota en USD empareja por monto_dolares', () => {
+    const usd = mov(SEP, 'Steam', '02/03', 0, 10);
+    const planes = construirPlanes([usd], [SEP], [], { enCurso: [enCurso('STEAM', '03/03', 0, { monto_dolares: 10.005 })] });
+    assert.equal(planes.length, 1);
+    assert.deepEqual([planes[0].cuota_actual, planes[0].estado], [3, 'ultima_cuota']);
+    // Un monto en pesos no empareja con un plan en dólares.
+    const p2 = construirPlanes([usd], [SEP], [], { enCurso: [enCurso('STEAM', '03/03', 10)] });
+    assert.equal(p2[0].cuota_actual, 2);
+  });
+
+  test('tarjeta sin resúmenes (Macro): sus planes salen de Últimos consumos con tarjeta live:<grupoKey>', () => {
+    const macro = { ...enCurso('NOTEBOOK', '02/06', 90000), tarjeta: 'live:Macro|Visa|1111', mes_resumen: 9 };
+    const planes = construirPlanes(base, [AGO, SEP], [], { enCurso: [macro] });
+    const n = planes.find(p => p.tarjeta === 'live:Macro|Visa|1111');
+    assert.deepEqual([n.cuota_actual, n.origen, n.estado, n.interrumpida], [2, 'en_curso', 'vigente', false]);
+    assert.equal(proyectarCuotas([n], { meses: 1, ancla: new Date(2026, 8, 1) })[0].detalles[0].cuota_numero, 3);
+  });
+
+  test('sin enCurso, la salida es la de siempre', () => {
+    assert.deepEqual(construirPlanes(base, [AGO, SEP], [], { enCurso: [] }), construirPlanes(base, [AGO, SEP]));
   });
 });

@@ -4,7 +4,7 @@
 
 App web personal para centralizar el seguimiento de tarjetas de crédito argentinas y compras en cuotas. Permite importar resúmenes PDF de bancos, ver saldos, cuotas pendientes y proyecciones de gastos futuros.
 
-**Estado:** En desarrollo activo. Junio 2026.
+**Estado:** En desarrollo activo. Rediseño B+C terminado el 27/09/2026 (rama `feat/rediseno-bc`).
 
 ---
 
@@ -12,7 +12,9 @@ App web personal para centralizar el seguimiento de tarjetas de crédito argenti
 
 | Capa | Tecnología |
 |---|---|
-| Frontend | React + Vite + Tailwind CSS |
+| Frontend | React + Vite + Tailwind CSS (utilidades) + tokens propios en `src/ui/tokens.css` |
+| Gráficos | Propios, con divs/SVG (sin recharts desde el rediseño) |
+| Tipografía | Fuentes del sistema (`-apple-system`, SF Pro, `system-ui`); sin Google Fonts |
 | Backend | Node.js + Express |
 | DB | En memoria (objeto `db` en RAM) + localStorage del browser |
 | PDF parsing | pdf-parse (texto) + Claude Vision API (imágenes/bancos no reconocidos) |
@@ -20,6 +22,8 @@ App web personal para centralizar el seguimiento de tarjetas de crédito argenti
 | Deploy Backend | Railway |
 
 **Importante:** No hay base de datos persistente en el backend. Los datos viven en `db` (RAM) y se pierden al reiniciar el servidor. La fuente de verdad es `localStorage` del browser. El backend solo parsea PDFs y devuelve datos; el frontend los persiste localmente.
+
+**Sin dependencias nuevas para la UI:** el movimiento se hace con CSS (`transition`/`animation` con la curva `--spring`).
 
 ---
 
@@ -29,16 +33,33 @@ App web personal para centralizar el seguimiento de tarjetas de crédito argenti
 tarjetas-proyecto/
 ├── Frontend/
 │   └── src/
-│       ├── App.jsx          ← TODO el frontend (monolítico, ~3400 líneas)
-│       ├── index.css        ← variables CSS, temas claro/oscuro
-│       └── services/
-│           └── storage.js   ← helpers para leer/escribir localStorage
+│       ├── App.jsx            ← estado global, handlers y ruteo entre secciones (+ Ajustes, Importar, Reglas)
+│       ├── index.css          ← importa ui/tokens.css; clases mínimas de las vistas secundarias
+│       ├── novedades.js       ← APP_VERSION, NOVEDADES, GUIA
+│       ├── views/             ← secciones: MesView, TarjetasView, MovimientosView, CuotasView,
+│       │                         Guia (Novedades + Guía), Onboarding
+│       ├── ui/                ← piezas visuales: tokens.css, AppShell, Rail, Hoja, Seg, CampoDeLuz,
+│       │                         Capsula, EvolucionChart, DetalleMes, MiniHistorial, Plastico,
+│       │                         PilaWallet, FilaMovimiento, DetalleMovimiento, LineaDeTiempoPlanes,
+│       │                         DetallePlan, identidad.js, formato.js, useCompacto.js
+│       └── services/          ← cálculos puros con tests (`npm test`)
+│           ├── storage.js         ← localStorage (versión 1.4.0) + migraciones.js (idempotentes en cada carga)
+│           ├── mes.js             ← ciclo de pago, composición, tope, próximo mes
+│           ├── evolucion.js       ← gráfico Evolución y proyección
+│           ├── tarjetas.js        ← qué muestra cada plástico, nombres personalizados
+│           ├── movimientos-vista.js ← filtros, días, historial de comercio, consumos en curso
+│           ├── planes-vista.js    ← línea de tiempo y cifras de Cuotas
+│           ├── cuotas.js          ← planes, identidad (comprobante/ocurrencia) y cuotas en curso (única calculadora)
+│           ├── series.js          ← gastos fijos (cadenas por ID de movimiento)
+│           ├── apariencia.js      ← modo de color / reducir transparencia
+│           └── consumos/          ← lectores de Últimos consumos y ciclos (Card/SuperCard)
 ├── Backend/
 │   └── src/
 │       ├── app.js           ← servidor Express completo (~1100 líneas)
 │       └── services/
 │           ├── pdf-parser.service.js   ← parser tradicional por banco
 │           └── vision-parser.service.js ← parser con Claude Vision API
+├── rediseno-2026/           ← specs (fases 0–6) y prototipos del rediseño B+C
 ├── CLAUDE.md                ← este archivo
 └── Backend/VISION-INTEGRATION.md
 ```
@@ -47,17 +68,15 @@ tarjetas-proyecto/
 
 ## Arquitectura del Frontend
 
-`App.jsx` es un único archivo con todos los componentes. Estructura:
+`App.jsx` conecta estado y handlers; la UI de cada sección vive en `src/views/` y los cálculos en `src/services/` (funciones puras con test). Regla: **código nuevo fuera de `App.jsx`**.
 
-- `OnboardingWizard` — wizard inicial para nuevos usuarios
-- `CreditCardVisual` — card visual de cada tarjeta
-- `SettingsModal` — modal de configuración (tarjetas, preferencias, alertas, datos, temas)
-- `App` — componente raíz con todo el estado global
-- `DashboardView` — vista principal con StatCards, gráficos y proyecciones
-- `MovimientosView` — lista de movimientos con filtros
-- `CuotasView` — vista de cuotas activas
-- `ReglasView` — gestión de reglas de limpieza de nombres de comercios
-- `ImportarView` — drag & drop para subir PDFs
+- `AppShell` (`ui/`) — marco: barra superior con pestañas **Mes · Tarjetas · Movimientos · Cuotas**, Buscar, menú **Más** e **Importar**; ventana de vidrio con scroll interno; en celular (< 768 px) riel plegable abajo.
+- Menú **Más** (⋯) — Ajustes (`SettingsModal`), Reglas de nombres (`ReglasView`), Guía y novedades, Apariencia (Sistema / Claro / Oscuro, Reducir transparencia, Menú a la izquierda en celular).
+- `MesView` — próximo pago, cápsula cuotas/fijos/variables, tope, pregunta de fijos, En curso por tarjeta, Evolución y proyección.
+- `TarjetasView` — pila tipo Wallet + detalle de la tarjeta, o la vista Todas (con resúmenes cargados y borrar).
+- `MovimientosView` — lista por día, filtros en una fila (Reintegros y **En curso** son filtros), detalle en panel o en `Hoja`. Los Últimos consumos que todavía no están en un resumen se ven acá (fase 7); ya no hay vista aparte.
+- `CuotasView` — línea de tiempo de planes, decisiones sobre planes "a revisar".
+- `activeView` sigue siendo la fuente de verdad de la navegación ('dashboard' = Mes).
 
 **Variables de entorno Frontend:**
 ```
@@ -101,17 +120,64 @@ Para otros bancos, el backend usa Claude Vision API como fallback automático (r
 
 ---
 
+## Glosario (usar siempre estas palabras)
+
+- **Movimiento = gasto = consumo = compra** (sinónimos).
+- **Tarjeta**: cuenta de crédito que genera UN resumen (banco + red + últimos 4). Varios **plásticos** pueden compartir resumen.
+- **Resumen**: documento oficial del cierre. Datos cerrados.
+- **Últimos consumos**: export parcial del home banking (xlsx/xls/csv) con lo no facturado. Provisional.
+- **Card / SuperCard**: grupo de Últimos consumos de una tarjeta (SuperCard = varios plásticos, mismo cierre y vto). En la UI nueva se ven como un **plástico** de la pila en Tarjetas (la SuperCard, con el segundo plástico asomando).
+- **Ciclo**: período entre cierres. **Conciliación**: el Resumen reemplaza a los Últimos consumos de su ciclo.
+- **Ciclo de pago**: el mes del **próximo vencimiento ≥ hoy**; es el mes que muestra Mes.
+- **Comprometido**: lo que ya se sabe que se va a pagar: cuotas + fijos (y, en el mes en curso, lo ya consumido).
+- **Tope**: tope de gasto mensual del usuario (`config.tope_mensual`, null = sin tope). "Libre" = tope − total del ciclo de pago.
+- **A revisar**: plan en cuotas que el banco dejó de facturar sin terminar. No se proyecta hasta que el usuario decide (terminado / vigente).
+
+---
+
+## Cambios recientes (02/10/2026) — identidad de planes y cuotas de Últimos consumos
+
+Spec: `rediseno-2026/specs/fix-cuotas-identidad-y-ultimos-consumos.json`. Detalle en `references/contexto-tarjeteando.md` (Gotchas 1–1c).
+
+- **Período del resumen = mes de CIERRE**, del string `fecha_cierre` (el parser ya no usa `new Date`: un cierre del día 1 caía en el mes anterior). Storage lo corrige en los resúmenes guardados (`migrarPeriodoResumenes`, idempotente, no cambia ids).
+- **Comprobante:** el parser lo devuelve crudo en cada movimiento (`'008547'`; null si no hay). No entra en el hash del id. Se compara siempre con `normalizarComprobante` (solo dígitos, sin ceros a la izquierda).
+- **Identidad del plan** (`services/cuotas.js`): `tarjeta|c:<comprobante>`, o clave base + ocurrencia `#k` dentro del resumen. Compras idénticas son planes distintos. Viejo sin comprobante + nuevo con comprobante de la misma compra = un plan (`alias`). Nunca emparejar por nombre. Decisiones con clave vieja → `<clave>#1` (`migrarDecisionesPlanes`).
+- **Cuotas de Últimos consumos** (`observacionesEnCurso` → `construirPlanes(..., { enCurso })`): avanzan los planes existentes (comprobante, o tarjeta + total + cuota esperada + monto) y crean los nuevos solo si son cuota 1 o la tarjeta no tiene resúmenes (`live:<grupoKey>`); el resto va a `sinEmparejar`. Mismo período: gana el resumen. Interrumpidos solo desde resúmenes. El total del Mes y las columnas "pagado" no cambian (el plan guarda su ancla del resumen).
+- `refrescarLive` recalcula los planes. DetallePlan avisa "Actualizado con Últimos consumos · se confirma con el próximo resumen".
+
+---
+
+## Cambios recientes (27/09/2026) — Rediseño B+C (fases 0 a 7)
+
+Rama `feat/rediseno-bc` (fases 0 a 7, specs en `rediseno-2026/specs/`, prototipos en `rediseno-2026/prototipos/`).
+
+**Qué cambió para el usuario:** la app pasa a 4 secciones (Mes, Tarjetas, Movimientos, Cuotas) dentro de una ventana de vidrio, con apariencia Sistema / Claro / Oscuro. El dashboard viejo, las StatCards, la vista Reintegros y los temas Liquid / dorado ya no existen.
+
+**Reglas (no romper):**
+- **Ciclo de pago** (`services/mes.js`): por tarjeta, resumen cerrado que vence ese mes → su total a pagar; si no hay, el ciclo en curso de Últimos consumos que vence ese mes (tarjeta ↔ ciclo por banco + red); si no, `sin_datos` (no suma, aviso).
+- **Cuotas del mes**: cada tarjeta factura en su mes de cierre y paga `desfase` meses después (del último resumen: vto − cierre, default 1). `cuotasDelMes` elige por mes, nunca por posición en `proyectarCuotas`. Las cuotas en USD van aparte. Una "cuota" 1/1 es compra común (no cuenta como cuota).
+- **Variables = total − cuotas − fijos**, calculado por tarjeta (`composicionPorTarjeta`) y sumado (`composicionDesdeTarjetas`): la cápsula de Mes = suma de "Esta tarjeta en el mes". Si cuotas + fijos superan lo importado, el total de esa tarjeta sube a lo comprometido y hay aviso. Nunca sumar cuotas al total de Últimos consumos.
+- **Evolución** (`services/evolucion.js`): pagado por mes de vencimiento; comprometido = solo cuotas + fijos (no se inventa gasto variable).
+- **Cuotas** (`services/planes-vista.js`): los meses de la línea de tiempo son meses de pago, así "Este mes" coincide con Mes. `construirPlanes(movs, resumenes, decisiones, { enCurso })`: 'terminado' → `estado 'terminada'`, `motivo 'decision_usuario'` (no se proyecta); 'vigente' → deja de estar interrumpido. Sin decisiones, la salida es idéntica a la de antes.
+- **Identidad de tarjeta** (`ui/identidad.js`): plástico y color de gráfico por banco + red, nunca por orden ni por monto. Orden de apilado: Santander → BBVA → Galicia Visa → Galicia MC → otros (por alta).
+- **Nombres personalizados** (`nombresTarjetas`): por id de tarjeta o `live:<grupoKey>` para tarjetas que solo existen por Últimos consumos; se muestran en todas las vistas (`nombreVisible`) y se mudan a la tarjeta cuando llega su resumen (`migrarNombresLive`).
+- **Accesibilidad** es criterio de aceptación: foco visible, `aria-label` en íconos, áreas táctiles ≥ 44 px en celular, `prefers-reduced-motion`, `prefers-reduced-transparency` y `prefers-contrast` respetados. Ningún texto usa el color de una serie.
+- Modales, hojas y avisos van en un **portal a `<body>`** (dentro de `<main>` quedan debajo de la barra y del riel y el vidrio no desenfoca).
+- Fechas: nunca `new Date('YYYY-MM-DD')`; siempre strings o constructores locales.
+
+**Últimos consumos en Movimientos (fase 7):** `movimientosEnCurso` (`services/movimientos-vista.js`) arma filas con forma de movimiento (`origen: 'en_curso'`, id `live:<id>`) a partir de `cardsEnCurso` / `resumenCard`: son exactamente los consumos que Mes y Tarjetas cuentan como en curso. Se excluyen los pagos y los ciclos que ya cubre un resumen importado (cierre ±5 días o posterior), así nada aparece dos veces. Los nombres se limpian con las mismas reglas que los resúmenes (`nombreSegunReglas`). En curso no hay fijos: el tipo se define cuando llega el resumen. "Borrar Últimos consumos importados" está en Importar.
+
+**localStorage 1.4.0** (`services/migraciones.js`, idempotente): el tema viejo pasa a `config.apariencia`; se borran `tarjetas_theme`, `dashboard_card_order` y `config.theme`. Keys y campos nuevos: `config.apariencia`, `config.tope_mensual`, `tarjetas_decisiones_planes`; las decisiones de fijos tienen `id` (Deshacer). Todo viaja en `exportAll`/`importAll`; un backup de 1.3.0 se importa sin pérdida (test).
+
+**Tests:** `cd Frontend && npm test` (node --test, sin dependencias) cubre `src/services/*.test.js`, `src/services/consumos/*.test.js` y `src/ui/*.test.js`.
+
+---
+
 ## Cambios recientes (26/09/2026) — Últimos consumos en el dashboard, bandeja única, SuperCard
 
 Rama `feat/ultimos-consumos-supercard`. Diseño: `~/Claude/Projects/Tarjeteando/diseno/supercard-estratos.png`.
 
-**Glosario (usar siempre estas palabras):**
-- **Movimiento = gasto = consumo = compra** (sinónimos).
-- **Tarjeta**: cuenta de crédito que genera UN resumen (banco + red + últimos 4). Varios plásticos pueden compartir resumen.
-- **Resumen**: documento oficial del cierre. Datos cerrados.
-- **Últimos consumos**: export parcial del home banking (xlsx/xls/csv) con lo no facturado. Provisional.
-- **Card**: la tarjeta visual del dashboard. **SuperCard**: Card de un grupo (varios plásticos, mismo cierre y vto). **StatCard**: los KPIs de arriba.
-- **Ciclo**: período entre cierres. **Conciliación**: el Resumen reemplaza a los Últimos consumos de su ciclo.
+(Glosario: ver la sección de arriba.)
 
 **Código nuevo (todo testeable en Node, `npm test` → 63 tests):**
 - `services/consumos/index.js` — `parseUltimosConsumos(hojas, {plantillas})` → bloques (1 por plástico). Recorre TODAS las hojas.
@@ -119,7 +185,7 @@ Rama `feat/ultimos-consumos-supercard`. Diseño: `~/Claude/Projects/Tarjeteando/
 - `services/consumos/macro.js` — números en formato inglés, cuotas en la descripción ("02/06"), fechas imposibles (31/09) corregidas con aviso, valida contra "Total consumos".
 - `services/consumos/generico.js` + `POST /api/v1/consumos/mapear-columnas` (Backend, `mapeo-columnas.service.js`) — bancos desconocidos: la IA recibe SOLO encabezados + 8 filas, devuelve el mapeo y el frontend lo guarda como plantilla (`plantillas_consumos`). Sin IA → `CSVColumnMapper` manual.
 - `services/consumos/ciclos.js` — `agruparBloques` (mismo archivo + mismo cierre y vto → grupo), `aplicarArchivo` (archivo nuevo REEMPLAZA grupo+ciclo), `resumenCard`, `cardsEnCurso`, `conciliarConResumen` (banco+red+cierre ±5 días; emparejamiento 1 a 1 por fecha ±1 y monto).
-- `services/consumos/live.js` — puente con storage. `components/LiveCards.jsx` — Card/SuperCard.
+- `services/consumos/live.js` — puente con storage. (`components/LiveCards.jsx` se borró en el rediseño: las Cards son plásticos en Tarjetas.)
 - `parsearMontoConsumo` detecta es-AR vs inglés por el último separador. Nunca asumir.
 
 **Reglas:**
@@ -129,7 +195,7 @@ Rama `feat/ultimos-consumos-supercard`. Diseño: `~/Claude/Projects/Tarjeteando/
 - Un plástico sin consumos en el ciclo no ocupa fila.
 
 **localStorage 1.3.0:** keys nuevas `tarjetas_ciclos_live`, `tarjetas_alias_ult4`, `plantillas_consumos`. Los consumos viejos sin grupo se reemplazan al subir de nuevo su archivo.
-**ConsumosLiveView** ya no tiene uploader propio: su botón lleva a Importar.
+**ConsumosLiveView** ya no tiene uploader propio: su botón lleva a Importar. *(Desde la fase 7 del rediseño la vista no existe: los consumos están en Movimientos.)*
 **Build:** `node_modules` está instalado para macOS; en la VM de Cowork `vite build` falla por el binario de rollup (no es un bug del código).
 
 ---
@@ -191,7 +257,7 @@ Rama `fix/auditoria-parser-cuotas-2026-09`. Detalle completo en `references/cont
 ### Feature "Últimos consumos" (consumos pre-resumen, XLSX)
 - Nueva sección en sidebar (icon Zap). Importa el export "Últimos consumos" de Galicia (.xlsx) para ver gasto en curso antes del cierre.
 - **Independiente** de resúmenes/movimientos/cuotas. Vive en localStorage key `tarjetas_consumos_live`.
-- Parser nuevo: `Frontend/src/services/consumos-parser.js` (usa SheetJS). Componentes `ConsumosLiveView` + `CSVColumnMapper` en `App.jsx`.
+- Parser nuevo: `Frontend/src/services/consumos-parser.js` (usa SheetJS). Componentes `ConsumosLiveView` + `CSVColumnMapper` en `App.jsx`. *(ConsumosLiveView se borró en la fase 7.)*
 - **Nueva dependencia:** `xlsx`. Correr `cd Frontend && npm install` antes de levantar.
 
 ---
@@ -227,12 +293,14 @@ Rama `fix/auditoria-parser-cuotas-2026-09`. Detalle completo en `references/cont
 
 ## Gotchas conocidos
 
-- **`App.jsx` es monolítico.** Todos los componentes están en un solo archivo. Editarlo requiere conocer bien la estructura para no romper el scope de variables.
+- **`App.jsx` sigue siendo grande** (estado global + Ajustes, Importar y Reglas). Las secciones nuevas viven en `src/views/`; no agregar UI nueva en `App.jsx`.
 - **El backend pierde datos al reiniciar.** Si el backend (Railway) se reinicia, hay que volver a subir los PDFs. El localStorage del browser es la fuente de verdad real.
-- **Reglas de limpieza** se persisten en `Backend/data/reglas-usuario.json` (el único dato que sobrevive reinicios del backend).
+- **Reglas de limpieza** se persisten en `Backend/data/reglas-usuario.json` (el único dato que sobrevive reinicios del backend). Renombrar un comercio desde la app también lo escribe ahí.
 - **`cotizacion_cache` en localStorage** expira a los 30 minutos. Si la API de dolarapi.com falla y bluelytics también falla, `cotizacion` queda `null` y no se muestra nada (no rompe nada).
-- **El criterio de proyección de cuotas** es `cuotas_restantes >= i` donde `i=0` es el mes actual. Este criterio está duplicado: en `fetchData` (líneas ~1519-1524) y en el panel de detalle del gráfico. Si se cambia uno, cambiar el otro.
-- **Colores de tarjetas** están hardcodeados en `TARJETA_COLORS` y `BANK_THEMES`. Bancos no listados usan fallback por hash del nombre.
+- **Proyección de cuotas:** hay una sola calculadora (`services/cuotas.js`); Mes, Evolución, Tarjetas y Cuotas usan `cuotasDelMes` (meses de pago). No duplicar criterios.
+- **Colores de tarjetas:** `ui/identidad.js` (tabla del README del rediseño). Bancos no listados usan grafito + slots "otros" por orden de alta.
+- **Los resúmenes no guardan pago mínimo ni cotización:** "A pagar" es el total; los USD de meses pagados se excluyen del reparto por tipo y se avisa.
+- **`vite build`** falla en la VM de Cowork por el binario de rollup (no es un bug del código). Verificar con `npm run dev` en la Mac.
 
 ---
 

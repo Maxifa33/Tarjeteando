@@ -22,35 +22,50 @@
 
 ## Estructura de archivos
 
+Post-rediseño B+C (fases 0–7, rama `feat/rediseno-bc`).
+
 ```
 tarjetas-proyecto/
 ├── Frontend/
 │   ├── src/
-│   │   ├── App.jsx               ← monolítico, ~3553 líneas, TODOS los componentes
-│   │   ├── index.css             ← CSS variables, temas claro/oscuro
-│   │   └── services/
-│   │       ├── storage.js        ← helpers localStorage (+ migración a ID hash)
-│   │       ├── series.js         ← IDs SHA-256, cadenas de gastos, fijos, overrides, preguntas
-│   │       ├── series.test.js    ← tests de series (incluye regresión sobre las fixtures)
-│   │       ├── cuotas.js         ← calculadora de cuotas
-│   │       └── consumos-parser.js
-│   │   └── novedades.js          ← APP_VERSION, NOVEDADES por versión y GUIA (mini manual)
+│   │   ├── App.jsx               ← estado global, handlers, ruteo; Ajustes, Importar y Reglas
+│   │   ├── index.css             ← importa ui/tokens.css; clases mínimas de vistas secundarias
+│   │   ├── novedades.js          ← APP_VERSION, NOVEDADES por versión y GUIA (mini manual)
+│   │   ├── views/                ← MesView, TarjetasView, MovimientosView, CuotasView, Guia, Onboarding
+│   │   ├── ui/                   ← tokens.css, AppShell, Rail, Hoja, Seg, CampoDeLuz, Capsula,
+│   │   │                            EvolucionChart, DetalleMes, MiniHistorial, Plastico, PilaWallet,
+│   │   │                            FilaMovimiento, DetalleMovimiento, LineaDeTiempoPlanes,
+│   │   │                            DetallePlan, identidad.js, formato.js, useCompacto.js
+│   │   └── services/             ← cálculos puros con tests (`npm test`)
+│   │       ├── storage.js        ← localStorage (1.4.0) + migraciones idempotentes
+│   │       ├── migraciones.js    ← 1.4.0, período de resúmenes, decisiones de planes
+│   │       ├── cuotas.js         ← ÚNICA calculadora de cuotas (planes, identidad, en curso)
+│   │       ├── mes.js            ← ciclo de pago, cuotasDelMes, composición, tope
+│   │       ├── evolucion.js      ← gráfico Evolución (pagado / en curso / comprometido)
+│   │       ├── tarjetas.js       ← qué muestra cada plástico, nombres personalizados
+│   │       ├── movimientos-vista.js ← filtros, días, historial de comercio, consumos en curso
+│   │       ├── planes-vista.js   ← línea de tiempo y cifras de Cuotas
+│   │       ├── series.js         ← IDs SHA-256, cadenas de gastos fijos, overrides, preguntas
+│   │       ├── apariencia.js     ← modo de color / reducir transparencia
+│   │       ├── consumos-parser.js
+│   │       └── consumos/         ← lectores de Últimos consumos y ciclos (ciclos.js, live.js…)
 │   ├── package.json
 │   └── .env.local                ← VITE_API_URL
 ├── Backend/
 │   ├── src/
 │   │   ├── app.js                ← Express server + db en RAM
 │   │   └── services/
-│   │       ├── pdf-parser.service.js    ← 1464 líneas, parser por banco
-│   │       ├── vision-parser.service.js ← 565 líneas, Claude Vision API
-│   │       └── proyeccion.service.js    ← lógica pura de proyección de cuotas (anclada al período)
+│   │       ├── pdf-parser.service.js    ← parser por banco (devuelve comprobante)
+│   │       └── vision-parser.service.js ← Claude Vision API
 │   ├── tests/
-│   │   ├── proyeccion.test.js    ← robustez al orden de subida (se saltea si faltan los PDFs)
-│   │   └── fixtures/pdfs/        ← resúmenes reales de prueba — NO versionado (.gitignore, datos privados)
+│   │   ├── parser.test.js
+│   │   ├── fixtures-regresion.test.js ← re-parsea los 40 PDFs reales, totales al centavo
+│   │   └── fixtures/pdfs/        ← resúmenes reales de prueba — NO versionado (datos privados)
 │   ├── data/
 │   │   └── reglas-usuario.json   ← ÚNICO archivo persistente del backend
 │   ├── package.json
 │   └── .env                      ← ANTHROPIC_API_KEY, PORT, FRONTEND_URL
+├── rediseno-2026/                ← specs y prototipos del rediseño
 ├── references/
 │   └── contexto-tarjeteando.md  ← este archivo
 └── CLAUDE.md                     ← instrucciones para Claude Code
@@ -58,148 +73,35 @@ tarjetas-proyecto/
 
 ---
 
-## Frontend — App.jsx
+## Frontend — App.jsx y vistas
 
-### Imports clave
-```js
-import React, { useState, useEffect, useCallback } from 'react';
-import storage from './services/storage';
-// lucide-react: LayoutDashboard, Receipt, CreditCard, Tag, Upload, TrendingUp, ...
-// recharts: LineChart, AreaChart, BarChart, Bar, PieChart, Pie, Cell, ...
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-const API_BASE = `${API_URL}/api/v1`;
-```
+Desde el rediseño B+C, `App.jsx` conecta estado y handlers; la UI de cada sección vive
+en `src/views/` y los cálculos en `src/services/`. **Código nuevo fuera de `App.jsx`.**
+Ya no existen `DashboardView`, las StatCards, `CreditCardVisual`, `ConsumosLiveView`
+ni la proyección dentro de `fetchData`.
 
-### Componentes (orden en el archivo)
-1. **`OnboardingWizard`** — wizard inicial, 3 pasos, se muestra si `!localStorage.getItem('onboarding_completed')`
-2. **`CreditCardVisual`** — card visual de cada tarjeta. Props: `tarjeta, cotizacion=null, onClick, onEdit, onDelete`
-3. **`SettingsModal`** — modal con tabs: tarjetas, preferencias, alertas, datos, temas
-4. **`App`** — componente raíz con TODO el estado global
-5. **`DashboardView`** — vista principal: StatCards, CreditCardVisuals, gráficos, proyección cuotas
-6. **`MovimientosView`** — lista con filtros por tarjeta/tipo/mes
-7. **`CuotasView`** — cuotas activas con progress bars y proyección
-8. **`ReglasView`** — gestión de reglas limpieza de nombres + pendientes de nombre
-9. **`ImportarView`** — drag & drop para PDFs e imágenes
-10. **`ConsumosLiveView`** — vista "Últimos consumos": importa XLSX/CSV de Galicia, stats, gráficos (gasto/día + categoría), lista filtrable, dedup por período
-11. **`CSVColumnMapper`** — modal fallback para mapear columnas manualmente si el formato no se reconoce
+- **Secciones:** Mes (`MesView`), Tarjetas (`TarjetasView`), Movimientos
+  (`MovimientosView`, incluye los Últimos consumos en curso), Cuotas (`CuotasView`).
+  `activeView` sigue siendo la fuente de verdad ('dashboard' = Mes).
+- **fetchData** lee todo de localStorage (`storage.*`), aplica las reglas de nombres y
+  arma los planes con `construirPlanes(movimientos, resumenes, decisiones, { enCurso })`,
+  donde `enCurso = observacionesEnCurso({ consumosLive, ciclosLive, tarjetas })`.
+  `setCuotasActivas(formatearParaVista(planes))` es lo único que guarda planes.
+- **refrescarLive** (importar / borrar / asignar banco a Últimos consumos) recalcula los
+  planes con la última base de `fetchData` (ref `basePlanesRef`), sin recargar todo.
+- Mes, Evolución, Tarjetas y Cuotas usan `cuotasDelMes` (services/mes.js): meses de
+  PAGO (período de cierre + `desfase` de la tarjeta).
 
 ### Servicio: consumos-parser.js (`Frontend/src/services/`)
-Parser del export "Últimos consumos" de Galicia (XLSX jerárquico). **No es CSV plano.** Usa SheetJS (`xlsx`).
-- `parseConsumosFile(arrayBuffer)` → `{ consumos, metadata, warnings, subtotales }` (wrapper browser)
-- `parseRows(rows)` → mismo output, opera sobre matriz de filas (testeable en Node)
-- `categorizarConsumo(descripcion)` → categoría por diccionario `CATEGORIAS_CONSUMO`
-- `parsearMontoConsumo`, `normalizarFecha`, `parsearCuotas` → helpers exportados
-- **Lógica clave:** forward-fill de fechas vacías, detección de tarjetas por "terminada en XXXX" (soporta múltiples por archivo), separación de pagos/devoluciones (`es_pago`), pendientes (`es_pendiente`), validación contra "Subtotal de..." excluyendo pagos y pendientes.
-- **Validado** contra `Backend/tests/fixtures/Ultimos Consumos/` (Visa 3327 = 2 tarjetas, Amex 2017). Totales coinciden exacto con subtotales del Excel.
-
-### Estado global en `App`
-```js
-const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'dark');
-const [sidebarOpen, setSidebarOpen] = useState(false);
-const [activeView, setActiveView] = useState('dashboard');
-const [searchQuery, setSearchQuery] = useState('');
-const [settingsOpen, setSettingsOpen] = useState(false);
-const [settingsInitialTab, setSettingsInitialTab] = useState('tarjetas');
-const [filtroTipoGastoInicial, setFiltroTipoGastoInicial] = useState(null);
-const [showOnboarding, setShowOnboarding] = useState(() => !localStorage.getItem('onboarding_completed'));
-const [tarjetas, setTarjetas] = useState([]);
-const [movimientos, setMovimientos] = useState([]);
-const [resumenes, setResumenes] = useState([]);
-const [cuotasActivas, setCuotasActivas] = useState([]);
-const [proyeccionCuotas, setProyeccionCuotas] = useState([]);
-const [dashboard, setDashboard] = useState({});
-const [proyecciones, setProyecciones] = useState({ evolucion_mensual: [] });
-const [reglas, setReglas] = useState([]);
-const [loading, setLoading] = useState(true);
-const [gastosFijos, setGastosFijos] = useState(new Set());
-const [nombresTarjetas, setNombresTarjetas] = useState({});
-const [cotizacion, setCotizacion] = useState(() => {
-  try {
-    const cache = JSON.parse(localStorage.getItem('cotizacion_cache') || 'null');
-    if (cache && Date.now() - cache.cachedAt < 30 * 60 * 1000) return cache;
-  } catch {}
-  return null;
-});
-```
-
-### fetchData (useCallback)
-Fuente de verdad: **localStorage** (via `storage.*`). NO llama al backend para datos.
-
-```js
-// Flujo fetchData:
-storage.getResumenes()          → setResumenes
-storage.getMovimientos()        → setMovimientos
-storage.getTarjetas()           → setTarjetas (enriquecidas con último resumen y stats)
-storage.getReglas()             → setReglas
-storage.getEstadisticas()       → setDashboard
-storage.getEvolucionMensual(6)  → setProyecciones  // ventana anclada al período del resumen más reciente
-// Proyección de cuotas ANCLADA AL PERÍODO del resumen de cada tarjeta (NO a la fecha de hoy
-// ni al orden de subida). Si la cuota N cae en el período P, la cuota N+k cae en P+k.
-const ancla = max(período del último resumen de cada tarjeta);
-for (let i = 0; i < 6; i++) {
-  const fecha = ancla + (i + 1) meses;  // bucket 0 = mes siguiente al último resumen
-  cuotasOrdenadas.forEach(m => {       // cuotasOrdenadas = orden determinístico (tarjeta, ref, ...)
-    const diff = mesesEntre(períodoDeTarjeta(m), fecha);
-    const numeroCuota = m.cuota_actual + diff;
-    if (diff >= 1 && numeroCuota <= m.total_cuotas) { totalMes += m.monto_pesos; detalles.push({...}); }
-  });
-  total = Math.round(totalMes * 100) / 100;  // redondeo estable a 2 decimales
-}
-setProyeccionCuotas(proyeccionCalculada); // [{mes, mes_nombre, total, cantidad_cuotas, detalles[]}]
-```
+Parser del export "Últimos consumos" de Galicia/Santander/Amex (XLSX jerárquico). Usa SheetJS (`xlsx`).
+Cada consumo trae `comprobante`, `es_cuota`, `cuota_actual`, `total_cuotas`, `es_pago`,
+`grupo_key` y `ciclo_cierre` (después de `aplicarArchivo`). Macro y genérico: `consumos/`.
 
 ### Cotización dólar tarjeta
 ```js
 // useEffect en App, cache 30 min en localStorage key: 'cotizacion_cache'
 fetch('https://dolarapi.com/v1/dolares/tarjeta')  // primario
 // Fallback: 'https://api.bluelytics.com.ar/v2/latest'
-// Objeto guardado: {venta, compra, nombre, fechaActualizacion, cachedAt}
-```
-
-### Funciones auxiliares clave
-```js
-formatMonto(n)           // → "$1.234.567,89"
-formatMontoDolares(n)    // → "USD 1.234,56"
-getTarjetaColor(nombre)  // usa TARJETA_COLORS o hash del nombre
-getCardTheme(banco)      // usa BANK_THEMES por banco
-parseFechaLocal(str)     // 'YYYY-MM-DD' → Date LOCAL (nunca new Date(str): eso es UTC)
-mesKeyDeFecha(str)       // → 'YYYY-MM' del mes calendario local
-esGastoFijo(mov, gastosFijos) // gastosFijos = Set de IDs de movimiento (no de nombres)
-calcularTotalesGastos(movs, gastosFijos, cotizacionVenta) // pesifica los USD
-// Gastos fijos: ver services/series.js (sección 6b). Handlers en App:
-// guardarEdicionDescripcion(mov, nombre)  → regla por clave de comercio + fetchData()
-// cambiarTipoGasto(mov, 'fijo'|'variable') → override desde el período del mov
-// responderPreguntaFijo(pregunta, 'mismo'|'otro'|'baja'|'sigue'|'omitir')
-```
-
-### DashboardView — props
-```js
-DashboardView({
-  tarjetas, movimientos, resumenes, cuotasActivas, proyeccionCuotas,
-  dashboard, proyecciones, reglas, gastosFijos, loading,
-  onImport, onViewChange, onFiltroTipoGasto, cotizacion = null
-})
-```
-
-**StatCards del Dashboard** (grid `lg:grid-cols-4`, en orden real en el código):
-1. **Gastos Fijos** — `totalFijos` (movimientos del último período, clasificados fijos)
-2. **Cuotas Activas** — `dashboard.cuotas_activas`
-3. **Cuotas Próximo Mes** — `proyeccionCuotas[0]?.total || 0` (mes siguiente al último resumen, no la fecha de hoy)
-4. **Total a pagar · {mes}** — suma de `total_a_pagar` (ARS+USD) de los resúmenes cuyo `fecha_vencimiento` cae en `mesRef` (el vencimiento más reciente); ver sección "Cambios recientes". Toggle `+ USD→ARS`.
-
-**Gráfico de barras proyección cuotas:**
-- Estado: `mesDetalleIdx` (null = ninguno seleccionado)
-- Click en barra → toggle `mesDetalleIdx`
-- Barras no seleccionadas: `opacity 0.4`
-- Texto bajo barra: "X consumos en cuotas pendientes"
-- Panel de detalle expandible: lee directo de `proyeccionCuotas[i].detalles` (cada uno con `cuota_numero`, `total_cuotas`, `tarjeta`, `monto_cuota`). Ya NO recomputa con un criterio aparte → fuente única.
-
-### CreditCardVisual — lógica clave
-```jsx
-// Si tarjeta tiene saldo USD y hay cotización:
-{ultimoResumen.total_a_pagar_dolares > 0 && cotizacion?.venta && (
-  <p>≈ {formatMonto(ultimoResumen.total_a_pagar_dolares * cotizacion.venta)} ARS</p>
-)}
 ```
 
 ---
@@ -261,7 +163,12 @@ métricas van en `exportAll()`/`importAll()`; `importAll` normaliza backups viej
 
 **Consumos live (`tarjetas_consumos_live`)** están incluidos en `exportAll()` (key `consumosLive`), `importAll()` (merge por id) y `clearAll()`.
 
-**Nota:** `getEvolucionMensual()` ya NO se ancla a la fecha de hoy. Toma el período del resumen más reciente (`max(anio, mes)`) y muestra los últimos `meses` meses terminando ahí, así los resúmenes recientes siempre aparecen aunque sean de meses anteriores a hoy. `getProyeccionCuotas()` fue **eliminado** (estaba muerto y su criterio era inconsistente); la proyección vive en `fetchData` (frontend) y en `proyeccion.service.js` (backend).
+**Nota:** `getEvolucionMensual()` ya NO se ancla a la fecha de hoy. Toma el período del resumen más reciente (`max(anio, mes)`) y muestra los últimos `meses` meses terminando ahí, así los resúmenes recientes siempre aparecen aunque sean de meses anteriores a hoy. `getProyeccionCuotas()` fue **eliminado**; la proyección vive en `services/cuotas.js` + `cuotasDelMes` (mes.js).
+
+**Migraciones idempotentes en cada carga** (y después de `importAll`): `migrarPeriodoResumenes`
+corrige `anio/mes` de resúmenes guardados con el corrimiento de zona horaria del parser viejo
+(cierre del día 1 en el mes anterior) y `anio_resumen/mes_resumen` de sus movimientos, sin
+cambiar ids; `migrarDecisionesPlanes` copia las decisiones con clave vieja a `<clave>#1`.
 
 ---
 
@@ -291,8 +198,6 @@ DELETE /tarjetas/:id
 GET    /movimientos              ← db.movimientos (con ?tarjeta=, ?mes=, ?anio=)
 GET    /resumenes                ← db.resumenes
 DELETE /resumenes/:id
-GET    /cuotas/activas           ← filtra movimientos con es_cuota
-GET    /cuotas/proyeccion        ← proyección anclada al período (usa proyeccion.service.js)
 GET    /reglas                   ← db.reglasUsuario
 POST   /reglas                   ← agrega regla + guarda JSON
 DELETE /reglas/:id
@@ -359,22 +264,10 @@ El parser valida en consola: suma extraída vs total_a_pagar del PDF. Diferencia
 
 ---
 
-## Backend — proyeccion.service.js
+## Backend — proyeccion.service.js (eliminado)
 
-Lógica pura y testeable de la proyección de cuotas. **Invariante: se ancla SIEMPRE al período del resumen donde aparece cada cuota (`fecha_ultima_cuota`), nunca a la fecha de hoy ni al orden de subida.**
-
-```js
-proyectarCuotas(cuotasActivas, meses = 6, hoy = new Date())
-// - Ordena las cuotas determinísticamente (tarjeta, referencia, total_cuotas, monto) → el orden
-//   de subida no afecta ni el detalle ni el total (ruido de punto flotante).
-// - Ancla = período del resumen más reciente entre las cuotas activas.
-// - Bucket i = ancla + (i + 1) meses. numeroCuota = cuota_actual + mesesEntre(período, bucket).
-//   Incluye la cuota si diff >= 1 y numeroCuota <= total_cuotas.
-// - total redondeado a 2 decimales (Math.round(x*100)/100).
-// Returns: [{ mes, mes_nombre, total, cantidad_cuotas, detalles:[{referencia,tarjeta,cuota,monto}] }]
-```
-
-El endpoint `GET /cuotas/proyeccion` lo usa con `db.comprasCuotas`. El frontend (`fetchData`) implementa la misma lógica sobre los movimientos del último resumen de cada tarjeta (no puede importar el módulo del backend; arquitectura separada). Tests: `Backend/tests/proyeccion.test.js`.
+Se borró el 14/09/2026 junto con `db.comprasCuotas` y `/api/v1/cuotas/*`. La única
+calculadora de cuotas es `Frontend/src/services/cuotas.js` (ver Gotchas → 1).
 
 ---
 
@@ -422,13 +315,16 @@ async procesarArchivo(buffer, filename, mimetype)  // → mismo formato que pdfP
 ```typescript
 {
   id: string;                  // 'mv_' + 24 hex de SHA-256(resumen_id|fecha|ref_original|cuota|pesos|usd#n)
+                               // (el comprobante NO entra en el hash: los ids guardados no cambian)
   resumen_id: string;          // `${tarjeta}-${anio}-${mes}`
   tarjeta: string;
-  mes_resumen: number;
+  mes_resumen: number;         // mes de CIERRE del resumen (del string fecha_cierre)
   anio_resumen: number;
   fecha_compra: string;        // YYYY-MM-DD
   referencia_original: string; // texto crudo del PDF
   referencia_limpia: string;   // después de aplicar reglas
+  comprobante: string | null;  // crudo, tal cual el PDF ('008547'); null si el banco no lo trae
+                               // o el resumen se importó antes de 10/2026
   es_dudoso: boolean;          // nombre no reconocido
   sugerencias: string[];
   monto_pesos: number;
@@ -440,21 +336,32 @@ async procesarArchivo(buffer, filename, mimetype)  // → mismo formato que pdfP
 }
 ```
 
-### Cuota formateada (usada en `cuotasActivas` state de App)
+Comprobante por banco: Galicia Visa 6 dígitos (en su línea o pegado al monto), Galicia
+Master 5, Santander y Amex 6 (columna antes del marcador `*`/`K`), BBVA 6 (cupón), compras
+en USD pegado al importe. Macro (Vision): null salvo que venga en la respuesta.
+
+### Plan formateado (`cuotasActivas` en App = `formatearParaVista(construirPlanes(...))`)
 ```typescript
 {
-  id: string;
+  id: string;                  // id del movimiento (u observación) más reciente del plan
+  clave: string;               // identidad: 'tarjeta|c:<comprobante>' o '<clave base>#<k>'
+  alias: string[];             // todas las claves con las que se vio (las decisiones usan cualquiera)
   descripcion: string;         // referencia_limpia || referencia_original
-  tarjeta: string;
+  tarjeta: string;             // nombre, o 'live:<grupoKey>' si solo existe por Últimos consumos
+  tarjeta_label: string|null;  // banco + red para las tarjetas live:
   total_cuotas: number;
-  cuotas_pagadas: number;      // = cuota_actual del movimiento
-  cuotas_restantes: number;    // = total_cuotas - cuota_actual
-  monto_cuota: number;         // monto_pesos || monto_dolares
-  monto_cuota_pesos: number;
-  monto_cuota_dolares: number;
+  cuotas_pagadas: number;      // = cuota_actual
+  cuotas_restantes: number;
+  monto_cuota: number; monto_cuota_pesos: number; monto_cuota_dolares: number;
   monto_total: number;
   es_ultima_cuota: boolean;
   fecha_compra: string;
+  estado: 'vigente'|'ultima_cuota'|'terminada'|'interrumpida';
+  interrumpida: boolean;
+  periodo_anio: number; periodo_mes: number;   // ancla del plan (mes de cierre)
+  origen: 'en_curso'|null;     // el plan avanzó (o nació) con Últimos consumos
+  cuota_resumen, periodo_resumen_anio, periodo_resumen_mes; // ancla del último resumen si avanzó
+  motivo: 'decision_usuario'|null; decision: 'terminado'|'vigente'|null;
 }
 ```
 
@@ -524,53 +431,69 @@ async procesarArchivo(buffer, filename, mimetype)  // → mismo formato que pdfP
 ### 0. NUNCA usar `new Date('YYYY-MM-DD')` para fechas del parser
 `fecha_compra` / `fecha_cierre` son **fechas de calendario sin hora**. `new Date('2026-08-10')` las lee como medianoche **UTC** y en Argentina (UTC-3) muestra el 09/08; además un consumo del día 1 caía en el mes anterior al agrupar. Usar siempre `parseFechaLocal()` / `mesKeyDeFecha()`. El patrón viejo `+ 'T12:00:00'` también funciona y sigue vivo en algunos renders.
 
-### 1. Proyección de cuotas — UNA sola implementación, en el frontend
-Toda la lógica de cuotas vive en **`Frontend/src/services/cuotas.js`**: `construirPlanes`,
-`proyectarCuotas`, `formatearParaVista`, `totalPendiente`. `App.jsx` solo la llama.
-El motor que había en el backend (`db.comprasCuotas`, `proyeccion.service.js`,
-`/api/v1/cuotas/*`, `/api/v1/proyecciones/proximo-mes`) **se eliminó**: el backend no
-tiene DB, así que nunca pudo ser la fuente de verdad, y sus tests probaban código que el
-frontend no consumía. Si tocás la fórmula, hay un solo lugar.
+### 1. Cuotas — UNA sola calculadora: `Frontend/src/services/cuotas.js`
+`construirPlanes`, `observacionesEnCurso`, `formatearParaVista`, `normalizarComprobante`,
+`idDePlan` (y `proyectarCuotas` / `totalPendiente`, hoy solo en tests). `App.jsx` solo la
+llama; Mes, Evolución, Tarjetas y Cuotas leen los planes con `cuotasDelMes` (mes.js). El
+motor viejo del backend se eliminó. Si tocás la fórmula, hay un solo lugar.
 
-Tests: `cd Frontend && npm test` (node:test, sin dependencias nuevas). Cubren unitarios
-sintéticos, independencia del orden de subida con los PDFs reales de fixtures, y el caso
-Easy Warnes contra el "Cuotas a vencer" que imprime el banco.
+**Período:** un resumen es del mes de su CIERRE (`resumen.anio/mes`, del string
+`fecha_cierre`; el parser y la migración de storage nunca usan `new Date`). Las
+observaciones en curso usan el mismo criterio con `ciclo.fecha_cierre`.
 
-### 1a. Estado de un plan: qué se muestra en la vista Cuotas
-`construirPlanes` le pone un `estado` a cada plan y eso decide la vista:
+### 1a. Identidad del plan
+- **ID = tarjeta + comprobante normalizado** (`tarjeta|c:9872`): solo dígitos, sin ceros
+  a la izquierda (`'009872'` = `'00009872'`); vacío o solo ceros = sin comprobante.
+- **Sin comprobante:** clave base (`tarjeta|nombre|total|monto/1000`) + ocurrencia `#k`
+  dentro del mismo resumen, numerada por (fecha_compra, id). **Compras idénticas son
+  planes distintos**, y el `#k` de un mes empalma con el `#k` del siguiente.
+- **Compatibilidad:** un resumen viejo sin comprobante y uno nuevo con comprobante de la
+  misma compra se unen por clave base + cuota esperada (cuota_actual + diferencia de
+  períodos). Nunca dos planes para la misma compra. `plan.alias` guarda todas las claves.
+- La misma compra dos veces en un resumen (puesta al día, ej. Sony 02/03 y 03/03 con el
+  mismo comprobante): gana la cuota más alta.
+- Nunca se empareja por nombre de comercio: las reglas de nombres lo cambian.
+- Decisiones (`tarjetas_decisiones_planes`): las guardadas con clave vieja (sin `#` ni
+  `|c:`) se copian a `<clave>#1` en cada carga (migración idempotente; la original queda).
 
-| estado | significado | se muestra |
-|---|---|---|
-| `vigente` | quedan cuotas y el banco las factura | sí — es lo único que cuenta como deuda |
-| `ultima_cuota` | la última cuota cayó en el resumen MÁS RECIENTE de la tarjeta | sí, con trofeo (plata que se libera); el mes que viene pasa a `terminada` |
-| `terminada` | terminó en un resumen anterior | no por defecto — detrás del botón "Ver N terminadas" |
-| `interrumpida` | quedan cuotas pero el banco dejó de facturarlas | sí, con badge ámbar |
+### 1b. Estado y anclaje
+Cada plan se ancla al período donde se lo vio por última vez. `estado`:
 
-Helpers: `estaVigente(plan)` y `estaEnCurso(plan)` (`ESTADOS_EN_CURSO`). La StatCard
-"Cuotas Activas" y `estadisticas.compras_en_cuotas` cuentan **solo `vigente`**: antes
-contaban también los planes terminados y mostraban 50 donde había 18.
-`formatearParaVista` ordena: última cuota → vigentes (las que están por terminar primero)
-→ a revisar → terminadas.
+| estado | significado |
+|---|---|
+| `vigente` | quedan cuotas y el banco las factura |
+| `ultima_cuota` | la última cuota es la del período más reciente de la tarjeta |
+| `terminada` | terminó antes (o el usuario lo dio por terminado: `motivo 'decision_usuario'`) |
+| `interrumpida` | quedan cuotas pero un resumen posterior de la tarjeta no lo facturó ("a revisar"; no se proyecta) |
 
-### 1a-bis. Badges del menú y Reintegros: solo lo vivo
-Los badges del menú lateral cuentan lo que está vivo hoy, no el histórico:
-- **Cuotas** → `cuotasActivas.filter(c => c.estado === 'vigente').length` (antes era
-  `cuotasActivas.length`, que incluía planes terminados: 53 donde había 18).
-- **Reintegros** → solo los del último resumen de cada tarjeta (`es_reciente`).
+`interrumpida` sale **solo de resúmenes** (`ultimoPeriodoPorTarjeta`): un plan que no
+aparece en Últimos consumos no se marca interrumpido. Caso validado: Easy Warnes (VISA GAL
+Jul→Ago 2026) contra el "Cuotas a vencer" del banco, al centavo.
 
-`reintegros` se calcula en `App` con `useMemo` y cada uno lleva `es_reciente`
-(su período == el último resumen de su tarjeta). `ReintegrosView` muestra esos por
-defecto y deja el histórico detrás de "Ver histórico (N anteriores)". La StatCard
-"Total Reintegros" del dashboard también suma solo los recientes.
-Un reintegro sin período identificable se trata como reciente, para no esconderlo.
+### 1c. Observaciones en curso (Últimos consumos)
+`observacionesEnCurso({ consumosLive, ciclosLive, tarjetas })`: consumos `es_cuota` (no
+pagos, no 1/1) del ciclo vigente de cada grupo que no esté `conciliado`. Forma de
+movimiento con `origen 'en_curso'`; tarjeta = la de storage que empareja por banco + red
+(`cicloEsDeTarjeta`), o `live:<grupoKey>`.
 
-### 1b. Anclaje al período del PLAN (no de la tarjeta)
-Cada plan de cuotas se ancla al período del resumen **donde se lo vio por última vez**, no al último resumen de la tarjeta. Antes las cuotas se leían solo del último resumen de cada tarjeta, así que un plan que el banco dejaba de facturar desaparecía por completo (caso Easy Warnes, VISA GAL Jul→Ago 2026).
+En `construirPlanes(..., { enCurso })`, después de armar los planes con resúmenes:
+1. Empareja por comprobante normalizado (misma tarjeta); si no, por tarjeta + total de
+   cuotas + cuota esperada + monto (pesos: |dif| ≤ max(1%, $100); USD: ≤ 0,01). Una
+   observación por plan y por período: dos idénticas avanzan dos planes distintos.
+2. Período posterior al del plan → el plan avanza (`cuota_actual`, período, `origen
+   'en_curso'`; mantiene nombre y referencia del resumen y guarda su ancla del resumen en
+   `cuota_resumen`/`periodo_resumen_*`). **Mismo período → gana el resumen.**
+3. Sin plan: se crea solo si es la cuota 1 o la tarjeta no tiene resúmenes (Macro,
+   Amex solo con Últimos consumos), y nunca si un resumen ya cubre ese período. El resto
+   va a `sinEmparejar` (`sinEmparejarDe(planes)`, para debug) y no se proyecta.
+4. Sin `enCurso`, la salida es idéntica a la de antes.
 
-**Regla `interrumpida`:** si existe un resumen posterior de la misma tarjeta donde el plan NO fue facturado y el plan no está terminado (N/N), se marca `interrumpida: true`. Se sigue mostrando en `CuotasView` con badge ámbar, pero **no se proyecta** ni suma deuda futura. Validado contra el bloque "Cuotas a vencer" que imprime el propio banco: Set/26 $244.580,43 y Oct/26 $214.783,00 en VISA GAL Agosto 2026 coinciden al centavo.
-
-La proyección se ancla al **período del resumen**, no a la fecha de hoy ni al orden de subida. El criterio ya **no está duplicado**: `fetchData` construye `proyeccionCuotas[i].detalles` y el panel del gráfico lee de ahí (fuente única). El backend usa `proyeccion.service.js` con la misma fórmula.
-**Si tocás la fórmula, hay 2 copias inevitables (front no importa del back):** `App.jsx/fetchData` y `Backend/src/services/proyeccion.service.js` — mantenelas en sync.
+Los resúmenes, sus movimientos y las columnas "pagado" de Evolución no se tocan:
+`cuotasDelMes` usa el ancla del resumen para los meses anteriores al período en curso.
+El total del Mes no cambia (el total de Últimos consumos ya incluye las cuotas): una
+compra 1/N solo pasa de variables a cuotas. Los ítems de planes `live:` usan el grupoKey,
+igual que Mes. DetallePlan muestra "Actualizado con Últimos consumos · se confirma con
+el próximo resumen".
 
 ### 2. Backend pierde datos al reiniciar
 Todo el `db` está en RAM. Railway reinicia el servidor → hay que volver a subir PDFs. `localStorage` del browser es la fuente de verdad.
@@ -581,11 +504,16 @@ Todo el `db` está en RAM. Railway reinicia el servidor → hay que volver a sub
 ### 4. getEvolucionMensual: ventana anclada al período más reciente
 `storage.getEvolucionMensual()` muestra los últimos N meses **terminando en el período del resumen más reciente**, no en la fecha de hoy. Así un resumen viejo de una tarjeta recién cargada siempre aparece en el gráfico. (`getProyeccionCuotas()` fue eliminado.)
 
-### 4b. Consumos live son INDEPENDIENTES de resúmenes/cuotas
-`ConsumosLiveView` y `tarjetas_consumos_live` NO tocan `db`, `resumenes`, `movimientos`, `cuotasActivas` ni `proyeccionCuotas`. El "dedup por período" (toggle "Ocultar ya facturados") solo **filtra la vista**: oculta consumos con `fecha <= fecha_cierre` del último resumen de esa tarjeta (match por últimos 4 dígitos). Nunca borra datos. Requiere `xlsx` (SheetJS) en Frontend/package.json.
+### 4b. Últimos consumos: provisionales, nunca pisan un resumen
+`tarjetas_consumos_live` NO toca `resumenes` ni `movimientos`. Sus cuotas sí entran a los
+planes como **observaciones en curso** (Gotchas → 1c): actualizan el estado del plan,
+nunca lo que cerró un resumen, y en el mismo período gana el resumen. En Movimientos se
+ven como filas `origen 'en_curso'` (`movimientosEnCurso`), excluyendo los ciclos que ya
+cubre un resumen. Requiere `xlsx` (SheetJS) en Frontend/package.json.
 
-### 5. App.jsx es monolítico
-~4000 líneas, un solo archivo. Todos los componentes están en scope global del módulo. Variables como `TARJETA_COLORS`, `BANK_THEMES`, `formatMonto()` son accesibles desde todos los componentes sin props.
+### 5. App.jsx sigue siendo grande
+Estado global + Ajustes, Importar y Reglas. Las secciones viven en `src/views/` y los
+cálculos en `src/services/`; no agregar UI nueva en `App.jsx`.
 
 ### 6. Cotización `null` no rompe nada
 Si `cotizacion === null`, el badge no se muestra y el equivalente ARS en `CreditCardVisual` tampoco. No hay error.
@@ -715,7 +643,7 @@ endpoints lo consumía el frontend (solo usa `/resumenes/upload`, `/reglas`,
 ## Tests
 
 ```bash
-cd Frontend && npm test    # cuotas + series de gastos fijos (node:test, 50 tests, sin deps; usa las fixtures si están)
+cd Frontend && npm test    # services/*, consumos/*, ui/* (node:test, sin deps; usa las fixtures si están)
 cd Backend  && npm test    # parser + regresión sobre los 40 PDFs reales (jest)
 ```
 

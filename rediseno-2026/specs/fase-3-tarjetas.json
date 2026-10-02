@@ -1,0 +1,116 @@
+{
+  "proyecto": "tarjeteando",
+  "feature": "rediseno-fase-3-tarjetas",
+  "objective": "Sección Tarjetas: cada tarjeta como plástico en una pila tipo Wallet, con el detalle de sus plásticos, su parte del mes, consumos, cuotas e historial.",
+
+  "scope": {
+    "incluye": [
+      "Pila de plásticos: 'Todas' (abanico) y tarjeta elegida (arriba, el resto apilado en canto)",
+      "SuperCard: tarjetas que comparten cierre y vencimiento se ven como un plástico con el segundo asomando (reusar agruparBloques/cardsEnCurso de services/consumos)",
+      "Detalle: estado, monto grande, 'Esta tarjeta en el mes' (Capsula 14 px), plásticos con barra de proporción, cierre / vencimiento / disponible, últimos consumos, cuotas, MiniHistorial",
+      "Vista Todas: 4 cifras, vencimientos del mes, composición por tarjeta",
+      "Funciones que hoy están en el dashboard y no se pueden perder: renombrar tarjeta (onGuardarNombre), asignar banco (BancoPicker/onAsignarBanco), lista de resúmenes cargados con borrar, equivalente en pesos de los saldos en USD con la cotización",
+      "Campo de luz: la tarjeta elegida tiñe el fondo"
+    ],
+    "no_incluye": [
+      "Gestión de tarjetas de Ajustes (sigue en SettingsModal)",
+      "Cambios en cómo se agrupan los ciclos"
+    ]
+  },
+
+  "database": {
+    "tablas_nuevas": [],
+    "tablas_modificadas": [],
+    "migracion_sql": null
+  },
+
+  "backend": {
+    "endpoints_nuevos": [],
+    "funciones_o_servicios": [],
+    "storage": []
+  },
+
+  "frontend": {
+    "componentes_nuevos": [
+      {
+        "path": "Frontend/src/ui/Plastico.jsx",
+        "proposito": "Plástico de 400×252 (compacto 358×226), radio 20, gradiente de identidad, brillo ::after linear-gradient(115deg, blanco 20% → 0 38%), isolation:isolate. Arriba: banco + estado a la izquierda, monto + 'vence …' a la derecha. En el medio: chip dorado. Abajo: '•• ult4' (varios plásticos separados) + red en itálica. SuperCard: segundo plástico asomando 9 px arriba al 55%. Texto con el color de identidad (Galicia Visa: oscuro).",
+        "props": { "identidad": "object", "banco": "string", "red": "string", "estado": "string", "monto": "string", "vence": "string", "ultimos4": "string[]", "superCard": "bool", "compacto": "bool" },
+        "estado_local": [],
+        "interacciones": []
+      },
+      {
+        "path": "Frontend/src/ui/PilaWallet.jsx",
+        "proposito": "Posiciones con transform animado por --spring. Todas: y = i × 80 (compacto 64). Elegida: y = 0; el resto en y = 290 + j × 16 (compacto 252 + j × 12), escala 0.92 − (2 − j) × 0.02, brillo 0.7 en oscuro. Hover sube 6 px; al presionar, scale .985. El contenedor del celular recorta la pila para que se vean solo los cantos.",
+        "props": { "tarjetas": "array", "elegida": "id|null", "onElegir": "fn(id|null)", "compacto": "bool" },
+        "estado_local": [],
+        "interacciones": ["Clic en un plástico → elegirlo; clic en el elegido → volver a Todas", "Botón 'Todas las tarjetas $total' arriba de la pila"]
+      },
+      {
+        "path": "Frontend/src/views/TarjetasView.jsx",
+        "proposito": "Grid de 400 px + detalle (compacto: pila y abajo el detalle). Detalle elegido: estado · actualizado; nombre (editable con el lápiz, como hoy); 'Va por · estimado' / 'A pagar · mínimo $X'; monto 44 px rounded con centavos chicos; '+ U$S x (≈ $y al dólar tarjeta)'. Paneles --fill2: Esta tarjeta en el mes (Capsula 14 px + cuotas/fijos/variables + '% del mes'), plásticos (barra de proporción + filas con 1 pago / cuotas / subtotal), cierre / vencimiento / disponible con barra de uso. Dos columnas: Últimos consumos (5 + 'Ver todos' → Movimientos filtrado por esa tarjeta) y Cuotas en esta tarjeta (barra de avance + 'n de t · restan $x'). MiniHistorial. Si no tiene banco: BancoPicker arriba del detalle. Todas: 4 cifras (en curso, cerrado a pagar, cuotas del mes siguiente, disponible total), vencimientos del mes (fila → elegir), composición por tarjeta (barras r1/r2/r3 escaladas al máximo), link 'N resúmenes cargados' que abre la lista con borrar.",
+        "props": { "tarjetas": "array", "ciclo": "fase 1", "composicionPorTarjeta": "map", "movimientos": "array", "planes": "array", "historial": "map tarjetaId→valores", "cotizacion": "object|null", "elegida": "id|null", "onElegir": "fn", "onGuardarNombre": "fn", "onAsignarBanco": "fn", "resumenes": "array", "onDeleteResumen": "fn", "onVerMovimientos": "fn(tarjetaId)", "compacto": "bool" },
+        "estado_local": ["mostrarResumenes: bool"],
+        "interacciones": []
+      }
+    ],
+    "componentes_modificados": [
+      {
+        "path": "Frontend/src/services/mes.js",
+        "cambios": ["composicionPorTarjeta(ciclo, planesDelMes, fijosPorTarjeta) → {[tarjetaId]: {cuotas, fijos, variables, total}} + test (la suma por tarjeta = composición total)."]
+      },
+      {
+        "path": "Frontend/src/App.jsx",
+        "cambios": ["Sección 'tarjetas' → TarjetasView", "tarjetaElegida viene de Mes (fase 1) o de la pila", "CampoDeLuz recibe manchas según la tarjeta elegida (la elegida escala 1.6; las demás 0.45 y opacidad 0.45)", "onVerMovimientos → Movimientos en modo 'por resumen' con esa tarjeta"]
+      },
+      {
+        "path": "Frontend/src/components/LiveCards.jsx",
+        "cambios": ["Dejar de usarlo en la UI (TarjetasView lo reemplaza). No borrar la lógica de agrupación que viva en services. Borrar el componente en la fase 6."]
+      }
+    ],
+    "rutas_nuevas": [],
+    "estado_global": []
+  },
+
+  "integraciones_externas": [
+    { "servicio": "dolarapi.com / bluelytics", "uso": "equivalente en pesos de los saldos USD", "cambios_respecto_a_uso_actual": "ninguno: solo se muestra en otro lugar" }
+  ],
+
+  "notificaciones": {
+    "tipo": null,
+    "trigger": null,
+    "destinatario": null,
+    "contenido": null
+  },
+
+  "acceptance_criteria": [
+    "Todas las tarjetas del usuario aparecen en la pila con el color de su banco, y la SuperCard de Santander (·3327 + ·1510) aparece como un solo plástico con dos plásticos en el detalle.",
+    "Elegir una tarjeta anima la pila sin saltos y el fondo toma su color; con prefers-reduced-motion cambia sin animación.",
+    "Todo lo que se podía hacer en el dashboard viejo con una tarjeta (renombrar, asignar banco, ver resúmenes y borrar uno) se puede hacer acá.",
+    "La suma de 'Esta tarjeta en el mes' de todas las tarjetas coincide con la cápsula de Mes.",
+    "A 390 px la pila elegida muestra la tarjeta completa y los cantos de las demás, sin scroll horizontal."
+  ],
+
+  "edge_cases": [
+    "Una sola tarjeta: sin pila, solo el plástico y el detalle.",
+    "Tarjeta sin banco asignado: plástico grafito con 'Elegí el banco', BancoPicker a la vista; la clave del grupo no cambia al asignarlo (regla de CLAUDE.md).",
+    "Más de 6 tarjetas en Todas: y = i × 64 y el contenedor crece; revisar que no tape el detalle.",
+    "Tarjeta con resumen cerrado y además Últimos consumos del ciclo siguiente: el plástico muestra el cerrado (a pagar) y el detalle aclara 'y ya van $x del próximo ciclo'."
+  ],
+
+  "orden_implementacion": [
+    "1. composicionPorTarjeta + test",
+    "2. Plastico",
+    "3. PilaWallet",
+    "4. TarjetasView elegida",
+    "5. Vista Todas + resúmenes cargados",
+    "6. Conectar App.jsx y el campo de luz",
+    "7. Compacto"
+  ],
+
+  "riesgos": [
+    { "descripcion": "Los nombres de las tarjetas se usan como clave en varios lugares (movimientos.tarjeta es un nombre).", "mitigacion": "Resolver por tarjetaId cuando exista y caer al nombre; no renombrar claves." }
+  ],
+
+  "notas_para_claude_code": "Prototipo: sección Tarjetas en web e iPhone. No duplicar la lógica de grupos: usar services/consumos/ciclos.js (agruparBloques, cardsEnCurso, resumenCard). Los montos grandes usan cifras proporcionales (no tabular-nums)."
+}

@@ -6,13 +6,12 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test src/services/*.test.js src/services/consumos/*.test.js"
+    "test": "node --test src/services/*.test.js src/services/consumos/*.test.js src/ui/*.test.js"
   },
   "dependencies": {
     "lucide-react": "^0.294.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "recharts": "^2.10.3",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {

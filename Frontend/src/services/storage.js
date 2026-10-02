@@ -4,6 +4,8 @@
  */
 
 import { asignarIds } from './series.js';
+import { configConDefaults } from './apariencia.js';
+import { migrarA140, migrarPeriodoResumenes, migrarDecisionesPlanes } from './migraciones.js';
 
 const STORAGE_KEYS = {
   RESUMENES: 'tarjetas_resumenes',
@@ -24,13 +26,18 @@ const STORAGE_KEYS = {
   DECISIONES_FIJOS: 'tarjetas_decisiones_fijos',
   // Cuántas veces el usuario corrigió al detector (tasa de error real)
   METRICAS_DETECTOR: 'tarjetas_metricas_detector',
+  // Qué hacer con los planes en cuotas que el banco dejó de facturar:
+  // [{ id, claveDePlan, decision: 'terminado'|'vigente', fecha }]
+  DECISIONES_PLANES: 'tarjetas_decisiones_planes',
   VERSION: 'tarjetas_version'
 };
 
 // 1.1.0: tarjeta en cada movimiento. 1.2.0: ID hash (SHA-256) por movimiento.
 // 1.3.0: ciclos de Últimos consumos (keys nuevas, sin migración destructiva: los
 // consumos viejos sin grupo se reemplazan la próxima vez que se sube su archivo).
-const CURRENT_VERSION = '1.3.0';
+// 1.4.0: rediseño B+C. El tema viejo pasa a config.apariencia y se borran
+// 'tarjetas_theme' y 'dashboard_card_order' (services/migraciones.js).
+const CURRENT_VERSION = '1.4.0';
 
 class StorageService {
   constructor() {
@@ -46,6 +53,18 @@ class StorageService {
       this.migrateData(version);
       localStorage.setItem(STORAGE_KEYS.VERSION, CURRENT_VERSION);
     }
+    this.migracionesIdempotentes();
+  }
+
+  /**
+   * Correcciones que corren en cada carga (y después de importar un backup): no
+   * dependen de la versión porque un backup viejo puede traer el dato sin corregir.
+   */
+  migracionesIdempotentes() {
+    const { corregidos } = migrarPeriodoResumenes(localStorage);
+    if (corregidos.length) console.log(`[Storage] Período de resumen corregido: ${corregidos.join(', ')}`);
+    const { migradas } = migrarDecisionesPlanes(localStorage);
+    if (migradas) console.log(`[Storage] Decisiones de planes con clave nueva: ${migradas}`);
   }
 
   /**
@@ -79,6 +98,10 @@ class StorageService {
     // SHA-256 del contenido. Así re-subir un resumen conserva los IDs y los cambios
     // manuales de tipo que apuntan a ellos.
     this.setItem(STORAGE_KEYS.MOVIMIENTOS, conIdsHash(movimientosActualizados));
+
+    // Migración 1.4.0: apariencia del rediseño (idempotente).
+    const { cambios } = migrarA140(localStorage);
+    if (cambios.length) console.log(`[Storage] 1.4.0: ${cambios.join(', ')}`);
   }
 
   /**
@@ -266,10 +289,35 @@ class StorageService {
     return this.getItem(STORAGE_KEYS.DECISIONES_FIJOS, []);
   }
 
+  /** Guarda una respuesta y devuelve su id (para poder deshacerla). */
   saveDecisionFijo(decision) {
     const lista = this.getDecisionesFijos();
-    lista.push({ ...decision, creado: new Date().toISOString() });
-    return this.setItem(STORAGE_KEYS.DECISIONES_FIJOS, lista);
+    const id = `df_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    lista.push({ ...decision, id, creado: new Date().toISOString() });
+    return this.setItem(STORAGE_KEYS.DECISIONES_FIJOS, lista) ? id : null;
+  }
+
+  /** Deshacer: saca una respuesta por id. */
+  removeDecisionFijo(id) {
+    if (!id) return false;
+    return this.setItem(STORAGE_KEYS.DECISIONES_FIJOS, this.getDecisionesFijos().filter(d => d.id !== id));
+  }
+
+  getDecisionesPlanes() {
+    return this.getItem(STORAGE_KEYS.DECISIONES_PLANES, []);
+  }
+
+  /** Guarda una decisión sobre un plan y devuelve su id (para Deshacer). */
+  addDecisionPlan({ claveDePlan, decision }) {
+    const id = `dp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    const lista = this.getDecisionesPlanes();
+    lista.push({ id, claveDePlan, decision, fecha: new Date().toISOString() });
+    return this.setItem(STORAGE_KEYS.DECISIONES_PLANES, lista) ? id : null;
+  }
+
+  removeDecisionPlan(id) {
+    if (!id) return false;
+    return this.setItem(STORAGE_KEYS.DECISIONES_PLANES, this.getDecisionesPlanes().filter(d => d.id !== id));
   }
 
   getMetricasDetector() {
@@ -290,10 +338,11 @@ class StorageService {
    * Obtiene configuración
    */
   getConfig() {
-    return this.getItem(STORAGE_KEYS.CONFIG, {
-      theme: 'dark',
-      apiKey: null // Para Vision API si el usuario quiere usar la suya
-    });
+    // apiKey: para Vision API si el usuario quiere usar la suya.
+    // apariencia: si falta, se migra desde el tema viejo ('tarjetas_theme').
+    let temaViejo = null;
+    try { temaViejo = localStorage.getItem('tarjetas_theme'); } catch {}
+    return configConDefaults(this.getItem(STORAGE_KEYS.CONFIG, null), temaViejo);
   }
 
   /**
@@ -375,6 +424,7 @@ class StorageService {
         tipoOverrides: this.getTipoOverrides(),
         decisionesFijos: this.getDecisionesFijos(),
         metricasDetector: this.getMetricasDetector(),
+        decisionesPlanes: this.getDecisionesPlanes(),
         config: this.getConfig()
       }
     };
@@ -391,7 +441,7 @@ class StorageService {
 
       const { resumenes, tarjetas, reglas, consumosLive, config,
               tipoOverrides, decisionesFijos, metricasDetector,
-              ciclosLive, aliasUlt4, plantillasConsumos } = data.data;
+              ciclosLive, aliasUlt4, plantillasConsumos, decisionesPlanes } = data.data;
       // Backups viejos traen IDs posicionales: se normalizan al ID hash.
       const movimientos = data.data.movimientos ? conIdsHash(data.data.movimientos) : data.data.movimientos;
 
@@ -441,6 +491,11 @@ class StorageService {
           const ids = new Set(existentes.map(o => o.mov_id));
           this.setItem(STORAGE_KEYS.TIPO_OVERRIDES, [...existentes, ...tipoOverrides.filter(o => !ids.has(o.mov_id))]);
         }
+        if (decisionesPlanes) {
+          const existentes = this.getDecisionesPlanes();
+          const ids = new Set(existentes.map(d => d.id));
+          this.setItem(STORAGE_KEYS.DECISIONES_PLANES, [...existentes, ...decisionesPlanes.filter(d => !ids.has(d.id))]);
+        }
         if (decisionesFijos) {
           const existentes = this.getDecisionesFijos();
           const clave = d => `${d.tipo}|${d.mov_id}|${d.periodo || ''}`;
@@ -461,9 +516,11 @@ class StorageService {
         if (tipoOverrides) this.setItem(STORAGE_KEYS.TIPO_OVERRIDES, tipoOverrides);
         if (decisionesFijos) this.setItem(STORAGE_KEYS.DECISIONES_FIJOS, decisionesFijos);
         if (metricasDetector) this.setItem(STORAGE_KEYS.METRICAS_DETECTOR, metricasDetector);
+        if (decisionesPlanes) this.setItem(STORAGE_KEYS.DECISIONES_PLANES, decisionesPlanes);
         if (config) this.setItem(STORAGE_KEYS.CONFIG, config);
       }
 
+      this.migracionesIdempotentes();
       return { success: true };
     } catch (error) {
       console.error('[Storage] Error importando:', error);
@@ -554,15 +611,19 @@ class StorageService {
 
       const totalMes = resumenesDelMes.reduce((sum, r) => sum + (r.total_a_pagar_pesos || 0), 0);
 
+      // Desglose por tarjetaId (el nombre de la tarjeta, como en la sección Mes).
+      const porTarjeta = resumenesDelMes.reduce((acc, r) => {
+        acc[r.tarjeta] = (acc[r.tarjeta] || 0) + (r.total_a_pagar_pesos || 0);
+        return acc;
+      }, {});
+
       resultado.push({
         mes: fecha.toLocaleDateString('es-AR', { month: 'short' }),
         anio,
         total: totalMes,
-        // Desglose por tarjeta
-        ...resumenesDelMes.reduce((acc, r) => {
-          acc[r.tarjeta] = r.total_a_pagar_pesos || 0;
-          return acc;
-        }, {})
+        porTarjeta,
+        // Compatibilidad: el dashboard viejo lee cada tarjeta como clave de primer nivel.
+        ...porTarjeta
       });
     }
 

@@ -1,0 +1,124 @@
+{
+  "proyecto": "tarjeteando",
+  "feature": "rediseno-fase-2-evolucion",
+  "objective": "Un solo gráfico que muestre en el mismo eje lo pagado, lo en curso y lo ya comprometido, reemplazando 'Evolución mensual' y 'Proyección de cuotas'.",
+
+  "scope": {
+    "incluye": [
+      "services/evolucion.js: serie de 12 meses pagados + mes en curso + 6 comprometidos, por tarjeta y por tipo",
+      "EvolucionChart: columnas apiladas, banda 'Ya comprometido', línea Hoy, línea de tope, tooltip, clic → detalle, vista Tabla",
+      "Detalle del mes: pasado = reparto con barras; futuro = cuotas de ese mes + fijos + 'Dejás de pagar X'",
+      "Versión compacta (celular): 6 pagados + en curso + 6, tocar en vez de hover",
+      "MiniHistorial: una serie (una tarjeta) para la fase 3"
+    ],
+    "no_incluye": [
+      "Proyectar variables futuras (no se inventa gasto: la banda futura es solo cuotas + fijos)",
+      "Otros tipos de gráfico o rangos configurables"
+    ]
+  },
+
+  "database": {
+    "tablas_nuevas": [],
+    "tablas_modificadas": [],
+    "migracion_sql": null
+  },
+
+  "backend": {
+    "endpoints_nuevos": [],
+    "funciones_o_servicios": [],
+    "storage": []
+  },
+
+  "frontend": {
+    "componentes_nuevos": [
+      {
+        "path": "Frontend/src/services/evolucion.js",
+        "proposito": "serieEvolucion({resumenes, movimientos, tipos, planes, fijosArs, ciclo, composicion, pasados:12, futuros:6}) → columnas [{mesKey, label, anioCorto, tipo:'pagado'|'en_curso'|'comprometido', porTarjeta:{[tarjetaId]:monto}, porTipo:{cuotas, fijos, variables}, total}]. Pagado: total de resúmenes por mes de vencimiento (reusar la lógica de storage.getEvolucionMensual, ampliada a 12 y por tarjeta); porTipo con movimientos marcados como cuota (numerosDeCuota) y fijo (tipos/series) de ese resumen; variables = resto. En curso = composicion de la fase 1. Comprometido = proyectarCuotas (por tarjeta) + fijosArs (se asume que los fijos siguen iguales: decirlo en el texto). detalleMes(col, planes) → para futuro: lista de cuotas de ese mes + qué planes terminaron el mes anterior. escalaY(maxTotal, tope) → múltiplo de 500.000 (web) o 1.000.000 (compacto), 6% de aire.",
+        "props": null,
+        "estado_local": [],
+        "interacciones": []
+      },
+      {
+        "path": "Frontend/src/services/evolucion.test.js",
+        "proposito": "Orden de columnas y tipos correcto; la suma porTarjeta = total = suma porTipo; meses sin resumen = 0 (no se saltean); el comprometido coincide con proyectarCuotas + fijos; 'Dejás de pagar' detecta el plan cuya última cuota fue el mes anterior; escalaY con tope mayor al máximo.",
+        "props": null,
+        "estado_local": [],
+        "interacciones": []
+      },
+      {
+        "path": "Frontend/src/ui/EvolucionChart.jsx",
+        "proposito": "Gráfico propio con divs (sin recharts). Web: plot de 220 px, slot 62 px, columna de 24 px (compacto: 150 px, slot 22, columna 12), gap de 2 px entre segmentos, radio 4 px arriba. Gridlines hairline --sep y etiquetas del eje Y a la izquierda. Banda 'Ya comprometido' (--fill2, radio 14) detrás de los meses futuros. Línea 'Hoy' de 1.5 px entre el último pagado y el en curso. En curso rayado 45° (::after repeating-linear-gradient blanco 24%). Línea de tope 1.5 px --label al 55% + 'tope $X'. Etiquetas solo en el último pagado, el en curso y el primer comprometido. Leyenda siempre visible (colores + Estimado + Ya comprometido + Tu tope). Columnas = <button> con aria-label 'Mes: $ total'. Hover/focus → tooltip (valor en negrita primero, después el nombre, clave de línea de 12×2 px); clic → onSeleccion. Seg Por tarjeta / Por tipo y Gráfico / Tabla.",
+        "props": { "columnas": "array", "modo": "'tarjeta'|'tipo'", "onModo": "fn", "vista": "'grafico'|'tabla'", "onVista": "fn", "seleccion": "index", "onSeleccion": "fn", "tope": "number|null", "identidades": "map tarjetaId→identidad", "compacto": "bool" },
+        "estado_local": ["hover: index|null"],
+        "interacciones": ["Hover o foco en una columna → tooltip", "Clic o toque → selección + panel de detalle", "Cambiar modo → las alturas animan con --spring (transition: height)"]
+      },
+      {
+        "path": "Frontend/src/ui/DetalleMes.jsx",
+        "proposito": "Panel --fill2 radio 20 debajo del gráfico. Pasado/en curso: título, subtítulo ('Resúmenes pagados' / 'Estimado con Últimos consumos…'), total grande, filas nombre + barra + % + monto. Futuro: 2 columnas de cuotas (chip plástico, nombre, 'última · ' n/t, monto) + fila de fijos + 'Dejás de pagar …'.",
+        "props": { "columna": "object", "detalle": "object", "modo": "string", "compacto": "bool" },
+        "estado_local": [],
+        "interacciones": []
+      },
+      {
+        "path": "Frontend/src/ui/MiniHistorial.jsx",
+        "proposito": "Versión de una sola serie (color de gráfico de la tarjeta): plot de 110 px (compacto 80), columna de 16 px (compacto 9), etiquetas en el último pagado y el en curso, banda y línea Hoy iguales. Hover o toque → tooltip chico. Sin leyenda: el título ya dice qué es.",
+        "props": { "valores": "[{mesKey, label, tipo, total}]", "color": "string", "compacto": "bool" },
+        "estado_local": ["hover: index|null"],
+        "interacciones": []
+      }
+    ],
+    "componentes_modificados": [
+      {
+        "path": "Frontend/src/views/MesView.jsx",
+        "cambios": ["Agregar la sección 'Evolución y proyección' debajo de las columnas (web) o después de En curso (compacto), separada por hairline. Selección inicial = primer mes comprometido."]
+      },
+      {
+        "path": "Frontend/src/services/storage.js",
+        "cambios": ["getEvolucionMensual(meses) acepta 12 y devuelve también desglose por tarjetaId (hoy es por nombre de tarjeta: mantener compatibilidad)."]
+      }
+    ],
+    "rutas_nuevas": [],
+    "estado_global": []
+  },
+
+  "integraciones_externas": [],
+
+  "notificaciones": {
+    "tipo": null,
+    "trigger": null,
+    "destinatario": null,
+    "contenido": null
+  },
+
+  "acceptance_criteria": [
+    "Con datos reales, cada mes pagado del gráfico coincide con la suma de los resúmenes de ese mes.",
+    "El mes en curso del gráfico coincide con el total de Mes.",
+    "Los meses comprometidos coinciden con proyectarCuotas + fijos, y el detalle de cada uno lista esas cuotas.",
+    "Mover el tope en Mes mueve la línea de tope del gráfico.",
+    "La vista Tabla muestra los mismos números que el gráfico (Mes, Estado, Cuotas, Fijos, Variables, Total).",
+    "Con teclado: Tab recorre las columnas, el foco muestra el tooltip y Enter selecciona.",
+    "Ningún texto usa el color de la serie: los valores van en --label o --label2."
+  ],
+
+  "edge_cases": [
+    "Menos de 12 meses de historia: se muestran solo los meses con datos a la izquierda, sin columnas vacías inventadas antes del primer resumen.",
+    "Mes pagado con cuotas en USD: pesificar con la cotización guardada en el resumen si existe; si no, excluir y avisar en el tooltip.",
+    "Tarjeta dada de baja: sus meses pasados siguen apareciendo con su color (no se repinta el resto).",
+    "Tope null: sin línea de tope ni leyenda 'Tu tope'."
+  ],
+
+  "orden_implementacion": [
+    "1. evolucion.js + tests",
+    "2. EvolucionChart (web) + DetalleMes",
+    "3. Vista Tabla",
+    "4. Compacto",
+    "5. MiniHistorial",
+    "6. Integrar en MesView"
+  ],
+
+  "riesgos": [
+    { "descripcion": "El desglose 'por tipo' de meses viejos depende de la detección de fijos, que pudo cambiar con el tiempo.", "mitigacion": "Calcular porTipo con los tipos actuales (incluidos overrides) y decirlo en el subtítulo de la vista Por tipo." }
+  ],
+
+  "notas_para_claude_code": "Prototipo: 'Evolución y proyección' al final de Mes (web) y el gráfico compacto del iPhone. Mark specs: columnas ≤ 24 px, gap de 2 px, gridlines hairline sólidas, un solo eje Y (nunca dos). recharts puede quedar instalado hasta la fase 6 si otra vista lo usa, pero este gráfico no lo usa."
+}

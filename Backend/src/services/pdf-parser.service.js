@@ -467,9 +467,11 @@ class PDFParserService {
     }
     
     if (metadatos.fecha_cierre) {
-      const fecha = new Date(metadatos.fecha_cierre);
-      metadatos.mes = fecha.getMonth() + 1;
-      metadatos.anio = fecha.getFullYear();
+      // Del string 'YYYY-MM-DD', sin new Date(): leída como UTC, un cierre el día 1
+      // quedaba en el mes anterior al correr el backend en hora argentina.
+      const [anio, mes] = String(metadatos.fecha_cierre).split('-').map(Number);
+      metadatos.mes = mes;
+      metadatos.anio = anio;
     }
 
     return metadatos;
@@ -674,6 +676,7 @@ class PDFParserService {
   }
 
   parsearLineaGalicia(fecha, resto, lineas, index) {
+    let comprobante = null;
     let montoPesos = 0;
     let montoDolares = null;
     let cuotaTexto = null;
@@ -684,6 +687,16 @@ class PDFParserService {
       const usdMatch = resto.match(/USD\s+([\d.,]+)/);
       if (usdMatch) {
         montoDolares = this.parsearMonto(usdMatch[1]);
+      }
+
+      // Comprobante: va pegado al monto USD después del importe ("USD 33,99 27600433,99").
+      let comprobante = null;
+      if (usdMatch) {
+        const cola = resto.substring(resto.indexOf(usdMatch[0]) + usdMatch[0].length).replace(/\D/g, '');
+        const montoDig = usdMatch[1].replace(/\D/g, '');
+        if (cola.length > montoDig.length && cola.endsWith(montoDig)) {
+          comprobante = cola.substring(0, cola.length - montoDig.length);
+        }
       }
       
       // Para compras en USD, el monto en pesos es 0
@@ -705,6 +718,7 @@ class PDFParserService {
         fecha_compra: this.parsearFechaVisaGalicia(fecha),
         referencia_original: referencia,
         cuota_texto: cuotaTexto,
+        comprobante,
         monto_pesos: montoPesos,
         monto_dolares: montoDolares,
         es_devolucion: false
@@ -723,11 +737,13 @@ class PDFParserService {
       if (cuotaMatch) {
         referencia = cuotaMatch[1].trim();
         cuotaTexto = cuotaMatch[2] + '/' + cuotaMatch[3];
+        comprobante = cuotaMatch[4];
         montoPesos = this.parsearMonto(cuotaMatch[5]);
       } else {
         const resultado = this.separarComprobanteYMonto(resto, this.formatoDetectado);
         montoPesos = resultado.monto;
         referencia = resultado.referencia;
+        comprobante = resultado.comprobante;
       }
       
     } else {
@@ -737,6 +753,8 @@ class PDFParserService {
         const siguienteLinea = lineas[j].trim();
         
         if (/^\d+$/.test(siguienteLinea)) {
+          // En Visa el comprobante viene en su propia línea, antes del monto.
+          if (comprobante === null) comprobante = siguienteLinea;
           j++;
           continue;
         }
@@ -774,6 +792,7 @@ class PDFParserService {
       fecha_compra: this.parsearFechaVisaGalicia(fecha),
       referencia_original: referencia,
       cuota_texto: cuotaTexto,
+      comprobante,
       monto_pesos: montoPesos,
       monto_dolares: montoDolares,
       es_devolucion: montoPesos < 0
@@ -785,12 +804,12 @@ class PDFParserService {
 
     const posicionComa = texto.lastIndexOf(',');
     if (posicionComa === -1 || posicionComa < 2) {
-      return { monto: 0, referencia: texto };
+      return { monto: 0, referencia: texto, comprobante: null };
     }
 
     const decimales = texto.substring(posicionComa + 1);
     if (decimales.length !== 2 || !/^\d{2}$/.test(decimales)) {
-      return { monto: 0, referencia: texto };
+      return { monto: 0, referencia: texto, comprobante: null };
     }
 
     let posInicioMonto = posicionComa - 1;
@@ -822,7 +841,7 @@ class PDFParserService {
       let monto = this.parsearMonto(bloqueCompleto);
       if (esNegativo && monto > 0) monto = -monto;
       const referencia = texto.substring(0, posInicioMonto).trim();
-      return { monto, referencia };
+      return { monto, referencia, comprobante: null };
     }
 
     const montoDigitos = digitosPuros.substring(longitudComprobante);
@@ -835,8 +854,9 @@ class PDFParserService {
     }
 
     const referencia = texto.substring(0, posInicioMonto).trim();
+    const comprobante = digitosPuros.substring(0, longitudComprobante);
 
-    return { monto, referencia };
+    return { monto, referencia, comprobante };
   }
 
   // ==================== SANTANDER ====================
@@ -872,7 +892,7 @@ class PDFParserService {
         const dia = matchFechaCompleta[3].padStart(2, '0');
         const descripcion = matchFechaCompleta[6];
 
-        const mov = this.parsearLineaSantander(anioActual, mesActual, dia, descripcion);
+        const mov = this.parsearLineaSantander(anioActual, mesActual, dia, descripcion, matchFechaCompleta[4]);
         if (mov) {
           movimientos.push(mov);
           const montoStr = mov.monto_dolares ? `$${mov.monto_pesos} | USD ${mov.monto_dolares}` : `$${mov.monto_pesos}`;
@@ -889,7 +909,7 @@ class PDFParserService {
         const dia = matchSoloDia[1].padStart(2, '0');
         const descripcion = matchSoloDia[4];
 
-        const mov = this.parsearLineaSantander(anioActual, mesActual, dia, descripcion);
+        const mov = this.parsearLineaSantander(anioActual, mesActual, dia, descripcion, matchSoloDia[2]);
         if (mov) {
           movimientos.push(mov);
           const montoStr = mov.monto_dolares ? `$${mov.monto_pesos} | USD ${mov.monto_dolares}` : `$${mov.monto_pesos}`;
@@ -925,7 +945,7 @@ class PDFParserService {
     return movimientos;
   }
 
-  parsearLineaSantander(anio, mes, dia, descripcion) {
+  parsearLineaSantander(anio, mes, dia, descripcion, comprobante = null) {
     let montoPesos = 0;
     let montoDolares = null;
     let cuotaTexto = null;
@@ -991,6 +1011,7 @@ class PDFParserService {
       fecha_compra: `${anio}-${mes}-${dia}`,
       referencia_original: referencia,
       cuota_texto: cuotaTexto,
+      comprobante,
       monto_pesos: montoPesos,
       monto_dolares: montoDolares,
       es_devolucion: montoPesos < 0
@@ -1081,6 +1102,7 @@ class PDFParserService {
     let montoDolares = null;
     let cuotaTexto = null;
     let referencia = lineaDescripcion;
+    let comprobante = null;
 
     // Buscar cuota formato BBVA: C.NN/NN
     const cuotaMatch = referencia.match(/C\.(\d{1,2})\/(\d{1,2})/i);
@@ -1099,6 +1121,7 @@ class PDFParserService {
       const montoConCuponMatch = montoUsdStr.match(/^([\d.]*\d,\d{2})\d{6,}$/);
       if (montoConCuponMatch) {
         montoUsdStr = montoConCuponMatch[1];
+        comprobante = usdInlineMatch[1].substring(montoConCuponMatch[1].length).slice(-6);
       }
       montoDolares = this.parsearMonto(montoUsdStr);
       referencia = referencia.replace(/USD\s+[\d.,]+/i, ' ').trim();
@@ -1109,6 +1132,8 @@ class PDFParserService {
     }
 
     // Quitar número de cupón (6 dígitos al final)
+    const cupon = referencia.match(/(\d{6,})\s*$/);
+    if (cupon && comprobante === null) comprobante = cupon[1].slice(-6);
     referencia = referencia.replace(/\d{6,}\s*$/, '').trim();
 
     // Limpiar referencia
@@ -1123,6 +1148,7 @@ class PDFParserService {
       fecha_compra: this.parsearFechaGaliciaMes(fecha),
       referencia_original: referencia,
       cuota_texto: cuotaTexto,
+      comprobante,
       monto_pesos: montoPesos,
       monto_dolares: montoDolares,
       es_devolucion: esDevolucion

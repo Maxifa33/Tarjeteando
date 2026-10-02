@@ -1,0 +1,90 @@
+{
+  "proyecto": "tarjeteando",
+  "feature": "rediseno-fase-6-cierre",
+  "objective": "Cerrar el rediseño: revisar celular y accesibilidad, borrar lo viejo, publicar las Novedades y dejar CLAUDE.md al día.",
+  "scope": {
+    "incluye": [
+      "Nombres personalizados de tarjeta (nombresTarjetas) en todas las vistas: Mes, gráficos, Movimientos y Cuotas, no solo en Tarjetas. Si una tarjeta que solo existía por Últimos consumos (clave 'live:<grupoKey>') pasa a tener resumen importado, mover su nombre a la clave de la tarjeta.",
+      "Pasada en celular (390 × 844 y 430 × 932) por las 4 secciones, el menú Más, el riel y las hojas",
+      "Pasada de accesibilidad: foco visible, orden de tabulación, aria-labels, contrastes, texto al 200% sin romper, reduced motion y transparency",
+      "Borrar código muerto: DashboardView, StatCard, CreditCardVisual, LiveCards.jsx, ReintegrosView, el layout viejo, la capa de compatibilidad de CSS que ya no se use, los temas viejos, recharts si ninguna vista lo usa",
+      "Restyle liviano de OnboardingWizard, SettingsModal, ImportarView, ReglasView, GuiaView, ConsumosLiveView y NovedadesModal con los tokens nuevos (sin cambiar su comportamiento)",
+      "storage CURRENT_VERSION 1.4.0 con migración: tema viejo → config.apariencia; borrar 'tarjetas_theme' y 'dashboard_card_order'",
+      "APP_VERSION nueva + entrada de NOVEDADES + GUIA actualizada (regla del proyecto)",
+      "CLAUDE.md: nueva estructura de archivos (src/ui, src/views, services nuevos), reglas de ciclo de pago y de tope, keys nuevas y sección 'Cambios recientes'"
+    ],
+    "no_incluye": [
+      "Funciones nuevas fuera de lo diseñado"
+    ]
+  },
+  "database": {
+    "tablas_nuevas": [],
+    "tablas_modificadas": [],
+    "migracion_sql": null
+  },
+  "backend": {
+    "endpoints_nuevos": [],
+    "funciones_o_servicios": [],
+    "storage": []
+  },
+  "frontend": {
+    "componentes_nuevos": [],
+    "componentes_modificados": [
+      {
+        "path": "Frontend/src/novedades.js",
+        "cambios": [
+          "Subir APP_VERSION.",
+          "NOVEDADES, en pocas líneas: 'App nueva: Mes, Tarjetas, Movimientos y Cuotas' / 'Poné un tope mensual y mirá cuánto ya está comprometido' / 'Evolución y proyección en un solo gráfico' / 'Renombrá y clasificá desde el detalle de cada movimiento' / 'Resolvé los planes que el banco dejó de facturar'.",
+          "GUIA: reescribir las secciones afectadas."
+        ]
+      },
+      {
+        "path": "Frontend/src/services/storage.js",
+        "cambios": [
+          "Migración 1.3.0 → 1.4.0 idempotente, con test."
+        ]
+      },
+      {
+        "path": "CLAUDE.md",
+        "cambios": [
+          "Actualizar Stack (sin Google Fonts ni recharts si se quitó), Estructura, Arquitectura del Frontend, Glosario (Tope, Ciclo de pago, Comprometido) y 'Cambios recientes' con fecha."
+        ]
+      }
+    ],
+    "rutas_nuevas": [],
+    "estado_global": []
+  },
+  "integraciones_externas": [],
+  "notificaciones": {
+    "tipo": "in-app",
+    "trigger": "Primera apertura después de actualizar",
+    "destinatario": "usuario",
+    "contenido": "Modal de Novedades existente, ya con el estilo nuevo"
+  },
+  "acceptance_criteria": [
+    "No quedan imports ni componentes sin uso (buscar a mano en App.jsx y src/).",
+    "Un backup exportado con la versión vieja se importa en la nueva sin pérdida.",
+    "Onboarding, Ajustes, Importar (PDF y Últimos consumos), Reglas, Guía y Novedades funcionan igual que antes.",
+    "npm test en verde; npm run dev sin errores en consola en la Mac.",
+    "Lighthouse Accessibility ≥ 95 en Mes, Tarjetas, Movimientos y Cuotas (en la Mac)."
+  ],
+  "edge_cases": [
+    "Usuario nuevo: onboarding → Importar → Mes con estado vacío.",
+    "Pantallas entre 768 y 1100 px: la ventana se adapta (columnas de Mes en 1 o 2, panel de Movimientos debajo de la lista)."
+  ],
+  "orden_implementacion": [
+    "1. Pasada de celular y accesibilidad (arreglos)",
+    "2. Restyle de las vistas secundarias",
+    "3. Borrar el código muerto",
+    "4. Migración de storage 1.4.0",
+    "5. Novedades, Guía y CLAUDE.md",
+    "6. Prueba completa en la Mac y PR a main"
+  ],
+  "riesgos": [
+    {
+      "descripcion": "Borrar código compartido que todavía usa otra vista.",
+      "mitigacion": "Borrar de a un componente, correr tests y abrir cada vista antes del siguiente."
+    }
+  ],
+  "notas_para_claude_code": "Al terminar, abrir un PR de feat/rediseno-bc a main con el resumen de las 7 fases y capturas en claro y oscuro (web y 390 px). No mergear sin OK del usuario."
+}
