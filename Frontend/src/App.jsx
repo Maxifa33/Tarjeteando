@@ -18,6 +18,14 @@ import { serieEvolucion, detalleMes } from './services/evolucion.js';
 import { movimientosEnCurso, nombreSegunReglas } from './services/movimientos-vista.js';
 import { cicloDePago, cuotasDelMes, desfasePorTarjeta, proximoMes, sumarMeses, composicionPorTarjeta, composicionDesdeTarjetas, fijosPorTarjeta } from './services/mes.js';
 import { clasesApariencia, modoEfectivo } from './services/apariencia.js';
+// Módulos (Economics): código aislado en src/modulos/. Ver modulos/registro.js.
+import { SECCIONES } from './ui/secciones.js';
+import useModulos from './modulos/useModulos.js';
+import { MODULOS, esModulo, seccionesConModulos } from './modulos/registro.js';
+import { conIconos } from './modulos/ui/iconos.js';
+import { resumenTarjetasDelMes } from './modulos/puente/tarjeteando.js';
+import GestorModulos from './modulos/ui/GestorModulos.jsx';
+import ModuloHost from './modulos/ui/ModuloHost.jsx';
 import {
   construirCadenas,
   aplicarOverrides,
@@ -671,6 +679,8 @@ const App = () => {
   const oscuro = modoEfectivo(apariencia.modo, sistemaOscuro) === 'oscuro';
   const cambiarApariencia = (cambios) => setApariencia(prev => ({ ...prev, ...cambios }));
   const [activeView, setActiveView] = useState('dashboard');
+  // Módulos: sesión + activos/favoritos (no toca datos de Tarjeteando).
+  const modulos = useModulos();
   const [pendientesNombre, setPendientesNombre] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -1139,17 +1149,26 @@ const App = () => {
   // activeView sigue siendo la fuente de verdad; solo cambia cómo se llega a cada vista.
   const VISTA_DE_SECCION = { mes: 'dashboard', tarjetas: 'tarjetas', movimientos: 'movimientos', cuotas: 'cuotas' };
   const SECCION_DE_VISTA = { dashboard: 'mes', tarjetas: 'tarjetas', movimientos: 'movimientos', cuotas: 'cuotas' };
-  const seccionActual = SECCION_DE_VISTA[activeView] || 'otra';
+  const seccionActual = SECCION_DE_VISTA[activeView] || (esModulo(activeView) ? activeView : 'otra');
+  const { pestanas: pestanasModulos, enMenu: modulosEnMenu } = seccionesConModulos(SECCIONES, modulos.estado);
+  const pestanas = useMemo(() => conIconos(pestanasModulos), [pestanasModulos]);
   const TITULOS = {
     dashboard: 'Mes', tarjetas: 'Tarjetas', movimientos: 'Movimientos', cuotas: 'Cuotas',
     reintegros: 'Reintegros', reglas: 'Reglas de nombres',
-    importar: 'Importar', guia: 'Guía y novedades'
+    importar: 'Importar', guia: 'Guía y novedades',
+    modulos: 'Módulos', ...Object.fromEntries(MODULOS.map(m => [m.id, m.nombre]))
   };
 
   const menuMas = [
     { tipo: 'item', id: 'ajustes', label: 'Ajustes', onSelect: () => setSettingsOpen(true) },
     { tipo: 'item', id: 'reglas', label: 'Reglas de nombres', onSelect: () => setActiveView('reglas') },
     { tipo: 'item', id: 'guia', label: 'Guía y novedades', onSelect: () => setActiveView('guia') },
+    ...(modulos.configurado ? [{ tipo: 'item', id: 'modulos', label: 'Módulos', onSelect: () => setActiveView('modulos') }] : []),
+    ...(modulosEnMenu.length ? [
+      { tipo: 'sep' },
+      { tipo: 'titulo', label: 'Mis módulos' },
+      ...modulosEnMenu.map(m => ({ tipo: 'item', id: `modulo-${m.id}`, label: m.nombre, onSelect: () => setActiveView(m.id) }))
+    ] : []),
     { tipo: 'sep' },
     { tipo: 'titulo', label: 'Apariencia' },
     { tipo: 'radio', id: 'modo-sistema', label: 'Sistema', checked: apariencia.modo === 'sistema', onSelect: () => cambiarApariencia({ modo: 'sistema' }) },
@@ -1195,6 +1214,9 @@ const App = () => {
     const prox = proximoMes({ cuotasDelMes: cuotasProx.total, fijosArs, fijosUsd, porTarjetaSiguiente: siguiente.porTarjeta, cuotasPorTarjeta });
     return { ciclo, comp, porTarjetaComp, cuotas, siguiente, cuotasProx, prox, desfase };
   }, [tarjetas, resumenes, ciclosLive, consumosLive, cuotasActivas, cotizacionVenta, gastosFijosDetalle]);
+  // Puente de solo lectura para Presupuestos: mismas cifras que la cápsula de Mes.
+  const presupuestosActivo = !!modulos.estado.presupuestos?.activo;
+  const puenteTarjeteando = useMemo(() => (presupuestosActivo ? resumenTarjetasDelMes(mes) : null), [presupuestosActivo, mes]);
 
   // Evolución y proyección (fase 2): 12 pagados + en curso + 6 comprometidos.
   const evolucion = useMemo(() => {
@@ -1275,7 +1297,8 @@ const App = () => {
     <>
       <AppShell
         seccion={seccionActual}
-        onSeccion={(id) => setActiveView(VISTA_DE_SECCION[id])}
+        secciones={pestanas}
+        onSeccion={(id) => setActiveView(VISTA_DE_SECCION[id] || id)}
         onImportar={() => setActiveView('importar')}
         busqueda={searchQuery}
         onBuscar={(q) => {
@@ -1406,6 +1429,10 @@ const App = () => {
               cantidadConsumosLive={consumosLive.length}
               onBorrarConsumosLive={() => handleDeleteConsumosLive()}
             />
+          ) : activeView === 'modulos' ? (
+            <GestorModulos modulos={modulos} />
+          ) : esModulo(activeView) ? (
+            <ModuloHost moduloId={activeView} modulos={modulos} puente={puenteTarjeteando} onIrAModulos={() => setActiveView('modulos')} />
           ) : null}
       </AppShell>
 

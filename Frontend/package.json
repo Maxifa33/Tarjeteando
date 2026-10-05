@@ -6,9 +6,10 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test src/services/*.test.js src/services/consumos/*.test.js src/ui/*.test.js"
+    "test": "node --test src/services/*.test.js src/services/consumos/*.test.js src/ui/*.test.js src/modulos/*.test.js src/modulos/puente/*.test.js"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.117.2",
     "lucide-react": "^0.294.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",

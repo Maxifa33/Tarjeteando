@@ -4,7 +4,7 @@ import { SECCIONES } from './secciones.js';
 
 const CERRADO = 62;
 // botón + 4 secciones + gaps + separador + Importar + aire
-const ABIERTO = 62 + 4 * 56 + 2 * 3 + 9 + 56 + 10;
+const alturaAbierto = (n) => 62 + n * 56 + 2 * 3 + 9 + 56 + 10;
 
 const estiloItem = {
   width: 54, height: 54, borderRadius: 27, flexShrink: 0,
@@ -14,12 +14,14 @@ const estiloItem = {
 
 /**
  * Riel de navegación para celular: un botón de vidrio abajo a la derecha (o a la
- * izquierda) que se despliega hacia arriba con las 4 secciones e Importar.
+ * izquierda) que se despliega hacia arriba con las secciones (4 + favoritos de
+ * módulos) e Importar.
  */
-const Rail = ({ seccion, onSeccion, onImportar, izquierda = false }) => {
+const Rail = ({ seccion, onSeccion, onImportar, izquierda = false, secciones = SECCIONES }) => {
   const [abierto, setAbierto] = useState(false);
   const botonRef = useRef(null);
-  const actual = SECCIONES.find(s => s.id === seccion);
+  const actual = secciones.find(s => s.id === seccion);
+  const ABIERTO = alturaAbierto(secciones.length);
   const IconoActual = actual?.icono || Menu;
 
   useEffect(() => {
@@ -67,7 +69,7 @@ const Rail = ({ seccion, onSeccion, onImportar, izquierda = false }) => {
             visibility: abierto ? 'visible' : 'hidden'
           }}
         >
-          {SECCIONES.map(s => {
+          {secciones.map(s => {
             const Icono = s.icono;
             const on = s.id === seccion;
             return (

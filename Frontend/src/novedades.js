@@ -10,9 +10,28 @@
  * 'novedades_version_vista'); la Guía está siempre disponible en el menú.
  */
 
-export const APP_VERSION = '2026.09.5';
+export const APP_VERSION = '2026.10.1';
 
 export const NOVEDADES = [
+  {
+    version: '2026.10.1',
+    fecha: 'octubre 2026',
+    titulo: 'Llegan los módulos',
+    puntos: [
+      {
+        titulo: 'Sumá solo lo que necesitás',
+        texto: 'En Más → Módulos activás herramientas extra: Platita (ingresos), Billetera (efectivo y transferencias), Compartidos, Saldar, Alcancía y Presupuestos. Por ahora están en preparación.'
+      },
+      {
+        titulo: 'Tus favoritos, a un toque',
+        texto: 'Marcá hasta 2 módulos con la estrella y aparecen como pestañas junto a Cuotas. El resto queda en el menú Más.'
+      },
+      {
+        titulo: 'Tarjeteando no cambia',
+        texto: 'Tus tarjetas siguen funcionando igual y sin cuenta. Solo los módulos piden tu email, para verse en todos tus dispositivos.'
+      }
+    ]
+  },
   {
     // 2026.09.5 incluye lo de 2026.09.4 (nunca salió sola): el modal muestra solo la última.
     version: '2026.09.5',
@@ -82,6 +101,17 @@ export const NOVEDADES = [
 ];
 
 export const GUIA = [
+  {
+    id: 'modulos',
+    titulo: 'Módulos',
+    icono: 'Zap',
+    items: [
+      'Más → Módulos: activá o desactivá cada módulo con su interruptor. Desactivarlo lo saca de la barra, sin borrar nada.',
+      'La estrella lo vuelve favorito: hasta 2 favoritos se ven como pestañas después de Cuotas (en el celular, en el riel). Los demás módulos activos están en el menú Más.',
+      'Los módulos necesitan una cuenta: escribí tu email y entrá con el link que te llega. Tarjeteando no la necesita.',
+      'Presupuestos ya lee el total de tus tarjetas del mes (las mismas cifras que Mes) desde este dispositivo.'
+    ]
+  },
   {
     id: 'importar',
     titulo: 'Importar resúmenes',

@@ -147,6 +147,21 @@ Spec: `rediseno-2026/specs/fix-cuotas-identidad-y-ultimos-consumos.json`. Detall
 
 ---
 
+## Módulos (Economics) — 02/10/2026, rama `feat/modulos-paso-0`
+
+Capa opcional de módulos dentro de Tarjeteando: **Platita** (ingresos), **Billetera** (efectivo + transferencias), **Compartidos**, **Saldar** (deudas fuera de tarjeta), **Alcancía** (metas + inversiones), **Presupuestos**. Paso 0: activar/desactivar y favoritos; cada módulo es todavía una pantalla "Próximamente".
+
+- **Todo el código nuevo vive en `Frontend/src/modulos/`.** Tarjeteando está congelado: no tocar `services/*`, `views/*`, `storage.js`, `migraciones.js` ni `STORAGE_KEYS`.
+- `modulos/registro.js` — manifiesto (ids, nombres, íconos por nombre) + `seccionesConModulos()` (pura, testeada). Sin módulos activos devuelve exactamente `SECCIONES`.
+- `modulos/useModulos.js` — sesión Supabase (magic link) + tabla `modulos_usuario`. Cache local en la key propia `modulos_estado_cache` (no viaja en exportAll). Escrituras optimistas, una a la vez por módulo.
+- `modulos/puente/tarjeteando.js` — **solo lectura**: recibe el `mes` que ya calcula App.jsx y devuelve totales del ciclo de pago (mismas cifras que la cápsula de Mes).
+- `modulos/ui/` — `GestorModulos` (Más → Módulos), `ModuloHost` (error boundary), `Proximamente`, `modulos.css` (todo con prefijo `.tj .mod-*`).
+- Favoritos: máx. 2, como pestañas después de Cuotas (AppShell y Rail reciben prop `secciones`). Activos no favoritos: menú Más → "Mis módulos".
+- Supabase: proyecto `tarjeteando-modulos` (sa-east-1). Tablas `modulos_usuario`, `cuentas`, `categorias`, `importaciones`, `movimientos` con RLS `user_id = auth.uid()`. Env: `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` en `Frontend/.env.local`. Sin esas variables, el ítem Módulos no aparece.
+- Tarjeteando sigue sin login: la cuenta es solo para módulos.
+
+---
+
 ## Cambios recientes (27/09/2026) — Rediseño B+C (fases 0 a 7)
 
 Rama `feat/rediseno-bc` (fases 0 a 7, specs en `rediseno-2026/specs/`, prototipos en `rediseno-2026/prototipos/`).

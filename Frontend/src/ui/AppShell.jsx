@@ -78,6 +78,7 @@ const MenuMas = ({ items, onCerrar, estilo }) => {
  */
 const AppShell = ({
   seccion,
+  secciones = SECCIONES,
   onSeccion,
   onImportar,
   busqueda = '',
@@ -209,7 +210,7 @@ const AppShell = ({
           {encabezado}
           {children}
         </main>
-        <Rail seccion={seccion} onSeccion={onSeccion} onImportar={onImportar} izquierda={railIzquierda} />
+        <Rail seccion={seccion} secciones={secciones} onSeccion={onSeccion} onImportar={onImportar} izquierda={railIzquierda} />
       </>
     );
   }
@@ -227,7 +228,7 @@ const AppShell = ({
           <Marca />
         </div>
         <nav aria-label="Secciones" className="vidrio" style={{ display: 'flex', gap: 2, padding: 6, borderRadius: 26, flexShrink: 0 }}>
-          {SECCIONES.map(s => (
+          {secciones.map(s => (
             <button
               key={s.id}
               type="button"
