@@ -50,3 +50,25 @@ test('sin mes devuelve null', () => {
   assert.equal(resumenTarjetasDelMes(null), null);
   assert.equal(resumenTarjetasDelMes({}), null);
 });
+
+import { comprasDeTarjeta, sugerirAlcance } from './tarjeteando.js';
+
+test('compras de tarjeta: una fila por plan de cuotas, sin pagos ni reintegros', () => {
+  const movs = [
+    { id: 'a', tarjeta: 'VISA', referencia_limpia: 'Heladera', fecha_compra: '2026-07-10', monto_pesos: 100000, es_cuota: true, cuota_actual: 2, total_cuotas: 6 },
+    { id: 'b', tarjeta: 'VISA', referencia_limpia: 'Heladera', fecha_compra: '2026-07-10', monto_pesos: 100000, es_cuota: true, cuota_actual: 3, total_cuotas: 6 },
+    { id: 'c', tarjeta: 'VISA', referencia_limpia: 'Asado', fecha_compra: '2026-09-01', monto_pesos: 40000 },
+    { id: 'd', tarjeta: 'VISA', referencia_limpia: 'SU PAGO', monto_pesos: 500000, es_pago: true },
+    { id: 'e', tarjeta: 'VISA', referencia_limpia: 'Reintegro', monto_pesos: -2000 }
+  ];
+  const c = comprasDeTarjeta(movs);
+  assert.equal(c.length, 2);
+  assert.equal(c[0].descripcion, 'Asado');
+  assert.deepEqual(c[1].cuotas, { actual: 3, total: 6, monto_cuota: 100000, total_compra: 600000 });
+  assert.equal(sugerirAlcance(100000, c[1]), 'cuota');
+  assert.equal(sugerirAlcance(550000, c[1]), 'total');
+  assert.equal(sugerirAlcance(300000, c[1]), 'total'); // devolución parcial del total, no una cuota
+  const dos = comprasDeTarjeta([{ id: 'x', tarjeta: 'V', referencia_limpia: 'Zapas', fecha_compra: '2026-05-01', monto_pesos: 10000, es_cuota: true, cuota_actual: 1, total_cuotas: 3 }, { id: 'y', tarjeta: 'V', referencia_limpia: 'Zapas', fecha_compra: '2026-06-01', monto_pesos: 10000, es_cuota: true, cuota_actual: 1, total_cuotas: 3 }]);
+  assert.equal(dos.length, 2); // dos compras iguales en fechas distintas no se fusionan
+  assert.equal(sugerirAlcance(10000, c[0]), 'total');
+});

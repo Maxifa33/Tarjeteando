@@ -70,6 +70,7 @@ const FilaModulo = ({ m, e, puedeFavorito, conSesion, ocupado, modulos }) => {
         <span style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
           <span id={idNombre} style={{ fontSize: 17, fontWeight: 600, letterSpacing: '-.01em' }}>{m.nombre}</span>
           {m.estado === 'proximamente' && <span className="h3" style={{ fontSize: 11 }}>Próximamente</span>}
+          {m.estado === 'beta' && <span className="mod-chip">Beta</span>}
         </span>
         <span id={idDesc} style={{ fontSize: 14, lineHeight: '20px', color: 'var(--label2)' }}>{m.descripcion}</span>
       </span>

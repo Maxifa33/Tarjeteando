@@ -10,9 +10,32 @@
  * 'novedades_version_vista'); la Guía está siempre disponible en el menú.
  */
 
-export const APP_VERSION = '2026.10.1';
+export const APP_VERSION = '2026.10.2';
 
 export const NOVEDADES = [
+  {
+    version: '2026.10.2',
+    fecha: 'octubre 2026',
+    titulo: 'Platita y Billetera ya funcionan',
+    puntos: [
+      {
+        titulo: 'Importá tus cuentas',
+        texto: 'Desde Platita o Billetera subí el Excel/CSV de Galicia y el PDF (o Excel/CSV) de Mercado Pago. Podés subir varios juntos y repetirlos: nada se duplica.'
+      },
+      {
+        titulo: 'Solo cuenta lo que es gasto o ingreso',
+        texto: 'Los pagos de tarjeta, la plata entre tus cuentas, la compra de dólares y las reservas de Mercado Pago no se suman. Lo dudoso queda en "Revisar" hasta que lo confirmes.'
+      },
+      {
+        titulo: 'Reservas: apartado o ahorro',
+        texto: 'Cada reserva de Mercado Pago se marca como Apartado (plata para un gasto que viene) o Ahorro (como Emergencia). Lo cambiás en Billetera → Tus reservas.'
+      },
+      {
+        titulo: 'Recupero: cuando te devuelven plata',
+        texto: 'Si alguien te paga su parte de un gasto que hiciste vos, marcalo como Recupero: no cuenta como ingreso y descuenta el gasto. Si lo pagaste con tarjeta, elegí la compra (y si fue una cuota o el total).'
+      }
+    ]
+  },
   {
     version: '2026.10.1',
     fecha: 'octubre 2026',
@@ -109,7 +132,10 @@ export const GUIA = [
       'Más → Módulos: activá o desactivá cada módulo con su interruptor. Desactivarlo lo saca de la barra, sin borrar nada.',
       'La estrella lo vuelve favorito: hasta 2 favoritos se ven como pestañas después de Cuotas (en el celular, en el riel). Los demás módulos activos están en el menú Más.',
       'Los módulos necesitan una cuenta: escribí tu email y entrá con el link que te llega. Tarjeteando no la necesita.',
-      'Presupuestos ya lee el total de tus tarjetas del mes (las mismas cifras que Mes) desde este dispositivo.'
+      'Presupuestos ya lee el total de tus tarjetas del mes (las mismas cifras que Mes) desde este dispositivo.',
+      'Platita (ingresos) y Billetera (gastos sin tarjeta): tocá "Importar movimientos" y subí el Excel/CSV de Galicia o el PDF de Mercado Pago. Tocá un movimiento para cambiarle el tipo o la categoría.',
+      'Lo marcado "Revisar" (transferencias con otras personas, depósitos) no suma hasta que lo confirmes.',
+      'Recupero: plata que te devuelven de un gasto tuyo (asado dividido, una compra que hiciste por alguien). Podés vincularlo a la compra con tarjeta y marcar "Siempre que esta persona me transfiera" para que las próximas entren solas.'
     ]
   },
   {

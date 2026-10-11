@@ -1217,6 +1217,8 @@ const App = () => {
   // Puente de solo lectura para Presupuestos: mismas cifras que la cápsula de Mes.
   const presupuestosActivo = !!modulos.estado.presupuestos?.activo;
   const puenteTarjeteando = useMemo(() => (presupuestosActivo ? resumenTarjetasDelMes(mes) : null), [presupuestosActivo, mes]);
+  // Solo lectura: compras con tarjeta para vincular recuperos (Platita/Billetera).
+  const tarjeteandoParaModulos = useMemo(() => ({ movimientos }), [movimientos]);
 
   // Evolución y proyección (fase 2): 12 pagados + en curso + 6 comprometidos.
   const evolucion = useMemo(() => {
@@ -1432,7 +1434,7 @@ const App = () => {
           ) : activeView === 'modulos' ? (
             <GestorModulos modulos={modulos} />
           ) : esModulo(activeView) ? (
-            <ModuloHost moduloId={activeView} modulos={modulos} puente={puenteTarjeteando} onIrAModulos={() => setActiveView('modulos')} />
+            <ModuloHost moduloId={activeView} modulos={modulos} puente={puenteTarjeteando} tarjeteando={tarjeteandoParaModulos} onIrAModulos={() => setActiveView('modulos')} />
           ) : null}
       </AppShell>
 

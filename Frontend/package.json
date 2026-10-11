@@ -6,11 +6,12 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test src/services/*.test.js src/services/consumos/*.test.js src/ui/*.test.js src/modulos/*.test.js src/modulos/puente/*.test.js"
+    "test": "node --test src/services/*.test.js src/services/consumos/*.test.js src/ui/*.test.js src/modulos/*.test.js src/modulos/puente/*.test.js src/modulos/cuentas/*.test.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.2",
     "lucide-react": "^0.294.0",
+    "pdfjs-dist": "^5.7.284",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"

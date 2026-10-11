@@ -16,7 +16,7 @@ export const MODULOS = [
     nombre: 'Platita',
     descripcion: 'Tus ingresos activos y pasivos: sueldo, honorarios, extras y rendimientos.',
     icono: 'Banknote',
-    estado: 'proximamente',
+    estado: 'beta',
     promesa: [
       'Ingresos del mes de un vistazo, separados en activos y pasivos.',
       'Se completan solos al importar los movimientos de Galicia y Mercado Pago.'
@@ -27,7 +27,7 @@ export const MODULOS = [
     nombre: 'Billetera',
     descripcion: 'Lo que gastás sin tarjeta: efectivo y transferencias.',
     icono: 'Wallet',
-    estado: 'proximamente',
+    estado: 'beta',
     promesa: [
       'Importás el movimiento de cuenta de Galicia o Mercado Pago y queda todo cargado.',
       'Sin duplicados: el pago de la tarjeta y las transferencias entre tus cuentas no cuentan como gasto.'

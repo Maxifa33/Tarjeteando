@@ -2,6 +2,12 @@ import React from 'react';
 import { Puzzle } from 'lucide-react';
 import { moduloPorId } from '../registro.js';
 import Proximamente from './Proximamente.jsx';
+
+// Módulos ya construidos: se cargan recién cuando se abren.
+const VISTAS = {
+  platita: React.lazy(() => import('./cuentas/PlatitaView.jsx')),
+  billetera: React.lazy(() => import('./cuentas/BilleteraView.jsx'))
+};
 import './modulos.css';
 
 /** Un módulo que falla no tumba Tarjeteando. */
@@ -30,12 +36,23 @@ const Vacio = ({ onIrAModulos }) => (
   </div>
 );
 
-const ModuloHost = ({ moduloId, modulos, puente, onIrAModulos }) => {
+const ModuloHost = ({ moduloId, modulos, puente, tarjeteando, onIrAModulos }) => {
   const modulo = moduloPorId(moduloId);
   if (!modulo || !modulos.estado[moduloId]?.activo) return <Vacio onIrAModulos={onIrAModulos} />;
+  const Vista = VISTAS[moduloId];
+  if (Vista && !modulos.sesion) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 12, maxWidth: 520 }}>
+        <p style={{ margin: 0, fontSize: 17, lineHeight: '24px', color: 'var(--label2)' }}>Entrá con tu email para ver tus datos en todos tus dispositivos.</p>
+        <button type="button" className="btn btn-pri" onClick={onIrAModulos} style={{ minHeight: 44, borderRadius: 22, padding: '0 18px' }}>Ir a Módulos</button>
+      </div>
+    );
+  }
   return (
     <Aislado id={moduloId}>
-      <Proximamente modulo={modulo} puente={modulo.usaPuenteTarjeteando ? puente : null} />
+      {Vista
+        ? <React.Suspense fallback={<p role="status" style={{ margin: 0 }}>Cargando…</p>}><Vista key={moduloId} tarjeteando={tarjeteando} /></React.Suspense>
+        : <Proximamente modulo={modulo} puente={modulo.usaPuenteTarjeteando ? puente : null} />}
     </Aislado>
   );
 };

@@ -160,6 +160,16 @@ Capa opcional de módulos dentro de Tarjeteando: **Platita** (ingresos), **Bille
 - Supabase: proyecto `tarjeteando-modulos` (sa-east-1). Tablas `modulos_usuario`, `cuentas`, `categorias`, `importaciones`, `movimientos` con RLS `user_id = auth.uid()`. Env: `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` en `Frontend/.env.local`. Sin esas variables, el ítem Módulos no aparece.
 - Tarjeteando sigue sin login: la cuenta es solo para módulos.
 
+### Paso 1 — Platita + Billetera (rama `feat/modulos-paso-1`)
+- `modulos/cuentas/`: `leer.js` (PDF con pdfjs-dist **legacy**, cargado con import dinámico; XLSX/CSV con SheetJS) → `detectar.js` (elige lector por contenido) → `parsers/galicia.js`, `parsers/mercadopago-pdf.js` (por posición de cada texto; valida contra Entradas/Salidas del resumen), `parsers/tabular.js` (planillas genéricas por sinónimos de columnas) → `plan.js` (clasifica con `clasificar.js`, huellas con `huella.js`) → `repo.js` (Supabase).
+- **Huella** (dedup): con n° de operación único en el archivo = cuenta+id+fecha+monto+dirección; sin id = hash del contenido + n° de ocurrencia en el día. Mercado Pago es una sola cuenta por usuario (PDF y Excel no se duplican). Reimportar un archivo (aunque haya fallado a medias) solo carga lo que falta.
+- **Nunca suman**: `pago_tarjeta`, `transferencia_interna` (cuentas propias por CUIT o nombre completo del titular), compra de dólares, `reserva` (reservas de MP = `bolsillos`, tipo `apartado` o `ahorro`). Lo dudoso va con `estado='revisar'` y no suma hasta confirmarlo.
+- Resúmenes con signo (`resumen.js`): un gasto que es entrada (devolución) resta.
+- Vistas: `ui/cuentas/PlatitaView.jsx`, `BilleteraView.jsx`, `ImportarCuentas.jsx`, `comunes.jsx` (selector de mes, `EditarMov`). Cargadas con `React.lazy` desde `ModuloHost`.
+- Tests: `src/modulos/cuentas/cuentas.test.js` con datos **ficticios**. Nunca commitear extractos reales.
+- **Recupero** (`tipo='recupero'`, solo entradas): plata que te devuelven de un gasto tuyo. No es ingreso. Sin vínculo resta del gasto de Billetera y de su categoría; con `vinculo_tarjeta` (jsonb: compra de Tarjeteando, `alcance` 'total'|'cuota', `cuota_numero`) no resta en Billetera: se netea en Presupuestos. Compras para vincular: `comprasDeTarjeta()` del puente (solo lectura, datos de este dispositivo). `sugerirAlcance`: 'cuota' solo si el monto está a ±10% de una cuota.
+- **Reglas por contraparte** (`reglas_contraparte`, contraparte normalizada + dirección): se aplican al importar solo a lo que quedó "a revisar", y al guardarlas a lo ya importado de esa persona que sigue a revisar. No se ofrecen para recuperos con tarjeta.
+
 ---
 
 ## Cambios recientes (27/09/2026) — Rediseño B+C (fases 0 a 7)
