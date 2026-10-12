@@ -108,13 +108,13 @@ export async function guardarArchivo(archivo, { tiposBolsillo = {}, titular = nu
   return { cuentaId, guardados: filas.length };
 }
 
-const SELECT_MOV = 'id, fecha, monto, moneda, direccion, tipo, modulo, estado, descripcion, descripcion_original, contraparte, naturaleza, cuenta_en_presupuesto, categoria_id, bolsillo_id, cuenta_id, origen, vinculo_tarjeta, categorias(nombre), bolsillos(nombre, tipo), cuentas(nombre, institucion)';
+const SELECT_MOV = 'id, fecha, monto, moneda, direccion, tipo, modulo, estado, descripcion, descripcion_original, contraparte, naturaleza, cuenta_en_presupuesto, categoria_id, bolsillo_id, cuenta_id, origen, vinculo_tarjeta, deuda_id, categorias(nombre), bolsillos(nombre, tipo), cuentas(nombre, institucion)';
 
 export async function movimientosEntre(desde, hasta) {
   const out = [];
   for (let i = 0; ; i += 1000) {
     const filas = await supabase.from('movimientos').select(SELECT_MOV)
-      .gte('fecha', desde).lte('fecha', hasta).order('fecha', { ascending: false }).range(i, i + 999).then(chk);
+      .gte('fecha', desde).lte('fecha', hasta).order('fecha', { ascending: false }).order('id').range(i, i + 999).then(chk);
     out.push(...filas);
     if (filas.length < 1000) break;
   }

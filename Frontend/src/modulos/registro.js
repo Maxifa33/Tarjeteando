@@ -50,7 +50,7 @@ export const MODULOS = [
     nombre: 'Saldar',
     descripcion: 'Préstamos y deudas fuera de la tarjeta, con un plan para cancelarlas.',
     icono: 'Scale',
-    estado: 'proximamente',
+    estado: 'beta',
     promesa: [
       'Todas tus deudas en un lugar, con su costo real.',
       'Un orden de pago sugerido según lo que te entra cada mes.'

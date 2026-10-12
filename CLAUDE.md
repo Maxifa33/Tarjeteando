@@ -180,6 +180,13 @@ Capa opcional de módulos dentro de Tarjeteando: **Platita** (ingresos), **Bille
 - Tarjetas por mes de vencimiento desde `evolucion.columnas` de App.jsx (`tarjetasPorMes` del puente, solo lectura). Mes 'pagado' sin resúmenes = sin datos → fallback a pagos de tarjeta hechos desde las cuentas. Nunca se suman ambos (no hay doble conteo).
 - `ui/cuentas/PresupuestosView.jsx`. App pasa `tarjeteandoParaModulos = { movimientos, evolucion: evolucion.columnas }` (declarado DESPUÉS del memo de evolución: si no, TDZ y la app entera no arranca).
 
+### Paso 3 — Saldar (rama `feat/modulos-paso-3`)
+- Tabla `deudas` (prestamo|persona|atraso, saldo_inicial a la `fecha_inicio`, cuota_monto, cuotas_restantes, tasa_anual, palabra_clave, estado activa|saldada). En `movimientos`: `deuda_id` (FK set null), `deudas_descartadas uuid[]`, `categoria_previa_id` + `estado_previo` (cómo estaba antes de confirmarlo como pago; se restaura al quitar/borrar, la categoría solo si sigue en Deudas).
+- `modulos/deudas/deudas.js` (puro, tests en deudas.test.js): estadoDeuda (saldo = inicial − pagos misma moneda desde fecha_inicio), puntaje/sugerirPagos (palabra clave, acreedor + pista, cuota ±3%, persona por tokens; el solo nombre del banco no alcanza), simular/compararPlanes (avalancha vs bola, motivo cuando no termina), validarDeuda.
+- `modulos/deudas/repo.js`: confirmar = update guardado `.is('deuda_id', null)` y DESPUÉS borrar el manual duplicado (si falla, quedan los dos visibles). Pago manual → cuenta `efectivo` creada a demanda, origen 'manual', huella 'manual:uuid', cuenta como gasto en Billetera.
+- UI `ui/deudas/SaldarView.jsx` + `HojasDeuda.jsx`. Monto sugerido del plan = promedio (teQueda + pagos de deudas) de meses cerrados.
+- Gotcha: el MCP de Supabase no aplica SQL con DELETE (ni dentro de funciones): por eso no hay RPCs atómicas acá.
+
 ---
 
 ## Cambios recientes (27/09/2026) — Rediseño B+C (fases 0 a 7)

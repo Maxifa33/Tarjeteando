@@ -7,7 +7,8 @@ import Proximamente from './Proximamente.jsx';
 const VISTAS = {
   platita: React.lazy(() => import('./cuentas/PlatitaView.jsx')),
   billetera: React.lazy(() => import('./cuentas/BilleteraView.jsx')),
-  presupuestos: React.lazy(() => import('./cuentas/PresupuestosView.jsx'))
+  presupuestos: React.lazy(() => import('./cuentas/PresupuestosView.jsx')),
+  saldar: React.lazy(() => import('./deudas/SaldarView.jsx'))
 };
 import './modulos.css';
 

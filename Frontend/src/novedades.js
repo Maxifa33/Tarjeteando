@@ -10,9 +10,28 @@
  * 'novedades_version_vista'); la Guía está siempre disponible en el menú.
  */
 
-export const APP_VERSION = '2026.10.3';
+export const APP_VERSION = '2026.10.4';
 
 export const NOVEDADES = [
+  {
+    version: '2026.10.4',
+    fecha: 'octubre 2026',
+    titulo: 'Saldar: tus deudas con un plan',
+    puntos: [
+      {
+        titulo: 'Todas tus deudas en un lugar',
+        texto: 'Préstamos del banco o Mercado Pago, plata que le debés a alguien y servicios o impuestos atrasados. Cargás lo que debés hoy (o la cuota y las que faltan) y Saldar te muestra cuánto queda.'
+      },
+      {
+        titulo: 'Reconoce tus pagos',
+        texto: 'Busca en tus cuentas importadas los movimientos que parecen pagos: tocá Confirmar o No es. Los pagos en efectivo los registrás a mano desde la deuda.'
+      },
+      {
+        titulo: 'Avalancha o bola de nieve',
+        texto: 'Con lo que te queda cada mes (de Presupuestos), compara pagar primero la de tasa más alta o la más chica: cuántos meses tardás y cuánto pagás de intereses.'
+      }
+    ]
+  },
   {
     version: '2026.10.3',
     fecha: 'octubre 2026',
@@ -154,6 +173,8 @@ export const GUIA = [
       'Presupuestos ya lee el total de tus tarjetas del mes (las mismas cifras que Mes) desde este dispositivo.',
       'Platita (ingresos) y Billetera (gastos sin tarjeta): tocá "Importar movimientos" y subí el Excel/CSV de Galicia o el PDF de Mercado Pago. Tocá un movimiento para cambiarle el tipo o la categoría.',
       'Lo marcado "Revisar" (transferencias con otras personas, depósitos) no suma hasta que lo confirmes.',
+      'Saldar: Nueva deuda (Préstamo, Persona o Atraso). Poné con quién y, si querés, una palabra clave que aparezca en el pago: así Saldar encuentra los pagos en tus cuentas. Tocá una deuda para ver sus pagos, registrar uno en efectivo, editarla o marcarla saldada.',
+      'Saldar compara dos planes con el monto que podés poner por mes: Avalancha (menos intereses) y Bola de nieve (cerrás deudas antes). Las deudas en dólares no entran en el plan.',
       'Presupuestos: Te queda = Ingresos − Tarjetas (lo que vence ese mes) − Gastos sin tarjeta + Recuperos de compras con tarjeta. Libre = Te queda − reservas. Los movimientos a revisar no entran hasta que los confirmes.',
       'Recupero: plata que te devuelven de un gasto tuyo (asado dividido, una compra que hiciste por alguien). Podés vincularlo a la compra con tarjeta y marcar "Siempre que esta persona me transfiera" para que las próximas entren solas.'
     ]
