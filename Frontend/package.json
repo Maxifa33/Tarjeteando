@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test src/services/*.test.js src/services/consumos/*.test.js src/ui/*.test.js src/modulos/*.test.js src/modulos/puente/*.test.js src/modulos/cuentas/*.test.js src/modulos/deudas/*.test.js"
+    "test": "node --test src/services/*.test.js src/services/consumos/*.test.js src/ui/*.test.js src/modulos/*.test.js src/modulos/puente/*.test.js src/modulos/cuentas/*.test.js src/modulos/deudas/*.test.js src/modulos/alcancia/*.test.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.2",

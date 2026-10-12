@@ -10,9 +10,28 @@
  * 'novedades_version_vista'); la Guía está siempre disponible en el menú.
  */
 
-export const APP_VERSION = '2026.10.4';
+export const APP_VERSION = '2026.10.5';
 
 export const NOVEDADES = [
+  {
+    version: '2026.10.5',
+    fecha: 'octubre 2026',
+    titulo: 'Alcancía: metas e inversiones',
+    puntos: [
+      {
+        titulo: 'Metas que se llenan solas',
+        texto: 'Vacaciones, auto, fondo de emergencia: poné cuánto y para cuándo. Vinculala a una reserva de Mercado Pago y se actualiza al importar; si la plata está en otro lado, la cargás a mano.'
+      },
+      {
+        titulo: '¿Te alcanza?',
+        texto: 'Te dice cuánto separar por mes para cada meta y si te alcanza con lo que te quedó en promedio en Presupuestos.'
+      },
+      {
+        titulo: 'Tus inversiones, al cierre de ayer',
+        texto: 'Plazos fijos, fondos, dólares, CEDEARs, acciones, bonos y cripto, valuados con las cotizaciones de cada noche. Y las mejores tasas de plazo fijo para comparar (información, no asesoramiento).'
+      }
+    ]
+  },
   {
     version: '2026.10.4',
     fecha: 'octubre 2026',
@@ -175,6 +194,8 @@ export const GUIA = [
       'Lo marcado "Revisar" (transferencias con otras personas, depósitos) no suma hasta que lo confirmes.',
       'Saldar: Nueva deuda (Préstamo, Persona o Atraso). Poné con quién y, si querés, una palabra clave que aparezca en el pago: así Saldar encuentra los pagos en tus cuentas. Tocá una deuda para ver sus pagos, registrar uno en efectivo, editarla o marcarla saldada.',
       'Saldar compara dos planes con el monto que podés poner por mes: Avalancha (menos intereses) y Bola de nieve (cerrás deudas antes). Las deudas en dólares no entran en el plan.',
+      'Alcancía → Metas: Nueva meta con monto y, si querés, fecha y una reserva de Mercado Pago. Tocá la meta para sumar o sacar plata a mano, editarla o marcarla lograda (eso libera la reserva para la próxima).',
+      'Alcancía → Inversiones: elegí el tipo, buscá el ticker o el fondo y poné la cantidad (los bonos van en valor nominal). Se valúan con el cierre de cada noche; los plazos fijos se estiman con la TNA.',
       'Presupuestos: Te queda = Ingresos − Tarjetas (lo que vence ese mes) − Gastos sin tarjeta + Recuperos de compras con tarjeta. Libre = Te queda − reservas. Los movimientos a revisar no entran hasta que los confirmes.',
       'Recupero: plata que te devuelven de un gasto tuyo (asado dividido, una compra que hiciste por alguien). Podés vincularlo a la compra con tarjeta y marcar "Siempre que esta persona me transfiera" para que las próximas entren solas.'
     ]

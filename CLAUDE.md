@@ -187,6 +187,12 @@ Capa opcional de módulos dentro de Tarjeteando: **Platita** (ingresos), **Bille
 - UI `ui/deudas/SaldarView.jsx` + `HojasDeuda.jsx`. Monto sugerido del plan = promedio (teQueda + pagos de deudas) de meses cerrados.
 - Gotcha: el MCP de Supabase no aplica SQL con DELETE (ni dentro de funciones): por eso no hay RPCs atómicas acá.
 
+### Paso 4 — Alcancía (rama `feat/modulos-paso-4`)
+- Tablas `metas` (bolsillo_id opcional; índice único parcial: una reserva por meta activa), `meta_aportes` (monto <0 = retiro), `inversiones` (plazo_fijo|fci|dolar|accion|cedear|bono|cripto|otro). Compartidas solo lectura: `precios` (PK tipo+simbolo, último cierre) y `tasas_plazo_fijo`.
+- Cotizaciones: pg_cron + pg_net, todo en la base, sin edge functions ni claves. `economics_pedir_cotizaciones()` 23:00 UTC → `economics_procesar_cotizaciones()` 23:05 y 23:30 UTC (security definer, sin execute para clientes). Fuentes: dolarapi (casas; precio = compra), data912 (acciones/CEDEARs/bonos/letras/ONs; USD si sufijo D/C y el base cotiza >100×; data912 es un proyecto hobby: riesgo de que desaparezca), coingecko (10 cripto, USD), argentinadatos (FCI vcp/1000 por cuotaparte; plazo fijo tnaClientes en decimal).
+- `modulos/alcancia/alcancia.js` (puro, tests): estadoMeta (juntado = inicial + aportes + neto reserva; porMes desde el saldo al empezar el mes; ritmo sobre meses cerrados desde que existe), planMetas, valuar (bonos ÷100; dólares: capital en pesos, precio compra de la casa; plazo fijo interés simple con tope al plazo), totalCartera, parseCantidad (sin redondeo; "10.000" = miles salvo cripto).
+- UI `ui/alcancia/AlcanciaView.jsx` (pestañas Metas/Inversiones) + `HojasMeta.jsx` + `HojasInversion.jsx`. Capacidad = promedio teQueda de meses completos (mismo criterio en Saldar). Marcar lograda congela lo juntado y desvincula la reserva.
+
 ---
 
 ## Cambios recientes (27/09/2026) — Rediseño B+C (fases 0 a 7)

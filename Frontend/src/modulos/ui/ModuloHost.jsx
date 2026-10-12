@@ -8,7 +8,8 @@ const VISTAS = {
   platita: React.lazy(() => import('./cuentas/PlatitaView.jsx')),
   billetera: React.lazy(() => import('./cuentas/BilleteraView.jsx')),
   presupuestos: React.lazy(() => import('./cuentas/PresupuestosView.jsx')),
-  saldar: React.lazy(() => import('./deudas/SaldarView.jsx'))
+  saldar: React.lazy(() => import('./deudas/SaldarView.jsx')),
+  alcancia: React.lazy(() => import('./alcancia/AlcanciaView.jsx'))
 };
 import './modulos.css';
 

@@ -11,6 +11,8 @@ import { listarDeudas, pagosDeDeudas, candidatos, confirmarPago, descartar, idCa
 import { FormDeuda, DetalleDeuda, hoyISO, plata, fechaDM } from './HojasDeuda.jsx';
 import '../modulos.css';
 
+// Tolerancia de 3 días: el último día del mes puede no tener movimientos.
+const menosDias = (iso, n) => { const d = new Date(`${iso}T12:00:00`); d.setDate(d.getDate() - n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const hoyMes = () => hoyISO().slice(0, 7);
 const r2 = (n) => Math.round(n * 100) / 100;
 
@@ -20,7 +22,8 @@ async function sugerirMonto(tarjeteando, pagos) {
   if (!ultima) return null;
   // Solo meses cerrados: el mes en curso está incompleto y bajaría el promedio.
   const cerrado = moverMes(hoyMes(), -1);
-  const mes = ultima.slice(0, 7) < cerrado ? ultima.slice(0, 7) : cerrado;
+  let mes = ultima.slice(0, 7) < cerrado ? ultima.slice(0, 7) : cerrado;
+  if (mes === ultima.slice(0, 7) && ultima < menosDias(rangoMes(mes).hasta, 3)) mes = moverMes(mes, -1); // mes a medias no cuenta
   const movs = await movimientosEntre(rangoMes(moverMes(mes, -2)).desde, rangoMes(mes).hasta);
   const h = historial(mes, movs, tarjetasPorMes(tarjeteando?.evolucion || []), 3).filter((x) => x.conCuentas);
   if (!h.length) return null;

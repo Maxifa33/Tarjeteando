@@ -61,7 +61,7 @@ export const MODULOS = [
     nombre: 'Alcancía',
     descripcion: 'Guardar platita para algo: metas, fondo de emergencia e inversiones.',
     icono: 'PiggyBank',
-    estado: 'proximamente',
+    estado: 'beta',
     promesa: [
       'Metas con fecha y monto: vacaciones, emergencia, una compra grande.',
       'Tus inversiones valuadas al cierre del día anterior, con sugerencias (no asesoramiento).'
