@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, AlertCircle, ArrowDownLeft, ArrowUpRight, Re
 import { pesos, mesLargo, diaCorto, capitalizar } from '../../../ui/formato.js';
 import { movimientosEntre, mesesConDatos, actualizarMovimiento, categorias as cargarCategorias, guardarRegla, aplicarReglaExistentes } from '../../cuentas/repo.js';
 import { sugerirAlcance } from '../../puente/tarjeteando.js';
+import { categoriasVisibles } from '../../cuentas/categorias.js';
 import { rangoMes, moverMes } from '../../cuentas/resumen.js';
 import Hoja from '../../../ui/Hoja.jsx';
 import Seg from '../../../ui/Seg.jsx';
@@ -40,7 +41,8 @@ export function useMovimientosMes() {
   }, [mes]);
 
   useEffect(() => { recargar(); }, [recargar]);
-  return { mes, setMes, movs, cats, cargando, error, recargar };
+  const recargarCats = useCallback(async () => { try { setCats(await cargarCategorias()); } catch { /* sin red */ } }, []);
+  return { mes, setMes, movs, cats, cargando, error, recargar, recargarCats };
 }
 
 export const SelectorMes = ({ mes, onCambio }) => (
@@ -187,7 +189,7 @@ export const EditarMov = ({ mov, cats, compras = [], onCerrar, onGuardado }) => 
   if (!mov) return null;
   const editable = ['gasto', 'ingreso', 'transferencia_interna', 'recupero'].includes(mov.tipo);
   const tipos = TIPOS.filter((t) => t.id !== 'recupero' || mov.direccion === 'entrada');
-  const opciones = cats.filter((c) => c.tipo === (tipo === 'ingreso' ? 'ingreso' : 'gasto'));
+  const opciones = categoriasVisibles(cats, tipo === 'ingreso' ? 'ingreso' : 'gasto');
   const quien = mov.contraparte || '';
 
   const elegirCompra = (c) => {

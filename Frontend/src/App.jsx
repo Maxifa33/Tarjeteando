@@ -1217,8 +1217,6 @@ const App = () => {
   // Puente de solo lectura para Presupuestos: mismas cifras que la cápsula de Mes.
   const presupuestosActivo = !!modulos.estado.presupuestos?.activo;
   const puenteTarjeteando = useMemo(() => (presupuestosActivo ? resumenTarjetasDelMes(mes) : null), [presupuestosActivo, mes]);
-  // Solo lectura: compras con tarjeta para vincular recuperos (Platita/Billetera).
-  const tarjeteandoParaModulos = useMemo(() => ({ movimientos }), [movimientos]);
 
   // Evolución y proyección (fase 2): 12 pagados + en curso + 6 comprometidos.
   const evolucion = useMemo(() => {
@@ -1232,6 +1230,8 @@ const App = () => {
       .map(c => [c.mesKey, detalleMes(c, cuotasActivas, opts)]));
     return { columnas, detalles };
   }, [mes, resumenes, movimientos, tiposGasto, cuotasActivas, gastosFijosDetalle, cotizacionVenta]);
+  // Solo lectura para los módulos: compras con tarjeta (recuperos) y lo que vence por mes (Presupuestos).
+  const tarjeteandoParaModulos = useMemo(() => ({ movimientos, evolucion: evolucion.columnas }), [movimientos, evolucion]);
 
   // Nombres personalizados en todas las vistas (fase 6).
   const nombreDe = (id, fallback) => nombreVisible(id, { tarjetas, nombres: nombresTarjetas, fallback });

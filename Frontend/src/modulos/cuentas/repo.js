@@ -1,6 +1,7 @@
 import { supabase } from '../supabase.js';
 import { claveCuenta } from './huella.js';
 import { normalizar } from './util.js';
+import { resolverCategoria } from './categorias.js';
 
 /** Acceso a Supabase de los módulos de cuentas (Platita, Billetera). RLS filtra por usuario. */
 
@@ -10,7 +11,7 @@ export async function cargarContexto() {
   const [cuentas, bolsillos, categorias, importaciones, reglas] = await Promise.all([
     supabase.from('cuentas').select('id, nombre, tipo, institucion, numero, moneda, titular_nombre, titular_cuit').then(chk),
     supabase.from('bolsillos').select('id, cuenta_id, nombre, tipo').then(chk),
-    supabase.from('categorias').select('id, nombre, tipo, user_id').then(chk),
+    supabase.from('categorias').select('id, nombre, tipo, user_id, reemplaza').then(chk),
     supabase.from('importaciones').select('hash_archivo').then(chk),
     supabase.from('reglas_contraparte').select('contraparte, direccion, tipo, categoria_id').then(chk)
   ]);
@@ -77,7 +78,7 @@ export async function guardarArchivo(archivo, { tiposBolsillo = {}, titular = nu
     filas_total: r.movimientos.length, filas_nuevas: archivo.nuevos.length, filas_duplicadas: archivo.duplicados
   }, { onConflict: 'user_id,hash_archivo' }).select('id').single().then(chk);
 
-  const catId = (nombre, tipo) => ctx.categorias.find((c) => c.nombre === nombre && c.tipo === tipo)?.id || null;
+  const catId = (nombre, tipo) => resolverCategoria(nombre, tipo, ctx.categorias);
   const filas = archivo.nuevos.map((m) => ({
     cuenta_id: cuentaId,
     fecha: m.fecha,
@@ -126,7 +127,68 @@ export async function mesesConDatos() {
 }
 
 export async function categorias() {
-  return supabase.from('categorias').select('id, nombre, tipo').order('nombre').then(chk);
+  return supabase.from('categorias').select('id, nombre, tipo, icono, user_id, reemplaza').order('nombre').then(chk);
+}
+
+/** Nueva categoría propia. */
+export async function crearCategoria(nombre, tipo) {
+  return supabase.from('categorias').insert({ nombre: nombre.trim(), tipo, user_id: (await supabase.auth.getUser()).data.user.id })
+    .select('id').single().then(chk);
+}
+
+/**
+ * Renombrar. Una propia se renombra directo. Una del sistema no se puede tocar (es de todos):
+ * se crea una propia que la reemplaza y se le pasan tus movimientos y reglas.
+ */
+export async function renombrarCategoria(cat, nombre) {
+  // En una sola transacción (función economics_renombrar_categoria): o se hace todo o nada.
+  return supabase.rpc('economics_renombrar_categoria', { p_cat: cat.id, p_nombre: nombre.trim() }).then(chk);
+}
+
+/** Borrar una propia: sus movimientos quedan "Sin categoría". Si reemplazaba una del sistema, esa vuelve. */
+export async function borrarCategoria(cat) {
+  if (!cat.user_id) throw new Error('Las categorías base no se borran; podés renombrarlas.');
+  if (cat.reemplaza) {
+    await supabase.from('movimientos').update({ categoria_id: cat.reemplaza }).eq('categoria_id', cat.id).then(chk);
+    await supabase.from('reglas_contraparte').update({ categoria_id: cat.reemplaza }).eq('categoria_id', cat.id).then(chk);
+  }
+  return supabase.from('categorias').delete().eq('id', cat.id).then(chk);
+}
+
+/** Archivos importados, del más nuevo al más viejo. */
+export async function listarImportaciones() {
+  const base = 'id, nombre_archivo, origen, filas_nuevas, filas_total, created_at, cuentas(nombre)';
+  let filas;
+  try {
+    filas = await supabase.from('importaciones').select(`${base}, movimientos(count)`).order('created_at', { ascending: false }).then(chk);
+  } catch {
+    // Si el conteo embebido no está habilitado, se muestra lo que se cargó en esa importación.
+    filas = await supabase.from('importaciones').select(base).order('created_at', { ascending: false }).then(chk);
+  }
+  return filas.map((f) => ({ ...f, cuenta: f.cuentas?.nombre || '', cantidad: f.movimientos?.[0]?.count ?? f.filas_nuevas }));
+}
+
+/** Borra un archivo importado y todos sus movimientos (incluidos los cambios que les hiciste). */
+export async function borrarImportacion(id) {
+  await supabase.from('movimientos').delete().eq('importacion_id', id).then(chk);
+  return supabase.from('importaciones').delete().eq('id', id).then(chk);
+}
+
+/**
+ * Empezar de cero: borra movimientos, archivos, reservas y cuentas.
+ * Pasos idempotentes y en orden de dependencias: si se corta a mitad, volver a tocar termina el trabajo.
+ * Con `todo`, también tus categorías propias y reglas por persona. No toca Tarjeteando.
+ */
+export async function borrarTodo({ todo = false } = {}) {
+  const todos = (q) => q.not('id', 'is', null);
+  await todos(supabase.from('movimientos').delete()).then(chk);
+  await todos(supabase.from('importaciones').delete()).then(chk);
+  await todos(supabase.from('bolsillos').delete()).then(chk);
+  await todos(supabase.from('cuentas').delete()).then(chk);
+  if (todo) {
+    await todos(supabase.from('reglas_contraparte').delete()).then(chk);
+    await supabase.from('categorias').delete().not('user_id', 'is', null).then(chk);
+  }
 }
 
 export async function actualizarMovimiento(id, cambios) {

@@ -73,7 +73,7 @@ export const MODULOS = [
     corto: 'Presup.',
     descripcion: 'Tu plan del mes con tarjetas, gastos sin tarjeta, deudas y ahorro juntos.',
     icono: 'Calculator',
-    estado: 'proximamente',
+    estado: 'beta',
     usaPuenteTarjeteando: true,
     promesa: [
       'Cuánto entra, cuánto ya está comprometido y cuánto te queda.',

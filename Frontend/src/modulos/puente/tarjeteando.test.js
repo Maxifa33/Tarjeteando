@@ -72,3 +72,11 @@ test('compras de tarjeta: una fila por plan de cuotas, sin pagos ni reintegros',
   assert.equal(dos.length, 2); // dos compras iguales en fechas distintas no se fusionan
   assert.equal(sugerirAlcance(10000, c[0]), 'total');
 });
+
+import { tarjetasPorMes } from './tarjeteando.js';
+test('tarjetas por mes desde las columnas de Evolución', () => {
+  const t = tarjetasPorMes([{ mesKey: '2026-09', tipo: 'pagado', total: 100.004, usdAparte: 0, porTarjeta: { V: 100 } }, { mesKey: '2026-10', tipo: 'en_curso', total: 50, usdAparte: 3 }, null]);
+  assert.deepEqual(t['2026-09'], { total: 100, tipo: 'pagado', usd: 0 });
+  assert.equal(t['2026-10'].usd, 3);
+  assert.equal(tarjetasPorMes([{ mesKey: '2026-08', tipo: 'pagado', total: 0, porTarjeta: {} }])['2026-08'], undefined);
+});

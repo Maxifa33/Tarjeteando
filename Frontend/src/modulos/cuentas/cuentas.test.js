@@ -221,3 +221,41 @@ test('regla por contraparte: las transferencias de esa persona entran como recup
   const interna = aplicarRegla({ tipo: 'transferencia_interna', contraparte: 'Tomás López', direccion: 'entrada' }, reglas);
   assert.equal(interna.tipo, 'transferencia_interna');
 });
+
+test('presupuesto del mes real: ingresos − tarjetas − sin tarjeta + recuperos de tarjeta; libre descuenta reservas', async () => {
+  const { presupuestoDelMes, historial } = await import('./presupuesto.js');
+  const movs = [
+    { fecha: '2026-09-02', tipo: 'ingreso', estado: 'confirmado', direccion: 'entrada', naturaleza: 'activo', monto: 1000000 },
+    { fecha: '2026-09-03', tipo: 'gasto', estado: 'confirmado', direccion: 'salida', monto: 200000, categoria: 'Supermercado' },
+    { fecha: '2026-09-04', tipo: 'recupero', estado: 'confirmado', direccion: 'entrada', monto: 50000, vinculo_tarjeta: { alcance: 'total' } },
+    { fecha: '2026-09-05', tipo: 'reserva', direccion: 'salida', monto: 100000, bolsillo: { tipo: 'apartado' } },
+    { fecha: '2026-09-06', tipo: 'pago_tarjeta', direccion: 'salida', monto: 600000 },
+    { fecha: '2026-09-07', tipo: 'ingreso', estado: 'revisar', direccion: 'entrada', monto: 9999 }
+  ];
+  const p = presupuestoDelMes('2026-09', movs, { total: 600000, tipo: 'pagado', usd: 0 });
+  assert.deepEqual([p.ingresos, p.tarjetas, p.sinTarjeta, p.recuperosTarjeta, p.teQueda, p.apartado, p.libre, p.pendientes],
+    [1000000, 600000, 200000, 50000, 250000, 100000, 150000, 1]);
+  const sin = presupuestoDelMes('2026-09', movs, null);
+  assert.deepEqual([sin.tarjetasTipo, sin.tarjetas], ['desde_cuentas', 600000]); // sin Tarjeteando: lo pagado desde cuentas
+  assert.equal(presupuestoDelMes('2026-09', [], null).tarjetasTipo, 'sin_datos');
+  const h = historial('2026-09', movs, { '2026-09': { total: 600000, tipo: 'pagado', usd: 0 } }, 3);
+  assert.deepEqual(h.map((x) => x.mesKey), ['2026-09', '2026-08', '2026-07']);
+  assert.equal(h[0].teQueda, 250000);
+});
+
+test('categorías: renombrar una del sistema la reemplaza; el clasificador usa la nueva', async () => {
+  const { categoriasVisibles, resolverCategoria, nombreOcupado } = await import('./categorias.js');
+  const todas = [
+    { id: 's1', user_id: null, nombre: 'Supermercado', tipo: 'gasto' },
+    { id: 's2', user_id: null, nombre: 'Sueldo', tipo: 'ingreso' },
+    { id: 'u1', user_id: 'yo', nombre: 'Almacén y súper', tipo: 'gasto', reemplaza: 's1' },
+    { id: 'u2', user_id: 'yo', nombre: 'Mascotas', tipo: 'gasto' }
+  ];
+  assert.deepEqual(categoriasVisibles(todas, 'gasto').map((c) => c.id), ['u1', 'u2']);
+  assert.equal(resolverCategoria('Supermercado', 'gasto', todas), 'u1');
+  assert.equal(resolverCategoria('Sueldo', 'ingreso', todas), 's2');
+  assert.equal(resolverCategoria('Inexistente', 'gasto', todas), null);
+  assert.equal(nombreOcupado('mascotas', 'gasto', todas), true);
+  assert.equal(nombreOcupado('Supermercado', 'gasto', todas), true); // aunque esté oculta, la base sigue usando ese nombre
+  assert.equal(nombreOcupado('Supermercado', 'gasto', todas, 'u1'), false); // volver al nombre original está bien
+});

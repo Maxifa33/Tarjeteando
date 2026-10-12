@@ -170,6 +170,16 @@ Capa opcional de módulos dentro de Tarjeteando: **Platita** (ingresos), **Bille
 - **Recupero** (`tipo='recupero'`, solo entradas): plata que te devuelven de un gasto tuyo. No es ingreso. Sin vínculo resta del gasto de Billetera y de su categoría; con `vinculo_tarjeta` (jsonb: compra de Tarjeteando, `alcance` 'total'|'cuota', `cuota_numero`) no resta en Billetera: se netea en Presupuestos. Compras para vincular: `comprasDeTarjeta()` del puente (solo lectura, datos de este dispositivo). `sugerirAlcance`: 'cuota' solo si el monto está a ±10% de una cuota.
 - **Reglas por contraparte** (`reglas_contraparte`, contraparte normalizada + dirección): se aplican al importar solo a lo que quedó "a revisar", y al guardarlas a lo ya importado de esa persona que sigue a revisar. No se ofrecen para recuperos con tarjeta.
 
+### Categorías y archivos (Platita / Billetera)
+- Categorías del sistema (`user_id` null) no se editan: renombrar crea una propia con `reemplaza = <id base>` y le pasa movimientos y reglas, en una transacción (RPC `economics_renombrar_categoria`, security invoker). `cuentas/categorias.js`: `categoriasVisibles`, `resolverCategoria` (el clasificador usa la que reemplaza), `nombreOcupado` (cuenta también las base ocultas).
+- Archivos importados (`ui/cuentas/ArchivosImportados.jsx`): borrar uno = sus movimientos + la importación. "Empezar de cero" (`borrarTodo`): movimientos → importaciones → bolsillos → cuentas (+ categorías propias y reglas opcional); pasos idempotentes, reintentar termina. No toca Tarjeteando. Confirmación por segundo toque que se desarma a los 4 s (Safari no da foco a botones).
+- Nota: `apply_migration` del MCP se cuelga con cualquier `DELETE`/`DROP` en el SQL (pide confirmación): por eso `borrarTodo` es del lado del cliente.
+
+### Paso 2 — Presupuestos v1, mes real (rama `feat/modulos-paso-2`)
+- `modulos/cuentas/presupuesto.js` (puro): Te queda = Ingresos − Tarjetas − Gastos sin tarjeta + Recuperos vinculados a tarjeta; Libre = Te queda − apartado − ahorrado. `historial()` 6 meses.
+- Tarjetas por mes de vencimiento desde `evolucion.columnas` de App.jsx (`tarjetasPorMes` del puente, solo lectura). Mes 'pagado' sin resúmenes = sin datos → fallback a pagos de tarjeta hechos desde las cuentas. Nunca se suman ambos (no hay doble conteo).
+- `ui/cuentas/PresupuestosView.jsx`. App pasa `tarjeteandoParaModulos = { movimientos, evolucion: evolucion.columnas }` (declarado DESPUÉS del memo de evolución: si no, TDZ y la app entera no arranca).
+
 ---
 
 ## Cambios recientes (27/09/2026) — Rediseño B+C (fases 0 a 7)

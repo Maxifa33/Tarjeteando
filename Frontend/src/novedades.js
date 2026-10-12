@@ -10,9 +10,28 @@
  * 'novedades_version_vista'); la Guía está siempre disponible en el menú.
  */
 
-export const APP_VERSION = '2026.10.2';
+export const APP_VERSION = '2026.10.3';
 
 export const NOVEDADES = [
+  {
+    version: '2026.10.3',
+    fecha: 'octubre 2026',
+    titulo: 'Presupuestos: tu mes real',
+    puntos: [
+      {
+        titulo: 'Cuánto te queda, sin cargar nada',
+        texto: 'Presupuestos junta lo que entró (Platita), lo que vence de tarjetas (Tarjeteando), lo que gastaste sin tarjeta (Billetera) y lo que te devolvieron. Resultado: cuánto te queda en el mes.'
+      },
+      {
+        titulo: 'Libre de verdad',
+        texto: 'Descuenta lo que separaste en reservas para gastos que vienen y lo que ahorraste. Y abajo, los últimos 6 meses para comparar.'
+      },
+      {
+        titulo: 'Tus categorías y tus archivos',
+        texto: 'En Platita y Billetera: Categorías para renombrar o agregar las tuyas, y Archivos para borrar un archivo importado o empezar de cero.'
+      }
+    ]
+  },
   {
     version: '2026.10.2',
     fecha: 'octubre 2026',
@@ -135,6 +154,7 @@ export const GUIA = [
       'Presupuestos ya lee el total de tus tarjetas del mes (las mismas cifras que Mes) desde este dispositivo.',
       'Platita (ingresos) y Billetera (gastos sin tarjeta): tocá "Importar movimientos" y subí el Excel/CSV de Galicia o el PDF de Mercado Pago. Tocá un movimiento para cambiarle el tipo o la categoría.',
       'Lo marcado "Revisar" (transferencias con otras personas, depósitos) no suma hasta que lo confirmes.',
+      'Presupuestos: Te queda = Ingresos − Tarjetas (lo que vence ese mes) − Gastos sin tarjeta + Recuperos de compras con tarjeta. Libre = Te queda − reservas. Los movimientos a revisar no entran hasta que los confirmes.',
       'Recupero: plata que te devuelven de un gasto tuyo (asado dividido, una compra que hiciste por alguien). Podés vincularlo a la compra con tarjeta y marcar "Siempre que esta persona me transfiera" para que las próximas entren solas.'
     ]
   },

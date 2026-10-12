@@ -87,3 +87,20 @@ export function sugerirAlcance(montoRecupero, compra) {
   const c = compra.cuotas.monto_cuota;
   return Math.abs(montoRecupero - c) <= Math.max(c * 0.1, 1) ? 'cuota' : 'total';
 }
+
+/**
+ * Lo que se paga de tarjetas por mes de vencimiento, desde las columnas de Evolución
+ * (services/evolucion.js): 'pagado' (resúmenes vencidos), 'en_curso' (= cápsula de Mes)
+ * y 'comprometido' (cuotas + fijos ya firmados). SOLO LECTURA.
+ * @returns {{ [mesKey]: { total, tipo, usd } }}
+ */
+export function tarjetasPorMes(columnas = []) {
+  const out = {};
+  columnas.forEach((c) => {
+    if (!c?.mesKey) return;
+    // Un mes 'pagado' sin ningún resumen (no lo importaste) no es "0 de tarjetas": es "sin datos".
+    if (c.tipo === 'pagado' && !Object.keys(c.porTarjeta || {}).length) return;
+    out[c.mesKey] = { total: r2(c.total), tipo: c.tipo, usd: r2(c.usdAparte || 0) };
+  });
+  return out;
+}

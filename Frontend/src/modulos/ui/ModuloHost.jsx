@@ -6,7 +6,8 @@ import Proximamente from './Proximamente.jsx';
 // Módulos ya construidos: se cargan recién cuando se abren.
 const VISTAS = {
   platita: React.lazy(() => import('./cuentas/PlatitaView.jsx')),
-  billetera: React.lazy(() => import('./cuentas/BilleteraView.jsx'))
+  billetera: React.lazy(() => import('./cuentas/BilleteraView.jsx')),
+  presupuestos: React.lazy(() => import('./cuentas/PresupuestosView.jsx'))
 };
 import './modulos.css';
 

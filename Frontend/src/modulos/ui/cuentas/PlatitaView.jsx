@@ -1,5 +1,7 @@
 import React, { useMemo, useState } from 'react';
-import { Upload } from 'lucide-react';
+import { Upload, Tags, FolderOpen } from 'lucide-react';
+import GestionCategorias from './GestionCategorias.jsx';
+import ArchivosImportados from './ArchivosImportados.jsx';
 import { pesos } from '../../../ui/formato.js';
 import { resumenPlatita } from '../../cuentas/resumen.js';
 import { comprasDeTarjeta } from '../../puente/tarjeteando.js';
@@ -9,7 +11,9 @@ import ImportarCuentas from './ImportarCuentas.jsx';
 /** Platita: ingresos del mes, activos (trabajo) y pasivos (rinden solos). */
 const PlatitaView = ({ tarjeteando }) => {
   const compras = useMemo(() => comprasDeTarjeta(tarjeteando?.movimientos || []), [tarjeteando]);
-  const { mes, setMes, movs, cats, cargando, error, recargar } = useMovimientosMes();
+  const { mes, setMes, movs, cats, cargando, error, recargar, recargarCats } = useMovimientosMes();
+  const [verCategorias, setVerCategorias] = useState(false);
+  const [verArchivos, setVerArchivos] = useState(false);
   const [importando, setImportando] = useState(false);
   const [editando, setEditando] = useState(null);
   const r = useMemo(() => resumenPlatita(movs), [movs]);
@@ -21,9 +25,17 @@ const PlatitaView = ({ tarjeteando }) => {
     <section style={{ display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 760 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <SelectorMes mes={mes} onCambio={setMes} />
-        <button type="button" className="btn" onClick={() => setImportando(true)} style={{ minHeight: 44 }}>
-          <Upload size={16} aria-hidden="true" /> Importar movimientos
-        </button>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button type="button" className="btn" onClick={() => setVerCategorias(true)} style={{ minHeight: 44 }}>
+            <Tags size={16} aria-hidden="true" /> Categorías
+          </button>
+          <button type="button" className="btn" onClick={() => setVerArchivos(true)} style={{ minHeight: 44 }}>
+            <FolderOpen size={16} aria-hidden="true" /> Archivos
+          </button>
+          <button type="button" className="btn" onClick={() => setImportando(true)} style={{ minHeight: 44 }}>
+            <Upload size={16} aria-hidden="true" /> Importar movimientos
+          </button>
+        </div>
       </div>
 
       {error && <div className="mod-aviso" role="alert">{error}</div>}
@@ -49,6 +61,8 @@ const PlatitaView = ({ tarjeteando }) => {
         </>
       )}
 
+      <GestionCategorias abierta={verCategorias} tipo="ingreso" todas={cats} onCerrar={() => setVerCategorias(false)} onCambio={async () => { await recargarCats(); await recargar(); }} />
+      <ArchivosImportados abierta={verArchivos} onCerrar={() => setVerArchivos(false)} onCambio={async () => { await recargarCats(); await recargar(); }} />
       <ImportarCuentas abierta={importando} onCerrar={() => setImportando(false)} onImportado={recargar} />
       <EditarMov mov={editando} cats={cats} compras={compras} onCerrar={() => setEditando(null)} onGuardado={recargar} />
     </section>

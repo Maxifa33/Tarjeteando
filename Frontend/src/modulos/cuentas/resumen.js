@@ -61,7 +61,7 @@ export function resumenBilletera(movs = []) {
     lista: confirmados,
     apartado: reservado('apartado'),
     ahorrado: reservado('ahorro'),
-    pagosTarjeta: sumar(pesos.filter((m) => m.tipo === 'pago_tarjeta'))
+    pagosTarjeta: neto(pesos.filter((m) => m.tipo === 'pago_tarjeta' && m.estado !== 'revisar'), 'salida')
   };
 }
 
