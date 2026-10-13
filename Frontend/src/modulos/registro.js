@@ -39,7 +39,7 @@ export const MODULOS = [
     corto: 'Compart.',
     descripcion: 'Gastos divididos: viajes, la casa, el trabajo.',
     icono: 'Users',
-    estado: 'proximamente',
+    estado: 'beta',
     promesa: [
       'Grupos con 2 o más personas, cada gasto dividido como quieras.',
       'Quién le debe a quién, con la menor cantidad de transferencias.'

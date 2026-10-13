@@ -193,6 +193,13 @@ Capa opcional de módulos dentro de Tarjeteando: **Platita** (ingresos), **Bille
 - `modulos/alcancia/alcancia.js` (puro, tests): estadoMeta (juntado = inicial + aportes + neto reserva; porMes desde el saldo al empezar el mes; ritmo sobre meses cerrados desde que existe), planMetas, valuar (bonos ÷100; dólares: capital en pesos, precio compra de la casa; plazo fijo interés simple con tope al plazo), totalCartera, parseCantidad (sin redondeo; "10.000" = miles salvo cripto).
 - UI `ui/alcancia/AlcanciaView.jsx` (pestañas Metas/Inversiones) + `HojasMeta.jsx` + `HojasInversion.jsx`. Capacidad = promedio teQueda de meses completos (mismo criterio en Saldar). Marcar lograda congela lo juntado y desvincula la reserva.
 
+### Paso 5 — Compartidos (rama `feat/modulos-paso-5`)
+- Tablas `grupos` (grupo|persona, token_publico), `participantes` (es_yo único por grupo; unique(grupo_id,id)), `gastos_compartidos` (division iguales|montos|porcentajes|partes, partes jsonb [{p,valor,monto}], movimiento_id o tarjeta jsonb), `pagos_compartidos` (movimiento_id único, previo jsonb). FKs compuestas (grupo_id, participante) y WITH CHECK de grupo propio. `movimientos.compartido_descartado`.
+- Contabilidad en base caja (igual que Recupero): el gasto compartido cuenta entero donde se pagó; cuando te transfieren y confirmás, el movimiento pasa a `recupero` (si todo el grupo salió de tarjeta, con `vinculo_tarjeta` a la última compra).
+- RPCs: `economics_crear_grupo` (transaccional), `economics_confirmar_pago_compartido` (foto previa + pago + cambio del movimiento, todo o nada), `economics_grupo_publico(token)` (security definer, anon: sin ids de movimientos ni notas). Trigger BEFORE DELETE en pagos_compartidos restaura `previo` (también en cascada al borrar grupo).
+- Puro `modulos/compartidos/compartidos.js` (centavos enteros; tests): repartir, saldos, simplificar (mínimas transferencias), sugerirPagos (nombre por palabras sin puntuación; tope por saldos), totales.
+- UI `ui/compartidos/CompartidosView.jsx` + `HojasGrupo.jsx`. Vista pública: página aparte `compartido.html` + `src/modulos/compartidos/publico.jsx` (multi-page en vite.config.js; Vercel sirve el archivo antes del rewrite). No toca Tarjeteando.
+
 ---
 
 ## Cambios recientes (27/09/2026) — Rediseño B+C (fases 0 a 7)

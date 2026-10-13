@@ -10,9 +10,28 @@
  * 'novedades_version_vista'); la Guía está siempre disponible en el menú.
  */
 
-export const APP_VERSION = '2026.10.5';
+export const APP_VERSION = '2026.10.6';
 
 export const NOVEDADES = [
+  {
+    version: '2026.10.6',
+    fecha: 'octubre 2026',
+    titulo: 'Compartidos: dividí gastos',
+    puntos: [
+      {
+        titulo: 'Grupos y 1 a 1',
+        texto: 'Un viaje, la casa o lo que te debe alguien. Dividí en partes iguales, por montos, por porcentaje o por partes, y mirá quién le paga a quién para quedar a mano.'
+      },
+      {
+        titulo: 'Desde tus gastos y tarjetas',
+        texto: 'Elegí un gasto de tus cuentas o una compra de Tarjeteando y compartilo. Cuando te transfieren, Compartidos lo reconoce: lo confirmás y queda como Recupero.'
+      },
+      {
+        titulo: 'Que lo vean',
+        texto: 'Creá un link de solo lectura para que el grupo vea gastos y saldos sin cuenta. Lo podés apagar cuando quieras.'
+      }
+    ]
+  },
   {
     version: '2026.10.5',
     fecha: 'octubre 2026',
@@ -196,6 +215,8 @@ export const GUIA = [
       'Saldar compara dos planes con el monto que podés poner por mes: Avalancha (menos intereses) y Bola de nieve (cerrás deudas antes). Las deudas en dólares no entran en el plan.',
       'Alcancía → Metas: Nueva meta con monto y, si querés, fecha y una reserva de Mercado Pago. Tocá la meta para sumar o sacar plata a mano, editarla o marcarla lograda (eso libera la reserva para la próxima).',
       'Alcancía → Inversiones: elegí el tipo, buscá el ticker o el fondo y poné la cantidad (los bonos van en valor nominal). Se valúan con el cierre de cada noche; los plazos fijos se estiman con la TNA.',
+      'Compartidos: Nuevo → Grupo o Con una persona. Poné nombre y apellido de cada uno (así se reconocen sus transferencias). Adentro: Gasto (a mano o elegido de tus gastos/tarjetas), Registrar pago, Para quedar a mano y el link de solo lectura.',
+      'Compartidos: cuando alguien te transfiere, aparece en Posibles pagos. Confirmar lo descuenta de su deuda y lo pasa a Recupero; borrar ese pago lo deja como estaba.',
       'Presupuestos: Te queda = Ingresos − Tarjetas (lo que vence ese mes) − Gastos sin tarjeta + Recuperos de compras con tarjeta. Libre = Te queda − reservas. Los movimientos a revisar no entran hasta que los confirmes.',
       'Recupero: plata que te devuelven de un gasto tuyo (asado dividido, una compra que hiciste por alguien). Podés vincularlo a la compra con tarjeta y marcar "Siempre que esta persona me transfiera" para que las próximas entren solas.'
     ]
