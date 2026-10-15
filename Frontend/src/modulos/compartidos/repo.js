@@ -56,6 +56,16 @@ export const borrarPago = (pago) => supabase.from('pagos_compartidos').delete().
  */
 export const confirmarPagoDeMovimiento = (s) => supabase.rpc('economics_confirmar_pago_compartido', { p_mov: s.mov.id, p_grupo: s.grupo.id, p_de: s.de, p_a: s.a }).then(chk);
 
+/** Recuperos que marcaste "es de un gasto compartido" y todavía no asignaste a un grupo. */
+export const recuperosPendientes = () => paginar(() => supabase.from('movimientos').select(MOV)
+  .eq('compartido_pendiente', true).eq('tipo', 'recupero').order('fecha', { ascending: false }).order('id'));
+
+/** Asignar un recupero pendiente a un grupo: queda como pago de esa persona a vos (función en la base, todo o nada). */
+export const asignarRecupero = (movId, grupoId, deId) => supabase.rpc('economics_asignar_recupero_compartido', { p_mov: movId, p_grupo: grupoId, p_de: deId }).then(chk);
+
+/** Sacarlo de la lista sin asignarlo (no era de un compartido). */
+export const quitarDePendientes = (id) => supabase.from('movimientos').update({ compartido_pendiente: false }).eq('id', id).then(chk);
+
 export const descartarMovimiento = (id) => supabase.from('movimientos').update({ compartido_descartado: true }).eq('id', id).then(chk);
 
 const MOV = 'id, fecha, monto, moneda, direccion, tipo, estado, descripcion, contraparte, categoria_id, vinculo_tarjeta, deuda_id, compartido_descartado, cuentas(nombre)';

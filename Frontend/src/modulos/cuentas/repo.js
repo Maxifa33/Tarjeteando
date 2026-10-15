@@ -108,7 +108,7 @@ export async function guardarArchivo(archivo, { tiposBolsillo = {}, titular = nu
   return { cuentaId, guardados: filas.length };
 }
 
-const SELECT_MOV = 'id, fecha, monto, moneda, direccion, tipo, modulo, estado, descripcion, descripcion_original, contraparte, naturaleza, cuenta_en_presupuesto, categoria_id, bolsillo_id, cuenta_id, origen, vinculo_tarjeta, recupero_pago, deuda_id, categorias!movimientos_categoria_id_fkey(nombre), bolsillos(nombre, tipo), cuentas(nombre, institucion)';
+const SELECT_MOV = 'id, fecha, monto, moneda, direccion, tipo, modulo, estado, descripcion, descripcion_original, contraparte, naturaleza, cuenta_en_presupuesto, categoria_id, bolsillo_id, cuenta_id, origen, vinculo_tarjeta, recupero_pago, compartido_pendiente, deuda_id, categorias!movimientos_categoria_id_fkey(nombre), bolsillos(nombre, tipo), cuentas(nombre, institucion)';
 
 export async function movimientosEntre(desde, hasta) {
   const out = [];

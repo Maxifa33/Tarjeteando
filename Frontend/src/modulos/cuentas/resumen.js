@@ -47,9 +47,11 @@ export function resumenBilletera(movs = []) {
   const recuperos = pesos.filter((m) => m.tipo === 'recupero' && m.estado !== 'revisar');
   // Si no recordás cómo pagaste el gasto, no se descuenta de Billetera (podría haber sido con tarjeta):
   // va aparte y Presupuestos lo suma igual a lo que te queda.
-  const recNoSe = recuperos.filter((m) => m.recupero_pago === 'no_se' && !m.vinculo_tarjeta);
-  const recSinTarjeta = recuperos.filter((m) => !m.vinculo_tarjeta && m.recupero_pago !== 'no_se');
-  const recTarjeta = recuperos.filter((m) => m.vinculo_tarjeta);
+  // Con tarjeta = vinculado a una compra o marcado "con tarjeta" aunque la compra todavía no esté en un resumen.
+  const esTarjeta = (m) => !!m.vinculo_tarjeta || m.recupero_pago === 'tarjeta';
+  const recNoSe = recuperos.filter((m) => !esTarjeta(m) && m.recupero_pago === 'no_se');
+  const recSinTarjeta = recuperos.filter((m) => !esTarjeta(m) && m.recupero_pago !== 'no_se');
+  const recTarjeta = recuperos.filter(esTarjeta);
   const reservas = pesos.filter((m) => m.tipo === 'reserva');
   const reservado = (tipo) => r2(reservas.filter((m) => (m.bolsillo?.tipo || 'apartado') === tipo)
     .reduce((s, m) => s + (m.direccion === 'salida' ? m.monto : -m.monto), 0));

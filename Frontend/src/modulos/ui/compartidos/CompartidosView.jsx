@@ -5,7 +5,7 @@ import { pesos } from '../../../ui/formato.js';
 import { comprasDeTarjeta } from '../../puente/tarjeteando.js';
 import { resumenGrupo, sugerirPagos, totales } from '../../compartidos/compartidos.js';
 import {
-  cargarTodo, transferenciasDesde, gastosRecientes, confirmarPagoDeMovimiento, descartarMovimiento,
+  cargarTodo, transferenciasDesde, gastosRecientes, confirmarPagoDeMovimiento, descartarMovimiento, recuperosPendientes, asignarRecupero, quitarDePendientes,
   borrarPago, borrarGrupo, actualizarGrupo, cambiarLink, agregarParticipante, quitarParticipante
 } from '../../compartidos/repo.js';
 import { hoyISO, plata, fechaDM } from '../deudas/HojasDeuda.jsx';
@@ -153,6 +153,8 @@ const CompartidosView = ({ tarjeteando }) => {
   const [datos, setDatos] = useState(null);
   const [trans, setTrans] = useState([]);
   const [recientes, setRecientes] = useState([]);
+  const [pendientes, setPendientes] = useState([]);
+  const [asignar, setAsignar] = useState({}); // movId → { grupo, de }
   const [error, setError] = useState(null);
   const [nuevoGrupo, setNuevoGrupo] = useState(false);
   const [detalleId, setDetalleId] = useState(null);
@@ -166,9 +168,9 @@ const CompartidosView = ({ tarjeteando }) => {
     const id = ++pedido.current; setError(null);
     try {
       // Los grupos son lo principal: si fallan las sugerencias, igual se muestran.
-      const [d, t, g] = await Promise.all([cargarTodo(), transferenciasDesde(menosDias(120)).catch(() => []), gastosRecientes(menosDias(90)).catch(() => [])]);
+      const [d, t, g, pe] = await Promise.all([cargarTodo(), transferenciasDesde(menosDias(120)).catch(() => []), gastosRecientes(menosDias(90)).catch(() => []), recuperosPendientes().catch(() => [])]);
       if (id !== pedido.current) return;
-      setDatos(d); setTrans(t); setRecientes(g);
+      setDatos(d); setTrans(t); setRecientes(g); setPendientes(pe);
     } catch { if (id === pedido.current) { setError('No se pudieron leer tus compartidos. Revisá tu conexión.'); setDatos((x) => x || { grupos: [], participantes: [], gastos: [], pagos: [] }); } }
   }, []);
   useEffect(() => { cargar(); }, [cargar]);
@@ -228,6 +230,49 @@ const CompartidosView = ({ tarjeteando }) => {
         <button type="button" className="btn btn-pri" onClick={() => setNuevoGrupo(true)} style={{ minHeight: 44, borderRadius: 22, padding: '0 18px' }}><Plus size={16} aria-hidden="true" /> Nuevo</button>
       </div>
       {error && <div className="mod-aviso" role="alert">{error}</div>}
+
+      {pendientes.length > 0 && (
+        <section aria-labelledby="com-asignar" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <h2 id="com-asignar" className="h3" style={{ margin: 0 }}>Recuperos para asignar ({pendientes.length})</h2>
+          <p style={{ margin: 0, fontSize: 13, color: 'var(--label2)' }}>Los marcaste como "de un gasto compartido". Elegí el grupo y quién te pagó: se descuenta de lo que te debe.</p>
+          <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {pendientes.map((m) => {
+              const sel = asignar[m.id] || {};
+              const grupos = activos.filter((r) => r.yo);
+              const r = grupos.find((x) => x.grupo.id === sel.grupo) || (grupos.length === 1 ? grupos[0] : null);
+              const otros = r ? r.participantes.filter((p) => !p.es_yo) : [];
+              const de = sel.de || (otros.length === 1 ? otros[0].id : '');
+              const set = (cambio) => setAsignar((a) => ({ ...a, [m.id]: { ...sel, ...cambio } }));
+              const ocup = ocupado === m.id;
+              return (
+                <li key={m.id} style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 12px', borderRadius: 16, background: 'var(--fill2)' }}>
+                  <span style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                    <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      <span style={{ fontSize: 15, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.descripcion}</span>
+                      <span style={{ fontSize: 13, color: 'var(--label2)' }}>{fechaDM(m.fecha)}{m.contraparte ? ` · ${m.contraparte}` : ''}</span>
+                    </span>
+                    <span className="mod-cifra" style={{ fontSize: 15, fontWeight: 600 }}>{$(m.monto)}</span>
+                  </span>
+                  {grupos.length ? (
+                    <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                      <select className="mod-select" aria-label="Grupo" value={r?.grupo.id || ''} onChange={(e) => set({ grupo: e.target.value, de: '' })}>
+                        <option value="" disabled>Grupo…</option>
+                        {grupos.map((x) => <option key={x.grupo.id} value={x.grupo.id}>{x.grupo.nombre}</option>)}
+                      </select>
+                      <select className="mod-select" aria-label="Quién te pagó" value={de} disabled={!r} onChange={(e) => set({ grupo: r?.grupo.id, de: e.target.value })}>
+                        <option value="" disabled>¿Quién te pagó?</option>
+                        {otros.map((p) => <option key={p.id} value={p.id}>{p.nombre}{(r.saldos.get(p.id) || 0) < 0 ? ` (debe ${$(-(r.saldos.get(p.id)))})` : ''}</option>)}
+                      </select>
+                      <button type="button" className="btn" disabled={ocup} onClick={() => accion({ mov: m }, () => quitarDePendientes(m.id))} style={{ minHeight: 44 }}>No era compartido</button>
+                      <button type="button" className="btn btn-pri" disabled={ocup || !r || !de} onClick={() => accion({ mov: m }, () => asignarRecupero(m.id, r.grupo.id, de))} style={{ minHeight: 44, borderRadius: 22, padding: '0 16px' }}>Asignar</button>
+                    </span>
+                  ) : <span style={{ fontSize: 13, color: 'var(--label2)' }}>Creá un grupo o un 1 a 1 para asignarlo.</span>}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
 
       {sugerencias.length > 0 && (
         <section aria-labelledby="com-pagos" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

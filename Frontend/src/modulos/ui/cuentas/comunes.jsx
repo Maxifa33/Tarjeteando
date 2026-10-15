@@ -112,7 +112,7 @@ export const FilaMov = ({ m, onAbrir }) => {
         <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
           <span style={{ fontSize: 15, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.descripcion}</span>
           <span style={{ fontSize: 13, color: 'var(--label2)' }}>
-            {diaCorto(m.fecha)} · {m.tipo === 'recupero' ? `Recupero${m.vinculo_tarjeta ? ' · tarjeta' : m.recupero_pago === 'no_se' ? ' · sin saber cómo se pagó' : m.categoria ? ` · ${m.categoria}` : ''}` : (m.categoria || (m.tipo === 'transferencia_interna' ? 'Entre mis cuentas' : m.tipo === 'reserva' ? 'Reserva' : 'Sin categoría'))} · {m.cuenta?.nombre || ''}
+            {diaCorto(m.fecha)} · {m.tipo === 'recupero' ? `Recupero${m.compartido_pendiente ? ' · compartido sin asignar' : ''}${m.vinculo_tarjeta || m.recupero_pago === 'tarjeta' ? ' · tarjeta' : m.recupero_pago === 'no_se' ? ' · sin saber cómo se pagó' : m.categoria ? ` · ${m.categoria}` : ''}` : (m.categoria || (m.tipo === 'transferencia_interna' ? 'Entre mis cuentas' : m.tipo === 'reserva' ? 'Reserva' : 'Sin categoría'))} · {m.cuenta?.nombre || ''}
           </span>
         </span>
         {m.estado === 'revisar' && <span className="mod-chip">Revisar</span>}
@@ -193,9 +193,10 @@ export const EditarMov = ({ mov, cats, compras = [], onCerrar, onGuardado, onCat
   const [catId, setCatId] = useState(mov?.categoria_id || '');
   const [naturaleza, setNaturaleza] = useState(mov?.naturaleza || 'activo');
   // Cómo se pagó el gasto que te devuelven: 'con' (tarjeta) | 'sin' | 'nose'.
-  const pagoDe = (m) => (m?.vinculo_tarjeta ? 'con' : m?.recupero_pago === 'no_se' ? 'nose' : 'sin');
+  const pagoDe = (m) => (m?.vinculo_tarjeta || m?.recupero_pago === 'tarjeta' ? 'con' : m?.recupero_pago === 'no_se' ? 'nose' : 'sin');
   const [pago, setPago] = useState(pagoDe(mov));
   const conTarjeta = pago === 'con';
+  const [compartido, setCompartido] = useState(!!mov?.compartido_pendiente);
   const [compra, setCompra] = useState(null);
   const [alcance, setAlcance] = useState('total');
   const [cuotaNro, setCuotaNro] = useState(1);
@@ -206,7 +207,7 @@ export const EditarMov = ({ mov, cats, compras = [], onCerrar, onGuardado, onCat
   const [creadas, setCreadas] = useState([]); // recién creadas, hasta que vuelvan las categorías
   useEffect(() => {
     setTipo(mov?.tipo); setCatId(mov?.categoria_id || ''); setNaturaleza(mov?.naturaleza || 'activo');
-    setPago(pagoDe(mov)); setSiempre(false); setError(null); setNueva(null);
+    setPago(pagoDe(mov)); setSiempre(false); setError(null); setNueva(null); setCompartido(!!mov?.compartido_pendiente);
     const v = mov?.vinculo_tarjeta;
     setCompra(v ? compras.find((c) => c.clave === v.clave) || { ...v, id: v.mov_id, monto: v.monto_compra, cuotas: v.cuotas || null } : null);
     setAlcance(v?.alcance || 'total'); setCuotaNro(v?.cuota_numero || 1);
@@ -239,7 +240,6 @@ export const EditarMov = ({ mov, cats, compras = [], onCerrar, onGuardado, onCat
   };
 
   const guardar = async () => {
-    if (tipo === 'recupero' && conTarjeta && !compra) { setError('Elegí la compra con tarjeta, o marcá otra opción.'); return; }
     setGuardando(true); setError(null);
     const cambios = { estado: 'confirmado' };
     if (editable) {
@@ -249,6 +249,7 @@ export const EditarMov = ({ mov, cats, compras = [], onCerrar, onGuardado, onCat
       cambios.categoria_id = tipo === 'transferencia_interna' || (tipo === 'recupero' && conTarjeta) ? null : (catId || null);
       cambios.naturaleza = tipo === 'ingreso' ? naturaleza : null;
       cambios.recupero_pago = tipo === 'recupero' ? ({ con: 'tarjeta', sin: 'sin_tarjeta', nose: 'no_se' }[pago]) : null;
+      cambios.compartido_pendiente = tipo === 'recupero' && compartido;
       cambios.vinculo_tarjeta = tipo === 'recupero' && conTarjeta && compra ? {
         clave: compra.clave, mov_id: compra.id, tarjeta: compra.tarjeta, descripcion: compra.descripcion, fecha: compra.fecha,
         moneda: compra.moneda, monto_compra: compra.cuotas ? compra.cuotas.total_compra : compra.monto,
@@ -317,11 +318,26 @@ export const EditarMov = ({ mov, cats, compras = [], onCerrar, onGuardado, onCat
                     </button>
                   ))}
                 </div>
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, minHeight: 44, fontSize: 14 }}>
+                  <input type="checkbox" checked={compartido} onChange={(e) => setCompartido(e.target.checked)} style={{ width: 20, height: 20, marginTop: 1, flexShrink: 0 }} />
+                  <span>Es de un gasto compartido <span style={{ color: 'var(--label2)' }}>— queda en Compartidos → "Recuperos para asignar" para elegir el grupo y quién te pagó.</span></span>
+                </label>
                 {pago === 'nose' && <p style={{ margin: 0, fontSize: 13, color: 'var(--label2)' }}>No se descuenta de Billetera (pudo ser con tarjeta). En Presupuestos suma igual a lo que te queda.</p>}
                 {conTarjeta && (
-                  compras.length
-                    ? <ElegirCompra compras={compras} monto={mov.monto} elegida={compra} onElegir={elegirCompra} />
-                    : <p style={{ margin: 0, fontSize: 14, color: 'var(--label2)' }}>No hay compras de Tarjeteando en este dispositivo. Importá tus resúmenes acá para vincularlo.</p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <p style={{ margin: 0, fontSize: 13, color: 'var(--label2)' }}>
+                      Vincular a la compra es opcional: si todavía no está en un resumen (ciclo abierto), guardalo igual y vinculalo más adelante.
+                    </p>
+                    {compra && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 14 }}>Vinculado a <strong>{compra.descripcion}</strong>{compra.tarjeta ? ` · ${compra.tarjeta}` : ''}</span>
+                        <button type="button" className="btn" onClick={() => setCompra(null)} style={{ minHeight: 44 }}>Quitar vínculo</button>
+                      </div>
+                    )}
+                    {compras.length
+                      ? <ElegirCompra compras={compras} monto={mov.monto} elegida={compra} onElegir={elegirCompra} />
+                      : <p style={{ margin: 0, fontSize: 14, color: 'var(--label2)' }}>No hay compras de Tarjeteando en este dispositivo para vincular.</p>}
+                  </div>
                 )}
                 {conTarjeta && compra?.cuotas && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

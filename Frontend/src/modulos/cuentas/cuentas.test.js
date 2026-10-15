@@ -275,3 +275,12 @@ test('recupero "no recuerdo cómo lo pagué": no resta en Billetera, suma en Pre
   assert.equal(p.teQueda, 44000); // 50000 − 9000 + 3000
   assert.equal(p.recuperosNoSe, 3000);
 });
+
+test('recupero "con tarjeta" sin compra vinculada cuenta como de tarjeta', async () => {
+  const { resumenBilletera } = await import('./resumen.js');
+  const b = resumenBilletera([
+    { tipo: 'gasto', direccion: 'salida', monto: 10000, moneda: 'ARS', estado: 'confirmado' },
+    { tipo: 'recupero', direccion: 'entrada', monto: 2000, moneda: 'ARS', estado: 'confirmado', recupero_pago: 'tarjeta' }
+  ]);
+  assert.deepEqual([b.total, b.recuperadoTarjeta, b.recuperadoNoSe], [10000, 2000, 0]);
+});
