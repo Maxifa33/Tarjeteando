@@ -10,9 +10,20 @@
  * 'novedades_version_vista'); la Guía está siempre disponible en el menú.
  */
 
-export const APP_VERSION = '2026.10.6';
+export const APP_VERSION = '2026.10.7';
 
 export const NOVEDADES = [
+  {
+    version: '2026.10.7',
+    fecha: 'octubre 2026',
+    titulo: 'Un solo Importar para todo',
+    puntos: [
+      {
+        titulo: 'Tarjetas y cuentas, en el mismo lugar',
+        texto: 'Arrastrá resúmenes de tarjeta, últimos consumos o extractos de Galicia y Mercado Pago al mismo Importar. La app reconoce cada uno: los de cuenta van a Platita y Billetera, que se activan solos.'
+      }
+    ]
+  },
   {
     version: '2026.10.6',
     fecha: 'octubre 2026',

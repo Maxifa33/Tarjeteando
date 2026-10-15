@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+// Importador de extractos de cuenta (módulos): se carga solo si subís uno desde Importar.
+const ImportarCuentasDiferido = React.lazy(() => import('./modulos/ui/cuentas/ImportarCuentas.jsx'));
 import storage from './services/storage';
 import { APP_VERSION } from './novedades';
 import { parseUltimosConsumos, leerHojas, EXTENSIONES_CONSUMOS } from './services/consumos/index.js';
@@ -1430,6 +1432,8 @@ const App = () => {
               onResponderPregunta={responderPreguntaFijo}
               cantidadConsumosLive={consumosLive.length}
               onBorrarConsumosLive={() => handleDeleteConsumosLive()}
+              modulos={modulos}
+              onIrAModulos={() => setActiveView('modulos')}
             />
           ) : activeView === 'modulos' ? (
             <GestorModulos modulos={modulos} />
@@ -1763,8 +1767,10 @@ const describirGrupo = (g, alias) => {
  * últimos consumos (Excel / CSV → se leen en el navegador). Reconoce cuál es
  * cuál por el tipo de archivo y, dentro de los Excel, por su formato.
  */
-const ImportarView = ({ onSuccess, preguntasFijos = [], onResponderPregunta, cantidadConsumosLive = 0, onBorrarConsumosLive }) => {
+const ImportarView = ({ onSuccess, preguntasFijos = [], onResponderPregunta, cantidadConsumosLive = 0, onBorrarConsumosLive, modulos = null, onIrAModulos }) => {
   const [uploading, setUploading] = useState(false);
+  const [cuentas, setCuentas] = useState(null); // extractos de cuenta → importador de Platita/Billetera
+  const [cuentasSinSesion, setCuentasSinSesion] = useState(0);
   const [confirmarBorrado, setConfirmarBorrado] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [results, setResults] = useState([]);
@@ -1892,14 +1898,34 @@ const ImportarView = ({ onSuccess, preguntasFijos = [], onResponderPregunta, can
     onSuccess?.();
   };
 
+  // Extractos de cuenta (Galicia, Mercado Pago) no son de tarjeta: van a Platita/Billetera.
+  // Se detectan por contenido, con el lector de los módulos (carga diferida).
+  const esExtractoDeCuenta = async (f) => {
+    if (!/\.(pdf|xlsx|xls|csv)$/i.test(f.name)) return false;
+    try {
+      const [{ leerArchivo }, { interpretar }] = await Promise.all([import('./modulos/cuentas/leer.js'), import('./modulos/cuentas/detectar.js')]);
+      const r = interpretar(await leerArchivo(f));
+      return !!r?.ok && ['galicia', 'mercadopago'].includes(r.origen);
+    } catch { return false; }
+  };
+
   const handleUpload = async (fileList) => {
-    const files = Array.from(fileList || []);
-    if (!files.length) return;
+    const todos = Array.from(fileList || []);
+    if (!todos.length) return;
     setUploading(true);
     setResults([]);
+    setCuentasSinSesion(0);
+    const out = [];
+    const files = [];
+    const deCuenta = [];
+    for (const f of todos) (await esExtractoDeCuenta(f) ? deCuenta : files).push(f);
+    if (deCuenta.length) {
+      // Un solo botón para todo: los extractos de cuenta siguen en el importador de los módulos.
+      if (modulos?.sesion) setCuentas(deCuenta);
+      else setCuentasSinSesion(deCuenta.length);
+    }
     const planillas = files.filter(f => EXTENSIONES_CONSUMOS.test(f.name));
     const resumenesArch = files.filter(f => !EXTENSIONES_CONSUMOS.test(f.name));
-    const out = [];
     if (resumenesArch.length) out.push(...await subirResumenes(resumenesArch));
     for (const f of planillas) {
       try {
@@ -1940,10 +1966,10 @@ const ImportarView = ({ onSuccess, preguntasFijos = [], onResponderPregunta, can
           <>
             <Upload className="w-16 h-16 mx-auto mb-4 text-[var(--r2)] opacity-70" />
             <p className="text-lg font-medium text-[var(--label)] mb-2">
-              Arrastrá resúmenes o últimos consumos
+              Arrastrá resúmenes, últimos consumos o extractos de cuenta
             </p>
             <p className="text-sm text-[var(--label2)]">
-              Resúmenes: PDF o capturas · Últimos consumos: Excel (.xlsx, .xls) o CSV
+              Tarjetas: PDF, capturas, Excel o CSV · Cuentas: Galicia (Excel/CSV) y Mercado Pago (PDF/Excel)
             </p>
             <p className="text-xs text-[var(--label2)] mt-1">La app reconoce cuál es cuál. Podés subir varios juntos.</p>
           </>
@@ -1984,6 +2010,26 @@ const ImportarView = ({ onSuccess, preguntasFijos = [], onResponderPregunta, can
         </div>
       )}
 
+      {cuentasSinSesion > 0 && (
+        <div className="glass-card p-4 mt-6 flex flex-wrap items-center gap-3 border-l-4 border-l-amber-400">
+          <AlertCircle className="w-5 h-5 text-[var(--warn)]" />
+          <p className="flex-1 min-w-[200px] text-sm text-[var(--label)]">
+            {cuentasSinSesion === 1 ? 'Ese archivo es un extracto de cuenta' : `${cuentasSinSesion} archivos son extractos de cuenta`} (Galicia o Mercado Pago). Van a Platita y Billetera, que necesitan que entres con tu email.
+          </p>
+          {onIrAModulos && <button type="button" className="btn btn-pri" onClick={onIrAModulos} style={{ minHeight: 44, borderRadius: 22, padding: '0 18px' }}>Entrar</button>}
+        </div>
+      )}
+
+      {cuentas && (
+        <React.Suspense fallback={null}>
+          <ImportarCuentasDiferido abierta archivosIniciales={cuentas} onCerrar={() => setCuentas(null)}
+            onImportado={() => {
+              // Lo importado se ve en Platita (ingresos) y Billetera (gastos): se activan si no lo estaban.
+              ['platita', 'billetera'].forEach((id) => { if (!modulos?.estado?.[id]?.activo) modulos?.activar?.(id); });
+            }} />
+        </React.Suspense>
+      )}
+
       {/* Results */}
       {results.length > 0 && (
         <div className="mt-6 space-y-3">
@@ -2000,7 +2046,7 @@ const ImportarView = ({ onSuccess, preguntasFijos = [], onResponderPregunta, can
               <div className="flex-1 min-w-0">
                 <p className="font-medium text-[var(--label)] truncate">{r.archivo}</p>
                 <p className="text-[10px] uppercase tracking-widest text-[var(--label2)] mt-0.5">
-                  {r.tipo === 'consumos' ? 'Últimos consumos' : 'Resumen'}
+                  {r.tipo === 'consumos' ? 'Últimos consumos' : r.tipo === 'cuenta' ? 'Extracto de cuenta' : 'Resumen'}
                 </p>
                 {r.error && <p className="text-sm text-[var(--danger)]">{r.error}</p>}
                 {r.movimientos && (
@@ -2048,7 +2094,7 @@ const CSVColumnMapper = ({ headers, preview, onConfirm, onCancel }) => {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="glass-card p-6 max-w-lg w-full max-h-[80vh] overflow-y-auto">
+      <div role="dialog" aria-modal="true" aria-label="Mapear columnas" className="glass-card vidrio-solido p-6 max-w-lg w-full max-h-[80vh] overflow-y-auto" style={{ boxShadow: '0 24px 60px rgba(0,0,0,.45)' }}>
         <h3 className="text-lg font-semibold text-[var(--label)] mb-1">Mapear columnas</h3>
         <p className="text-sm text-[var(--label2)] mb-4">
           No reconocimos el formato. Indicá qué columna es cada campo.

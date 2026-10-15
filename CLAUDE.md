@@ -200,6 +200,10 @@ Capa opcional de módulos dentro de Tarjeteando: **Platita** (ingresos), **Bille
 - Puro `modulos/compartidos/compartidos.js` (centavos enteros; tests): repartir, saldos, simplificar (mínimas transferencias), sugerirPagos (nombre por palabras sin puntuación; tope por saldos), totales.
 - UI `ui/compartidos/CompartidosView.jsx` + `HojasGrupo.jsx`. Vista pública: página aparte `compartido.html` + `src/modulos/compartidos/publico.jsx` (multi-page en vite.config.js; Vercel sirve el archivo antes del rewrite). No toca Tarjeteando.
 
+### Importar unificado (2026-10-15)
+- El Importar de Tarjeteando (App.jsx → ImportarView) detecta por contenido los extractos de cuenta (`interpretar` de modulos/cuentas, carga diferida) y los abre en `ImportarCuentas` con `archivosIniciales`; activa Platita y Billetera si no lo estaban. Sin sesión, muestra un aviso con "Entrar". Las tarjetas siguen su camino de siempre.
+- "Mapear columnas" con fondo sólido (`vidrio-solido`).
+
 ---
 
 ## Cambios recientes (27/09/2026) — Rediseño B+C (fases 0 a 7)

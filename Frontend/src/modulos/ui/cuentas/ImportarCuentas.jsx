@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Upload, FileText, CheckCircle, AlertCircle, Info } from 'lucide-react';
 import Hoja from '../../../ui/Hoja.jsx';
 import Seg from '../../../ui/Seg.jsx';
@@ -16,7 +16,11 @@ const fechaCorta = (iso) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso
  * Importar extractos de cuenta (Galicia, Mercado Pago u otra planilla): PDF, Excel o CSV.
  * 1) elegir archivos → 2) revisar lo que se va a cargar → 3) guardar. Nada se guarda sin confirmar.
  */
-const ImportarCuentas = ({ abierta, onCerrar, onImportado }) => {
+/**
+ * `archivosIniciales`: archivos que llegaron desde otro lado (el Importar general de Tarjeteando);
+ * al abrirse con ellos, se leen directo sin pasar por "elegir".
+ */
+const ImportarCuentas = ({ abierta, onCerrar, onImportado, archivosIniciales = null }) => {
   const [fase, setFase] = useState('elegir'); // elegir | leyendo | revision | guardando | listo
   const [plan, setPlan] = useState(null);
   const [ctx, setCtx] = useState(null);
@@ -29,6 +33,7 @@ const ImportarCuentas = ({ abierta, onCerrar, onImportado }) => {
 
   const reiniciar = () => { setFase('elegir'); setPlan(null); setError(null); setTipos({}); setGuardados(0); setNombres({}); };
   const cerrar = () => { reiniciar(); onCerrar(); };
+  const iniciales = useRef(null);
 
   const procesar = async (files) => {
     const lista = [...(files || [])];
@@ -78,6 +83,14 @@ const ImportarCuentas = ({ abierta, onCerrar, onImportado }) => {
       setFase('revision');
     }
   };
+
+  // Una sola vez por tanda de archivos recibida (no se vuelven a leer en cada render).
+  useEffect(() => {
+    if (abierta && archivosIniciales?.length && iniciales.current !== archivosIniciales) {
+      iniciales.current = archivosIniciales;
+      procesar(archivosIniciales);
+    }
+  }, [abierta, archivosIniciales]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <Hoja abierta={abierta} onCerrar={cerrar} titulo="Importar movimientos de cuenta">
