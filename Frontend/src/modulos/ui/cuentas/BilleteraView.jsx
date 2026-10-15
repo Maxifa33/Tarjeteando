@@ -82,10 +82,10 @@ const BilleteraView = ({ tarjeteando }) => {
             <Cifra label="Gastos sin tarjeta" valor={pesos(r.total)} fuerte />
             <Cifra label="Apartado en reservas" valor={pesos(r.apartado)} nota="Separado para gastos que vienen" />
             <Cifra label="Ahorrado" valor={pesos(r.ahorrado)} nota="Fondos como Emergencia" />
-            {r.recuperado > 0 && <Cifra label="Recuperado" valor={pesos(r.recuperado)} nota={r.recuperadoTarjeta ? `${pesos(r.recuperadoTarjeta)} de compras con tarjeta` : 'Plata que te devolvieron'} />}
+            {r.recuperado > 0 && <Cifra label="Recuperado" valor={pesos(r.recuperado)} nota={[r.recuperadoTarjeta ? `${pesos(r.recuperadoTarjeta)} de compras con tarjeta` : null, r.recuperadoNoSe ? `${pesos(r.recuperadoNoSe)} sin saber cómo se pagó` : null].filter(Boolean).join(' · ') || 'Plata que te devolvieron'} />}
           </div>
-          {r.recuperado - r.recuperadoTarjeta > 0 && (
-            <p style={{ margin: 0, fontSize: 13, color: 'var(--label2)' }}>Gastaste {pesos(r.bruto)} y te devolvieron {pesos(r.recuperado - r.recuperadoTarjeta)}: tu gasto real sin tarjeta es {pesos(r.total)}.</p>
+          {r.recuperado - r.recuperadoTarjeta - r.recuperadoNoSe > 0 && (
+            <p style={{ margin: 0, fontSize: 13, color: 'var(--label2)' }}>Gastaste {pesos(r.bruto)} y te devolvieron {pesos(r.recuperado - r.recuperadoTarjeta - r.recuperadoNoSe)}: tu gasto real sin tarjeta es {pesos(r.total)}.</p>
           )}
           {r.pagosTarjeta > 0 && (
             <p style={{ margin: 0, fontSize: 13, color: 'var(--label2)' }}>Pagaste {pesos(r.pagosTarjeta)} de tarjetas desde tus cuentas: eso ya está en Tarjeteando y no se suma acá.</p>
@@ -93,7 +93,7 @@ const BilleteraView = ({ tarjeteando }) => {
           <AvisoRevisar cantidad={r.revisar.length}
             texto={`${r.revisar.length} ${r.revisar.length === 1 ? 'salida' : 'salidas'} sin confirmar (${pesos(r.revisar.reduce((s, m) => s + m.monto, 0))}), en su mayoría transferencias a personas. No suman hasta que las confirmes.`} />
           {r.revisar.length > 0 && <ListaMovs titulo="A revisar" movs={r.revisar} onAbrir={setEditando} vacio="" />}
-          <PorCategoria titulo="Por categoría" filas={r.porCategoria} total={r.total} />
+          <PorCategoria titulo="Por categoría" filas={r.porCategoria} total={r.total} onAbrir={setEditando} />
           <ListaMovs titulo="Gastos" movs={r.lista} onAbrir={setEditando} vacio="Sin gastos confirmados." />
           {r.recuperos.length > 0 && <ListaMovs titulo="Recuperos" movs={r.recuperos} onAbrir={setEditando} vacio="" />}
           <Reservas onCambio={recargar} />
@@ -103,7 +103,7 @@ const BilleteraView = ({ tarjeteando }) => {
       <GestionCategorias abierta={verCategorias} tipo="gasto" todas={cats} onCerrar={() => setVerCategorias(false)} onCambio={async () => { await recargarCats(); await recargar(); }} />
       <ArchivosImportados abierta={verArchivos} onCerrar={() => setVerArchivos(false)} onCambio={async () => { await recargarCats(); await recargar(); }} />
       <ImportarCuentas abierta={importando} onCerrar={() => setImportando(false)} onImportado={recargar} />
-      <EditarMov mov={editando} cats={cats} compras={compras} onCerrar={() => setEditando(null)} onGuardado={recargar} />
+      <EditarMov mov={editando} cats={cats} compras={compras} onCerrar={() => setEditando(null)} onGuardado={recargar} onCategoriaCreada={recargarCats} />
     </section>
   );
 };

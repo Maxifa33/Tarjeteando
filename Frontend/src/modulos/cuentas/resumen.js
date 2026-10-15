@@ -10,9 +10,9 @@ function porCategoria(lista) {
   const mapa = new Map();
   lista.forEach((m) => {
     const k = m.categoria || 'Sin categoría';
-    const e = mapa.get(k) || { categoria: k, total: 0, cantidad: 0 };
+    const e = mapa.get(k) || { categoria: k, total: 0, cantidad: 0, movs: [] };
     const signo = m.tipo === 'recupero' ? -1 : m.tipo === 'gasto' ? (m.direccion === 'entrada' ? -1 : 1) : (m.direccion === 'salida' ? -1 : 1);
-    e.total = r2(e.total + signo * m.monto); e.cantidad += 1;
+    e.total = r2(e.total + signo * m.monto); e.cantidad += 1; e.movs.push(m);
     mapa.set(k, e);
   });
   return [...mapa.values()].sort((a, b) => b.total - a.total);
@@ -45,7 +45,10 @@ export function resumenBilletera(movs = []) {
   // Recuperos: plata que te devuelven de un gasto tuyo. Sin vínculo a tarjeta restan acá
   // (en su categoría); vinculados a una compra con tarjeta se descuentan en Presupuestos.
   const recuperos = pesos.filter((m) => m.tipo === 'recupero' && m.estado !== 'revisar');
-  const recSinTarjeta = recuperos.filter((m) => !m.vinculo_tarjeta);
+  // Si no recordás cómo pagaste el gasto, no se descuenta de Billetera (podría haber sido con tarjeta):
+  // va aparte y Presupuestos lo suma igual a lo que te queda.
+  const recNoSe = recuperos.filter((m) => m.recupero_pago === 'no_se' && !m.vinculo_tarjeta);
+  const recSinTarjeta = recuperos.filter((m) => !m.vinculo_tarjeta && m.recupero_pago !== 'no_se');
   const recTarjeta = recuperos.filter((m) => m.vinculo_tarjeta);
   const reservas = pesos.filter((m) => m.tipo === 'reserva');
   const reservado = (tipo) => r2(reservas.filter((m) => (m.bolsillo?.tipo || 'apartado') === tipo)
@@ -57,6 +60,7 @@ export function resumenBilletera(movs = []) {
     recuperos,
     recuperado: sumar(recuperos),
     recuperadoTarjeta: sumar(recTarjeta),
+    recuperadoNoSe: sumar(recNoSe),
     revisar: gastos.filter((m) => m.estado === 'revisar'),
     lista: confirmados,
     apartado: reservado('apartado'),

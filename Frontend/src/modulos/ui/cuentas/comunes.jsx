@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, AlertCircle, ArrowDownLeft, ArrowUpRight, Repeat } from 'lucide-react';
 import { pesos, mesLargo, diaCorto, capitalizar } from '../../../ui/formato.js';
-import { movimientosEntre, mesesConDatos, actualizarMovimiento, categorias as cargarCategorias, guardarRegla, aplicarReglaExistentes } from '../../cuentas/repo.js';
+import { movimientosEntre, mesesConDatos, actualizarMovimiento, categorias as cargarCategorias, guardarRegla, aplicarReglaExistentes, crearCategoria } from '../../cuentas/repo.js';
 import { sugerirAlcance } from '../../puente/tarjeteando.js';
-import { categoriasVisibles } from '../../cuentas/categorias.js';
+import { categoriasVisibles, nombreOcupado } from '../../cuentas/categorias.js';
 import { rangoMes, moverMes } from '../../cuentas/resumen.js';
 import Hoja from '../../../ui/Hoja.jsx';
 import Seg from '../../../ui/Seg.jsx';
@@ -61,21 +61,41 @@ export const Cifra = ({ label, valor, fuerte, nota }) => (
   </div>
 );
 
-export const PorCategoria = ({ filas, total, titulo }) => {
+/** Totales por categoría. Tocá una para ver sus movimientos (y abrir cualquiera para editarlo). */
+export const PorCategoria = ({ filas, total, titulo, onAbrir }) => {
+  const [abiertas, setAbiertas] = useState(() => new Set());
   if (!filas.length) return null;
+  const alternar = (k) => setAbiertas((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
   return (
     <section aria-label={titulo} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <h2 className="h3" style={{ margin: 0 }}>{titulo}</h2>
-      <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {filas.map((f) => (
-          <li key={f.categoria} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 15 }}>
-              <span>{f.categoria} <span style={{ color: 'var(--label2)', fontSize: 13 }}>· {f.cantidad}</span></span>
-              <span className="mod-cifra" style={{ fontWeight: 600 }}>{pesos(f.total)}</span>
-            </div>
-            <div className="mod-barra" aria-hidden="true"><i style={{ transform: `scaleX(${total ? Math.max(0.02, f.total / total) : 0})` }} /></div>
-          </li>
-        ))}
+      <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {filas.map((f) => {
+          const on = abiertas.has(f.categoria);
+          const id = `cat-${f.categoria.replace(/\W+/g, '-')}`;
+          return (
+            <li key={f.categoria} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <button type="button" onClick={() => alternar(f.categoria)} aria-expanded={on} aria-controls={id}
+                style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%', minHeight: 44, padding: '6px 0', background: 'transparent', border: 0, color: 'inherit', textAlign: 'left', cursor: 'pointer' }}>
+                <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, fontSize: 15, width: '100%' }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <ChevronRight size={16} aria-hidden="true" style={{ transform: on ? 'rotate(90deg)' : 'none', transition: 'transform .2s', color: 'var(--label2)' }} />
+                    {f.categoria} <span style={{ color: 'var(--label2)', fontSize: 13 }}>· {f.cantidad}</span>
+                  </span>
+                  <span className="mod-cifra" style={{ fontWeight: 600 }}>{pesos(f.total)}</span>
+                </span>
+                <span className="mod-barra" aria-hidden="true" style={{ width: '100%' }}><i style={{ transform: `scaleX(${total ? Math.max(0.02, Math.min(1, f.total / total)) : 0})` }} /></span>
+              </button>
+              {on && (
+                <ul id={id} aria-label={`Movimientos de ${f.categoria}`} style={{ listStyle: 'none', margin: '0 0 6px', padding: '0 0 0 12px', display: 'flex', flexDirection: 'column', gap: 2, borderLeft: '2px solid var(--sep)' }}>
+                  {[...(f.movs || [])].sort((a, b) => (a.fecha < b.fecha ? 1 : -1)).map((m) => (onAbrir
+                    ? <FilaMov key={m.id} m={m} onAbrir={onAbrir} />
+                    : <li key={m.id} style={{ fontSize: 14 }}>{diaCorto(m.fecha)} · {m.descripcion} · {pesos(m.monto)}</li>))}
+                </ul>
+              )}
+            </li>
+          );
+        })}
       </ul>
     </section>
   );
@@ -92,7 +112,7 @@ export const FilaMov = ({ m, onAbrir }) => {
         <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
           <span style={{ fontSize: 15, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.descripcion}</span>
           <span style={{ fontSize: 13, color: 'var(--label2)' }}>
-            {diaCorto(m.fecha)} · {m.tipo === 'recupero' ? `Recupero${m.vinculo_tarjeta ? ' · tarjeta' : m.categoria ? ` · ${m.categoria}` : ''}` : (m.categoria || (m.tipo === 'transferencia_interna' ? 'Entre mis cuentas' : m.tipo === 'reserva' ? 'Reserva' : 'Sin categoría'))} · {m.cuenta?.nombre || ''}
+            {diaCorto(m.fecha)} · {m.tipo === 'recupero' ? `Recupero${m.vinculo_tarjeta ? ' · tarjeta' : m.recupero_pago === 'no_se' ? ' · sin saber cómo se pagó' : m.categoria ? ` · ${m.categoria}` : ''}` : (m.categoria || (m.tipo === 'transferencia_interna' ? 'Entre mis cuentas' : m.tipo === 'reserva' ? 'Reserva' : 'Sin categoría'))} · {m.cuenta?.nombre || ''}
           </span>
         </span>
         {m.estado === 'revisar' && <span className="mod-chip">Revisar</span>}
@@ -168,20 +188,25 @@ const ElegirCompra = ({ compras, monto, elegida, onElegir }) => {
 };
 
 /** Hoja para confirmar o corregir un movimiento: tipo, categoría, activo/pasivo y, si es recupero, a qué compra corresponde. */
-export const EditarMov = ({ mov, cats, compras = [], onCerrar, onGuardado }) => {
+export const EditarMov = ({ mov, cats, compras = [], onCerrar, onGuardado, onCategoriaCreada }) => {
   const [tipo, setTipo] = useState(mov?.tipo);
   const [catId, setCatId] = useState(mov?.categoria_id || '');
   const [naturaleza, setNaturaleza] = useState(mov?.naturaleza || 'activo');
-  const [conTarjeta, setConTarjeta] = useState(!!mov?.vinculo_tarjeta);
+  // Cómo se pagó el gasto que te devuelven: 'con' (tarjeta) | 'sin' | 'nose'.
+  const pagoDe = (m) => (m?.vinculo_tarjeta ? 'con' : m?.recupero_pago === 'no_se' ? 'nose' : 'sin');
+  const [pago, setPago] = useState(pagoDe(mov));
+  const conTarjeta = pago === 'con';
   const [compra, setCompra] = useState(null);
   const [alcance, setAlcance] = useState('total');
   const [cuotaNro, setCuotaNro] = useState(1);
   const [siempre, setSiempre] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState(null);
+  const [nueva, setNueva] = useState(null); // nombre de la categoría que estás creando (null = no)
+  const [creadas, setCreadas] = useState([]); // recién creadas, hasta que vuelvan las categorías
   useEffect(() => {
     setTipo(mov?.tipo); setCatId(mov?.categoria_id || ''); setNaturaleza(mov?.naturaleza || 'activo');
-    setConTarjeta(!!mov?.vinculo_tarjeta); setSiempre(false); setError(null);
+    setPago(pagoDe(mov)); setSiempre(false); setError(null); setNueva(null);
     const v = mov?.vinculo_tarjeta;
     setCompra(v ? compras.find((c) => c.clave === v.clave) || { ...v, id: v.mov_id, monto: v.monto_compra, cuotas: v.cuotas || null } : null);
     setAlcance(v?.alcance || 'total'); setCuotaNro(v?.cuota_numero || 1);
@@ -189,7 +214,21 @@ export const EditarMov = ({ mov, cats, compras = [], onCerrar, onGuardado }) => 
   if (!mov) return null;
   const editable = ['gasto', 'ingreso', 'transferencia_interna', 'recupero'].includes(mov.tipo);
   const tipos = TIPOS.filter((t) => t.id !== 'recupero' || mov.direccion === 'entrada');
-  const opciones = categoriasVisibles(cats, tipo === 'ingreso' ? 'ingreso' : 'gasto');
+  const tipoCat = tipo === 'ingreso' ? 'ingreso' : 'gasto';
+  const todasCats = [...cats, ...creadas.filter((c) => !cats.some((x) => x.id === c.id))];
+  const opciones = categoriasVisibles(todasCats, tipoCat);
+  const crear = async () => {
+    const n = (nueva || '').trim();
+    if (!n) { setError('Poné un nombre para la categoría.'); return; }
+    if (nombreOcupado(n, tipoCat, todasCats)) { setError(`Ya existe una categoría "${n}".`); return; }
+    setError(null);
+    try {
+      const { id } = await crearCategoria(n, tipoCat);
+      setCreadas((l) => [...l, { id, nombre: n, tipo: tipoCat, user_id: 'yo', reemplaza: null }]);
+      setCatId(id); setNueva(null);
+      onCategoriaCreada?.();
+    } catch { setError('No se pudo crear la categoría. Revisá tu conexión.'); }
+  };
   const quien = mov.contraparte || '';
 
   const elegirCompra = (c) => {
@@ -200,7 +239,7 @@ export const EditarMov = ({ mov, cats, compras = [], onCerrar, onGuardado }) => 
   };
 
   const guardar = async () => {
-    if (tipo === 'recupero' && conTarjeta && !compra) { setError('Elegí la compra con tarjeta, o marcá "Sin tarjeta".'); return; }
+    if (tipo === 'recupero' && conTarjeta && !compra) { setError('Elegí la compra con tarjeta, o marcá otra opción.'); return; }
     setGuardando(true); setError(null);
     const cambios = { estado: 'confirmado' };
     if (editable) {
@@ -209,6 +248,7 @@ export const EditarMov = ({ mov, cats, compras = [], onCerrar, onGuardado }) => 
       cambios.cuenta_en_presupuesto = tipo !== 'transferencia_interna';
       cambios.categoria_id = tipo === 'transferencia_interna' || (tipo === 'recupero' && conTarjeta) ? null : (catId || null);
       cambios.naturaleza = tipo === 'ingreso' ? naturaleza : null;
+      cambios.recupero_pago = tipo === 'recupero' ? ({ con: 'tarjeta', sin: 'sin_tarjeta', nose: 'no_se' }[pago]) : null;
       cambios.vinculo_tarjeta = tipo === 'recupero' && conTarjeta && compra ? {
         clave: compra.clave, mov_id: compra.id, tarjeta: compra.tarjeta, descripcion: compra.descripcion, fecha: compra.fecha,
         moneda: compra.moneda, monto_compra: compra.cuotas ? compra.cuotas.total_compra : compra.monto,
@@ -249,16 +289,35 @@ export const EditarMov = ({ mov, cats, compras = [], onCerrar, onGuardado }) => 
             {tipo !== 'transferencia_interna' && !(tipo === 'recupero' && conTarjeta) && (
               <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, color: 'var(--label2)' }}>
                 {tipo === 'recupero' ? 'Categoría del gasto que te devuelven' : 'Categoría'}
-                <select className="mod-select" value={catId} onChange={(e) => setCatId(e.target.value)}>
+                <select className="mod-select" value={nueva !== null ? '__nueva__' : catId}
+                  onChange={(e) => { if (e.target.value === '__nueva__') setNueva(''); else { setNueva(null); setCatId(e.target.value); } }}>
                   <option value="">Sin categoría</option>
                   {opciones.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                  <option value="__nueva__">+ Nueva categoría…</option>
                 </select>
               </label>
             )}
+            {nueva !== null && tipo !== 'transferencia_interna' && !(tipo === 'recupero' && conTarjeta) && (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input className="mod-campo" autoFocus aria-label="Nombre de la nueva categoría" placeholder="Nombre de la categoría" value={nueva}
+                  onChange={(e) => setNueva(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); crear(); } }} />
+                <button type="button" className="btn" onClick={() => setNueva(null)} style={{ minHeight: 44 }}>Cancelar</button>
+                <button type="button" className="btn btn-pri" onClick={crear} style={{ minHeight: 44, borderRadius: 22, padding: '0 16px' }}>Crear</button>
+              </div>
+            )}
             {tipo === 'recupero' && (
               <>
-                <Seg opciones={[{ id: 'no', label: 'Lo pagué sin tarjeta' }, { id: 'si', label: 'Lo pagué con tarjeta' }]} valor={conTarjeta ? 'si' : 'no'}
-                  onCambio={(v) => setConTarjeta(v === 'si')} ariaLabel="¿Cómo pagaste el gasto?" />
+                {/* Tres opciones largas: en lista (en el celular no entran en un control segmentado). */}
+                <div role="radiogroup" aria-label="¿Cómo pagaste el gasto?" style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: 3, borderRadius: 12, background: 'var(--fill)' }}>
+                  {[{ id: 'con', label: 'Lo pagué con tarjeta' }, { id: 'sin', label: 'NO lo pagué con tarjeta' }, { id: 'nose', label: 'No recuerdo cómo lo pagué' }].map((o) => (
+                    <button key={o.id} type="button" role="radio" aria-checked={pago === o.id} onClick={() => setPago(o.id)}
+                      style={{ minHeight: 44, padding: '0 14px', borderRadius: 9, textAlign: 'left', fontSize: 15, fontWeight: pago === o.id ? 600 : 500, color: 'var(--label)',
+                        background: pago === o.id ? 'var(--solid)' : 'transparent', boxShadow: pago === o.id ? '0 1px 3px rgba(0,0,0,.14)' : 'none', border: 0, cursor: 'pointer' }}>
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+                {pago === 'nose' && <p style={{ margin: 0, fontSize: 13, color: 'var(--label2)' }}>No se descuenta de Billetera (pudo ser con tarjeta). En Presupuestos suma igual a lo que te queda.</p>}
                 {conTarjeta && (
                   compras.length
                     ? <ElegirCompra compras={compras} monto={mov.monto} elegida={compra} onElegir={elegirCompra} />

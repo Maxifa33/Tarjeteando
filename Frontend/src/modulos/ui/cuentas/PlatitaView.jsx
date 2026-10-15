@@ -56,7 +56,7 @@ const PlatitaView = ({ tarjeteando }) => {
           <AvisoRevisar cantidad={r.revisar.length}
             texto={`${r.revisar.length} ${r.revisar.length === 1 ? 'entrada' : 'entradas'} sin confirmar (${pesos(r.revisar.reduce((s, m) => s + m.monto, 0))}): pueden ser ingresos, plata tuya o un Recupero (te devolvieron un gasto). No suman hasta que los confirmes.`} />
           {r.revisar.length > 0 && <ListaMovs titulo="A revisar" movs={r.revisar} onAbrir={setEditando} vacio="" />}
-          <PorCategoria titulo="Por categoría" filas={r.porCategoria} total={r.total} />
+          <PorCategoria titulo="Por categoría" filas={r.porCategoria} total={r.total} onAbrir={setEditando} />
           <ListaMovs titulo="Ingresos" movs={r.lista} onAbrir={setEditando} vacio="Sin ingresos confirmados." />
         </>
       )}
@@ -64,7 +64,7 @@ const PlatitaView = ({ tarjeteando }) => {
       <GestionCategorias abierta={verCategorias} tipo="ingreso" todas={cats} onCerrar={() => setVerCategorias(false)} onCambio={async () => { await recargarCats(); await recargar(); }} />
       <ArchivosImportados abierta={verArchivos} onCerrar={() => setVerArchivos(false)} onCambio={async () => { await recargarCats(); await recargar(); }} />
       <ImportarCuentas abierta={importando} onCerrar={() => setImportando(false)} onImportado={recargar} />
-      <EditarMov mov={editando} cats={cats} compras={compras} onCerrar={() => setEditando(null)} onGuardado={recargar} />
+      <EditarMov mov={editando} cats={cats} compras={compras} onCerrar={() => setEditando(null)} onGuardado={recargar} onCategoriaCreada={recargarCats} />
     </section>
   );
 };

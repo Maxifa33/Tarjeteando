@@ -13,7 +13,7 @@ export function presupuestoDelMes(mesKey, movsDelMes = [], tarjetasMes = null) {
   // Sin datos de Tarjeteando en este dispositivo: se usa lo pagado de tarjetas desde tus cuentas.
   const usaPagos = !tarjetasMes && b.pagosTarjeta > 0;
   const tarjetas = tarjetasMes ? tarjetasMes.total : b.pagosTarjeta;
-  const teQueda = r2(p.total - tarjetas - b.total + b.recuperadoTarjeta);
+  const teQueda = r2(p.total - tarjetas - b.total + b.recuperadoTarjeta + b.recuperadoNoSe);
   return {
     mesKey,
     ingresos: p.total,
@@ -24,6 +24,7 @@ export function presupuestoDelMes(mesKey, movsDelMes = [], tarjetasMes = null) {
     tarjetasUsd: tarjetasMes ? tarjetasMes.usd : 0,
     sinTarjeta: b.total,
     recuperosTarjeta: b.recuperadoTarjeta,
+    recuperosNoSe: b.recuperadoNoSe,
     teQueda,
     apartado: b.apartado,
     ahorrado: b.ahorrado,

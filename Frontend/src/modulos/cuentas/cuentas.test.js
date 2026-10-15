@@ -259,3 +259,19 @@ test('categorías: renombrar una del sistema la reemplaza; el clasificador usa l
   assert.equal(nombreOcupado('Supermercado', 'gasto', todas), true); // aunque esté oculta, la base sigue usando ese nombre
   assert.equal(nombreOcupado('Supermercado', 'gasto', todas, 'u1'), false); // volver al nombre original está bien
 });
+
+test('recupero "no recuerdo cómo lo pagué": no resta en Billetera, suma en Presupuestos', async () => {
+  const { resumenBilletera } = await import('./resumen.js');
+  const { presupuestoDelMes } = await import('./presupuesto.js');
+  const movs = [
+    { tipo: 'gasto', direccion: 'salida', monto: 10000, moneda: 'ARS', estado: 'confirmado' },
+    { tipo: 'recupero', direccion: 'entrada', monto: 3000, moneda: 'ARS', estado: 'confirmado', recupero_pago: 'no_se' },
+    { tipo: 'recupero', direccion: 'entrada', monto: 1000, moneda: 'ARS', estado: 'confirmado' },
+    { tipo: 'ingreso', direccion: 'entrada', monto: 50000, moneda: 'ARS', estado: 'confirmado' }
+  ];
+  const b = resumenBilletera(movs);
+  assert.deepEqual([b.total, b.recuperado, b.recuperadoNoSe, b.recuperadoTarjeta], [9000, 4000, 3000, 0]);
+  const p = presupuestoDelMes('2026-09', movs, null);
+  assert.equal(p.teQueda, 44000); // 50000 − 9000 + 3000
+  assert.equal(p.recuperosNoSe, 3000);
+});

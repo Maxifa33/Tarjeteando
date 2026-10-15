@@ -85,6 +85,7 @@ const PresupuestosView = ({ tarjeteando }) => {
               <Linea signo="−" label="Tarjetas" valor={p.tarjetas} nota={NOTA_TARJETAS[p.tarjetasTipo] + (p.tarjetasUsd ? ` · más ${dolares(p.tarjetasUsd)} aparte, no incluidos` : '')} />
               <Linea signo="−" label="Gastos sin tarjeta" valor={p.sinTarjeta} nota="Billetera, ya neto de recuperos sin tarjeta" />
               {p.recuperosTarjeta > 0 && <Linea signo="+" label="Recuperos de compras con tarjeta" valor={p.recuperosTarjeta} nota="Lo que te devolvieron de gastos que pagaste con tarjeta" />}
+              {p.recuperosNoSe > 0 && <Linea signo="+" label="Otros recuperos" valor={p.recuperosNoSe} nota="Te devolvieron plata de gastos que no recordás cómo pagaste" />}
               <Linea label={p.teQueda >= 0 ? 'Te queda' : 'Gastaste de más'} valor={Math.abs(p.teQueda)} fuerte />
             </ul>
             {(p.apartado || p.ahorrado) ? (
