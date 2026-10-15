@@ -145,5 +145,20 @@ test('itemsPlan: solo activas en pesos con saldo', () => {
   const saldada = { ...persona, id: 's', estado: 'saldada' };
   const it = itemsPlan([prestamo, usd, saldada], []);
   assert.deepEqual(it.map((d) => d.id), ['p1']);
-  assert.equal(it[0].tasa, 60);
+  assert.equal(it[0].tasa, null); // cuotas fijas: la tasa ya está en la cuota
+  assert.equal(it[0].fija, true);
+  const abierta = itemsPlan([{ ...prestamo, cuotas_restantes: null }], []);
+  assert.equal(abierta[0].tasa, 60);
+});
+
+test('compararPlanes: una sola deuda o mismo resultado → iguales, sin "Conviene" falso', () => {
+  const una = compararPlanes([{ id: 'p', nombre: 'P', saldo: 50000, minimo: 10000, tasa: null, fija: true }], 23000);
+  assert.equal(una.iguales, true);
+  assert.equal(una.avalancha.meses, 3);
+  assert.equal(una.avalancha.intereses, 0);
+  const distintas = compararPlanes([
+    { id: 'cara', nombre: 'Cara', saldo: 500000, minimo: 20000, tasa: 120 },
+    { id: 'chica', nombre: 'Chica', saldo: 100000, minimo: 10000, tasa: 10 }
+  ], 120000);
+  assert.equal(distintas.iguales, false);
 });

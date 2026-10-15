@@ -139,17 +139,21 @@ export function compararPlanes(items, montoMensual) {
   const avalancha = simular(items, montoMensual, 'avalancha');
   const bola = simular(items, montoMensual, 'bola');
   const conTasa = items.some((d) => d.saldo > 0 && d.tasa > 0);
+  // Mismo resultado (una sola deuda, o el orden no cambia nada): no hay nada que comparar.
+  const iguales = avalancha.meses === bola.meses && avalancha.intereses === bola.intereses
+    && avalancha.orden.map((o) => `${o.id}:${o.mes}`).join() === bola.orden.map((o) => `${o.id}:${o.mes}`).join();
+  if (iguales) return { avalancha, bola, conTasa, iguales, recomendada: avalancha.meses ? 'avalancha' : null, ahorro: 0 };
   let recomendada = 'bola';
   // Si solo uno de los dos termina, ese es el que conviene.
-  if (avalancha.meses && !bola.meses) return { avalancha, bola, conTasa, recomendada: 'avalancha', ahorro: 0 };
-  if (!avalancha.meses && bola.meses) return { avalancha, bola, conTasa, recomendada: 'bola', ahorro: 0 };
+  if (avalancha.meses && !bola.meses) return { avalancha, bola, conTasa, iguales, recomendada: 'avalancha', ahorro: 0 };
+  if (!avalancha.meses && bola.meses) return { avalancha, bola, conTasa, iguales, recomendada: 'bola', ahorro: 0 };
   if (avalancha.meses && bola.meses) {
     const ahorro = r2((bola.intereses || 0) - (avalancha.intereses || 0));
     // Avalancha si ahorra algo que valga la pena; si no, bola (cerrás deudas antes y motiva).
     if (ahorro > Math.max(1000, montoMensual * 0.05)) recomendada = 'avalancha';
-    return { avalancha, bola, conTasa, recomendada, ahorro };
+    return { avalancha, bola, conTasa, iguales, recomendada, ahorro };
   }
-  return { avalancha, bola, conTasa, recomendada: null, ahorro: 0 };
+  return { avalancha, bola, conTasa, iguales, recomendada: null, ahorro: 0 };
 }
 
 /** 'YYYY-MM' sumando `n` meses a `desde`. */
@@ -191,6 +195,8 @@ export function validarDeuda(f) {
 export function itemsPlan(deudas = [], movs = []) {
   return deudas.filter((d) => d.estado === 'activa' && (d.moneda || 'ARS') === 'ARS').map((d) => {
     const e = estadoDeuda(d, movs);
-    return { id: d.id, nombre: d.nombre, saldo: e.saldo, minimo: e.minimo, tasa: d.tasa_anual == null ? null : Number(d.tasa_anual) };
+    // Cuotas fijas (cuota + cuotas que faltan): lo que debés ya trae los intereses adentro; aplicar la tasa encima los contaría dos veces.
+    const fija = !!d.cuota_monto && d.cuotas_restantes != null;
+    return { id: d.id, nombre: d.nombre, saldo: e.saldo, minimo: e.minimo, fija, tasa: fija || d.tasa_anual == null ? null : Number(d.tasa_anual) };
   }).filter((d) => d.saldo > 0);
 }

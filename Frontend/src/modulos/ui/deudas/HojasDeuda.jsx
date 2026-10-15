@@ -75,7 +75,7 @@ export const FormDeuda = ({ abierta, deuda, onCerrar, onGuardado }) => {
             <select className="mod-select" value={f.moneda} onChange={set('moneda')} aria-label="Moneda"><option value="ARS">$</option><option value="USD">U$S</option></select>
           </div>
         </Campo>
-        <Campo label="Tasa anual % (opcional)" nota="Solo si lo que debés crece con intereses. Si ya está incluida en las cuotas, dejalo vacío.">
+        <Campo label="Tasa anual % (opcional)" nota="Solo si lo que debés crece con intereses (tarjeta, préstamo sin cuotas fijas). Con cuota y cuotas que faltan cargadas, la tasa no se usa: ya está en la cuota.">
           <input className="mod-campo" inputMode="decimal" value={f.tasa_anual} onChange={set('tasa_anual')} placeholder="Ej. 85" />
         </Campo>
         <Campo label="Palabra clave (opcional)" nota='Una palabra que aparezca en el movimiento del pago, ej. "PRESTAMO 4521".'>

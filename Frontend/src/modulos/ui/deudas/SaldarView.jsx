@@ -45,7 +45,7 @@ const Plan = ({ items, sugerido }) => {
   if (!items.length) return null;
 
   const columna = ({ id, titulo, bajada, r }) => {
-    const reco = c.recomendada === id && r.meses;
+    const reco = !c.iguales && c.recomendada === id && r.meses;
     return (
       <div key={id} style={{ flex: '1 1 260px', display: 'flex', flexDirection: 'column', gap: 8, padding: 18, borderRadius: 20, background: reco ? 'var(--fill)' : 'var(--fill2)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'space-between' }}>
@@ -82,13 +82,18 @@ const Plan = ({ items, sugerido }) => {
           <div className="mod-aviso" role="status">No alcanza para las cuotas mínimas ({pesos(minimos)} por mes). Subí el monto o renegociá alguna deuda.</div>
         ) : (
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            {columna({ id: 'avalancha', titulo: 'Avalancha', bajada: 'Primero la de tasa más alta. Pagás menos intereses.', r: c.avalancha })}
-            {columna({ id: 'bola', titulo: 'Bola de nieve', bajada: 'Primero la más chica. Cerrás deudas antes y liberás cuotas.', r: c.bola })}
+            {c.iguales ? columna({ id: 'unico', titulo: 'Tu plan', bajada: items.length === 1 ? `Todo lo que ponés por mes va a ${items[0].nombre}.` : 'Con tus deudas, el orden en que las pagues no cambia el resultado.', r: c.avalancha }) : (
+              <>
+                {columna({ id: 'avalancha', titulo: 'Avalancha', bajada: 'Primero la de tasa más alta. Pagás menos intereses.', r: c.avalancha })}
+                {columna({ id: 'bola', titulo: 'Bola de nieve', bajada: 'Primero la más chica. Cerrás deudas antes y liberás cuotas.', r: c.bola })}
+              </>
+            )}
           </div>
         )}
         {!c.avalancha.insuficiente && (
           <p style={{ margin: '10px 0 0', fontSize: 13, color: 'var(--label2)' }}>
-            {!c.recomendada ? (monto > 0 ? 'Ninguno de los dos termina con este monto: subilo o renegociá la tasa más cara.' : '')
+            {c.iguales ? (items.some((d) => d.fija) ? 'En las deudas en cuotas fijas los intereses ya están en la cuota: poner más solo adelanta cuotas (preguntá al banco si te descuenta intereses o cobra cargo).' : '')
+              : !c.recomendada ? (monto > 0 ? 'Ninguno de los dos termina con este monto: subilo o renegociá la tasa más cara.' : '')
               : !c.avalancha.meses || !c.bola.meses ? `Solo ${c.recomendada === 'avalancha' ? 'avalancha' : 'bola de nieve'} termina con este monto.`
                 : !c.conTasa ? 'Sin tasas cargadas, los dos planes tardan lo mismo: conviene bola de nieve porque cerrás deudas antes.'
                   : c.recomendada === 'avalancha' ? `Avalancha te ahorra ${pesos(c.ahorro)} en intereses.`
