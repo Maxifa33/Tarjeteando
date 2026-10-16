@@ -308,10 +308,19 @@ export function proximoMes({ cuotasDelMes: cuotas = 0, fijosArs = 0, fijosUsd = 
  * @param p.porTarjeta       cicloDePago(...).porTarjeta
  * @param p.cuotas           cuotasDelMes(...).items del mismo mes
  * @param p.fijosPorTarjeta  { [tarjetaId]: fijos en pesos }
- * @returns {{ [tarjetaId]: { cuotas, fijos, variables, total, importado, completado } }}
+ * @param p.estimables       ids de tarjetas 'sin_datos' a las que se les estima el ciclo con
+ *                           lo ya comprometido (cuotas + fijos), como hace proximoMes. Sin
+ *                           resumen no hay variables: es un piso, marcado `estimado: true`.
+ * @returns {{ [tarjetaId]: { cuotas, fijos, variables, total, importado, completado, estimado? } }}
  */
-export function composicionPorTarjeta({ porTarjeta = [], cuotas = [], fijosPorTarjeta = {} } = {}) {
+export function composicionPorTarjeta({ porTarjeta = [], cuotas = [], fijosPorTarjeta = {}, estimables = [] } = {}) {
   const out = {};
+  porTarjeta.filter((t) => t.fuente === 'sin_datos' && estimables.includes(t.tarjetaId)).forEach((t) => {
+    const c = r2(cuotas.filter((q) => q.tarjeta === t.tarjetaId && !q.es_estimado_usd).reduce((s, q) => s + q.monto, 0));
+    const f = r2(fijosPorTarjeta[t.tarjetaId] || 0);
+    if (c + f <= 0) return;
+    out[t.tarjetaId] = { cuotas: c, fijos: f, variables: 0, total: r2(c + f), importado: 0, completado: false, estimado: true };
+  });
   porTarjeta.filter((t) => t.fuente !== 'sin_datos').forEach((t) => {
     const c = r2(cuotas.filter((q) => q.tarjeta === t.tarjetaId && !q.es_estimado_usd).reduce((s, q) => s + q.monto, 0));
     const f = r2(fijosPorTarjeta[t.tarjetaId] || 0);
@@ -328,6 +337,21 @@ export function composicionPorTarjeta({ porTarjeta = [], cuotas = [], fijosPorTa
 }
 
 /**
+ * Tarjetas 'sin_datos' del ciclo a las que conviene estimarles lo comprometido: las que
+ * tienen un resumen reciente (vence hasta `maxMeses` meses antes del ciclo), o sea que
+ * solo falta el del ciclo actual. Una tarjeta cuyo último resumen es más viejo se
+ * considera sin uso: sus planes no se proyectan (no habría resumen que los interrumpa).
+ */
+export function tarjetasEstimables({ porTarjeta = [], resumenes = [], mesKey, maxMeses = 2 } = {}) {
+  if (!mesKey) return [];
+  const piso = indiceMesKey(mesKey) - maxMeses;
+  return porTarjeta
+    .filter((t) => t.fuente === 'sin_datos')
+    .filter((t) => resumenes.some((r) => r?.tarjeta === t.tarjetaId && mesKeyDe(r.fecha_vencimiento) && indiceMesKey(mesKeyDe(r.fecha_vencimiento)) >= piso))
+    .map((t) => t.tarjetaId);
+}
+
+/**
  * Composición del mes como suma de las tarjetas: así la cápsula de Mes y la suma de
  * "Esta tarjeta en el mes" coinciden siempre.
  */
@@ -335,8 +359,10 @@ export function composicionDesdeTarjetas(porTarjetaComp = {}, { porTarjeta = [],
   const lista = Object.values(porTarjetaComp);
   const suma = (k) => r2(lista.reduce((s, x) => s + x[k], 0));
   const avisos = [];
-  const sinDatos = porTarjeta.filter((t) => t.fuente === 'sin_datos');
+  const sinDatos = porTarjeta.filter((t) => t.fuente === 'sin_datos' && !porTarjetaComp[t.tarjetaId]?.estimado);
   if (sinDatos.length) avisos.push({ tipo: 'tarjeta_sin_datos', tarjetas: sinDatos.map((t) => t.tarjetaId) });
+  const estimadas = porTarjeta.filter((t) => porTarjetaComp[t.tarjetaId]?.estimado);
+  if (estimadas.length) avisos.push({ tipo: 'ciclo_estimado', tarjetas: estimadas.map((t) => t.tarjetaId) });
   if (lista.some((x) => x.completado)) avisos.push({ tipo: 'datos_inconsistentes' });
   return { cuotas: suma('cuotas'), fijos: suma('fijos'), fijosUsd: r2(fijosUsd), variables: suma('variables'), total: suma('total'), avisos };
 }

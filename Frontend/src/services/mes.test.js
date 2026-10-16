@@ -15,7 +15,8 @@ import {
   sumarMeses,
   composicionPorTarjeta,
   composicionDesdeTarjetas,
-  fijosPorTarjeta
+  fijosPorTarjeta,
+  tarjetasEstimables
 } from './mes.js';
 import { construirPlanes, proyectarCuotas, observacionesEnCurso, formatearParaVista } from './cuotas.js';
 import { serieEvolucion } from './evolucion.js';
@@ -328,6 +329,48 @@ describe('composicionPorTarjeta', () => {
   test('tarjeta sin datos: no tiene composición', () => {
     const p = composicionPorTarjeta({ porTarjeta: [{ tarjetaId: 'y', fuente: 'sin_datos', total: 0 }], fijosPorTarjeta: { y: 999 } });
     assert.deepEqual(p, {});
+  });
+});
+
+describe('ciclo sin resumen: se estima con cuotas + fijos (como Próximo mes)', () => {
+  // Datos ficticios. Hoy 16-oct: el último resumen venció el 25-sep, el de octubre no está.
+  const hoy = '2026-10-16';
+  const tj = [{ nombre: 'VISA X', banco: 'Galicia', tipo: 'VISA' }, { nombre: 'VISA vieja', banco: 'BBVA', tipo: 'VISA' }];
+  const res = [
+    { tarjeta: 'VISA X', fecha_cierre: '2026-09-17', fecha_vencimiento: '2026-09-25', total_a_pagar_pesos: 500000 },
+    { tarjeta: 'VISA vieja', fecha_cierre: '2025-12-10', fecha_vencimiento: '2025-12-20', total_a_pagar_pesos: 90000 }
+  ];
+  const c = cicloDePago({ hoy, tarjetas: tj, resumenes: res });
+  const cuotas = [{ tarjeta: 'VISA X', monto: 30000 }, { tarjeta: 'VISA vieja', monto: 9999 }];
+  const fijos = { 'VISA X': 5000 };
+
+  test('el ciclo cae en octubre y ambas tarjetas están sin datos', () => {
+    assert.equal(c.mesKey, '2026-10');
+    assert.deepEqual(c.porTarjeta.map((t) => t.fuente), ['sin_datos', 'sin_datos']);
+  });
+
+  test('solo se estima la tarjeta con resumen reciente', () => {
+    assert.deepEqual(tarjetasEstimables({ porTarjeta: c.porTarjeta, resumenes: res, mesKey: c.mesKey }), ['VISA X']);
+  });
+
+  test('total del ciclo = cuotas + fijos, con aviso ciclo_estimado', () => {
+    const estimables = ['VISA X'];
+    const p = composicionPorTarjeta({ porTarjeta: c.porTarjeta, cuotas, fijosPorTarjeta: fijos, estimables });
+    assert.deepEqual(p, { 'VISA X': { cuotas: 30000, fijos: 5000, variables: 0, total: 35000, importado: 0, completado: false, estimado: true } });
+    const d = composicionDesdeTarjetas(p, { porTarjeta: c.porTarjeta });
+    assert.equal(d.total, 35000);
+    assert.deepEqual(d.avisos, [
+      { tipo: 'tarjeta_sin_datos', tarjetas: ['VISA vieja'] },
+      { tipo: 'ciclo_estimado', tarjetas: ['VISA X'] }
+    ]);
+  });
+
+  test('cuotasDelMes: plan de VISA X anclado en septiembre llega a octubre (cuota siguiente)', () => {
+    const plan = { id: 'p', tarjeta: 'VISA X', periodo_anio: 2026, periodo_mes: 9, cuota_actual: 3, total_cuotas: 12, monto_pesos: 30000 };
+    const r = cuotasDelMes([plan], c.mesKey, { desfase: { 'VISA X': 0 }, tarjetas: ['VISA X'] });
+    assert.equal(r.items.length, 1);
+    assert.equal(r.items[0].cuota_numero, 4);
+    assert.equal(r.total, 30000);
   });
 });
 

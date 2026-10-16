@@ -18,7 +18,7 @@ import { NovedadesModal, GuiaView } from './views/Guia.jsx';
 import { armarTarjetas, buscarTarjeta, nombreVisible, migrarNombresLive } from './services/tarjetas.js';
 import { serieEvolucion, detalleMes } from './services/evolucion.js';
 import { movimientosEnCurso, nombreSegunReglas } from './services/movimientos-vista.js';
-import { cicloDePago, cuotasDelMes, desfasePorTarjeta, proximoMes, sumarMeses, composicionPorTarjeta, composicionDesdeTarjetas, fijosPorTarjeta } from './services/mes.js';
+import { cicloDePago, cuotasDelMes, desfasePorTarjeta, proximoMes, sumarMeses, composicionPorTarjeta, composicionDesdeTarjetas, fijosPorTarjeta, tarjetasEstimables } from './services/mes.js';
 import { clasesApariencia, modoEfectivo } from './services/apariencia.js';
 // Módulos (Economics): código aislado en src/modulos/. Ver modulos/registro.js.
 import { SECCIONES } from './ui/secciones.js';
@@ -1198,13 +1198,16 @@ const App = () => {
   const mes = useMemo(() => {
     const desfase = desfasePorTarjeta(resumenes);
     const ciclo = cicloDePago({ tarjetas, resumenes, ciclosLive, consumosLive });
-    const conDatos = ciclo.porTarjeta.filter(t => t.fuente !== 'sin_datos').map(t => t.tarjetaId);
-    const cuotas = cuotasDelMes(cuotasActivas, ciclo.mesKey, { desfase, cotizacionVenta, tarjetas: conDatos });
+    // Tarjetas sin resumen del ciclo pero con uno reciente: se les estima lo comprometido
+    // (cuotas + fijos), igual que en Próximo mes.
+    const estimables = tarjetasEstimables({ porTarjeta: ciclo.porTarjeta, resumenes, mesKey: ciclo.mesKey });
+    const incluidas = [...ciclo.porTarjeta.filter(t => t.fuente !== 'sin_datos').map(t => t.tarjetaId), ...estimables];
+    const cuotas = cuotasDelMes(cuotasActivas, ciclo.mesKey, { desfase, cotizacionVenta, tarjetas: incluidas });
     const fijosArs = gastosFijosDetalle?.ars || 0;
     const fijosUsd = gastosFijosDetalle?.usd || 0;
     // Fase 3: la composición del mes es la suma de "Esta tarjeta en el mes" de cada tarjeta.
     const porTarjetaComp = composicionPorTarjeta({
-      porTarjeta: ciclo.porTarjeta, cuotas: cuotas.items, fijosPorTarjeta: fijosPorTarjeta(gastosFijosDetalle?.items)
+      porTarjeta: ciclo.porTarjeta, cuotas: cuotas.items, fijosPorTarjeta: fijosPorTarjeta(gastosFijosDetalle?.items), estimables
     });
     const comp = composicionDesdeTarjetas(porTarjetaComp, { porTarjeta: ciclo.porTarjeta, fijosUsd });
 

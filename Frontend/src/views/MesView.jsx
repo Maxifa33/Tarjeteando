@@ -293,6 +293,7 @@ const MesView = ({
   const sinHistoria = !columnasEvo.some(c => c.total > 0) && (fijos?.items || []).length === 0 && planesDelMes.length === 0;
   const sinNada = esCiclo && total === 0 && ciclo.porTarjeta.every(t => t.fuente === 'sin_datos') && sinHistoria;
   const inconsistente = c.avisos?.some(a => a.tipo === 'datos_inconsistentes');
+  const estimadoAviso = c.avisos?.find(a => a.tipo === 'ciclo_estimado');
 
   // ----- frase -----
   const colorLibre = pasado ? 'var(--danger)' : 'var(--label)';
@@ -364,6 +365,13 @@ const MesView = ({
       </button>
     </div>
   );
+
+  const AvisoEstimado = estimadoAviso ? (
+    <p role="note" style={{ margin: 0, display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 14, color: 'var(--label2)' }}>
+      <AlertTriangle size={16} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />
+      Estimado con cuotas y fijos: falta el resumen de este ciclo ({estimadoAviso.tarjetas.join(', ')}). Las variables se suman cuando lo importes.
+    </p>
+  ) : null;
 
   const Aviso = inconsistente ? (
     <p role="note" style={{ margin: 0, display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 14, color: 'var(--warn)' }}>
@@ -594,7 +602,7 @@ const MesView = ({
         {Frase}
         {CapsulaMes}
         {Leyenda}
-        {Aviso}
+        {Aviso}{AvisoEstimado}
         {Tope}
         {Pregunta}
         {EnCurso}
@@ -614,7 +622,7 @@ const MesView = ({
         {Leyenda}
         {Tope}
       </div>
-      {Aviso}
+      {Aviso}{AvisoEstimado}
       <div style={{ height: 0.5, background: 'var(--sep)' }} />
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1.1fr)' }}>
         <div style={{ paddingRight: 28, borderRight: '0.5px solid var(--sep)', minWidth: 0 }}>{Cuotas}</div>
