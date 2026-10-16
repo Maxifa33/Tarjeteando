@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { estadoDeuda, puntaje, sugerirPagos, simular, compararPlanes, validarDeuda, manualParecido, itemsPlan, pagadoEnMes } from './deudas.js';
+import { estadoDeuda, puntaje, sugerirPagos, simular, compararPlanes, validarDeuda, manualParecido, itemsPlan, pagadoEnMes, adelantar, proximoVencimiento, masUrgente, cancelacionHoy } from './deudas.js';
 
 // Datos ficticios.
 const prestamo = { id: 'p1', nombre: 'Préstamo Banco Uno', tipo: 'prestamo', acreedor: 'Banco Uno', moneda: 'ARS', saldo_inicial: 600000, fecha_inicio: '2026-01-01', cuota_monto: 50000, cuotas_restantes: 12, tasa_anual: 60, palabra_clave: null, estado: 'activa' };
@@ -145,8 +145,14 @@ test('itemsPlan: solo activas en pesos con saldo', () => {
   const saldada = { ...persona, id: 's', estado: 'saldada' };
   const it = itemsPlan([prestamo, usd, saldada], []);
   assert.deepEqual(it.map((d) => d.id), ['p1']);
-  assert.equal(it[0].tasa, null); // cuotas fijas: la tasa ya está en la cuota
-  assert.equal(it[0].fija, true);
+  // cuotas fijas con TNA: se simula sobre el capital (valor presente de las 12 cuotas a 60 %)
+  assert.equal(it[0].tasa, 60);
+  assert.equal(it[0].fija, false);
+  assert.ok(it[0].saldo > 440000 && it[0].saldo < 450000);
+  const sinTasa = itemsPlan([{ ...prestamo, tasa_anual: null }], []);
+  assert.equal(sinTasa[0].tasa, null); // sin tasa: la cuota ya trae los intereses
+  assert.equal(sinTasa[0].fija, true);
+  assert.equal(sinTasa[0].saldo, 600000);
   const abierta = itemsPlan([{ ...prestamo, cuotas_restantes: null }], []);
   assert.equal(abierta[0].tasa, 60);
 });
@@ -161,4 +167,111 @@ test('compararPlanes: una sola deuda o mismo resultado → iguales, sin "Convien
     { id: 'chica', nombre: 'Chica', saldo: 100000, minimo: 10000, tasa: 10 }
   ], 120000);
   assert.equal(distintas.iguales, false);
+});
+
+test('plan con cuotas fijas y TNA: pagar justo la cuota termina en las cuotas que faltan; pagar de más adelanta y ahorra', () => {
+  const [it] = itemsPlan([prestamo], []);
+  const justo = simular([it], 50000);
+  assert.equal(justo.meses, 12);
+  const mas = simular([it], 80000);
+  assert.ok(mas.meses < 12);
+  assert.ok(mas.intereses < justo.intereses);
+});
+
+test('simular: primerMes reparte cuotas mínimas y el extra a la deuda prioritaria', () => {
+  const r = simular([
+    { id: 'cara', nombre: 'Cara', saldo: 500000, minimo: 20000, tasa: 120 },
+    { id: 'chica', nombre: 'Chica', saldo: 100000, minimo: 10000, tasa: 10 }
+  ], 100000);
+  const cara = r.primerMes.find((x) => x.id === 'cara'); const chica = r.primerMes.find((x) => x.id === 'chica');
+  assert.equal(chica.cuota, 10000); assert.equal(chica.extra, 0);
+  assert.equal(cara.cuota, 20000); assert.equal(cara.extra, 70000);
+  assert.equal(r.primerMes.reduce((s, x) => s + x.cuota + x.extra, 0), 100000);
+});
+
+test('adelantar: un pago extra acorta el plan y ahorra intereses; sin extra no cambia nada', () => {
+  const items = [{ id: 'a', nombre: 'A', saldo: 500000, minimo: 30000, tasa: 100 }];
+  const r = adelantar(items, 60000, 100000);
+  assert.ok(r.mesesMenos > 0);
+  assert.ok(r.ahorro > 0);
+  assert.equal(r.aplicado, 100000);
+  assert.equal(r.deuda, 'A');
+  const cero = adelantar(items, 60000, 0);
+  assert.equal(cero.mesesMenos, 0); assert.equal(cero.ahorro, 0);
+  assert.equal(adelantar(items, 60000, 9e9).aplicado, 500000); // no más que lo que debés
+});
+
+test('proximoVencimiento: próxima, hoy, vencida, pagada este mes, mes corto y alta posterior', () => {
+  const d = { id: 'd', estado: 'activa', dia_vencimiento: 10, cuota_monto: 10000, fecha_inicio: '2026-01-01', saldo_inicial: 1000000, moneda: 'ARS' };
+  const pago = (monto, fecha) => ({ deuda_id: 'd', direccion: 'salida', monto, fecha });
+  assert.deepEqual(proximoVencimiento(d, [], '2026-10-05'), { fecha: '2026-10-10', dias: 5, estado: 'proxima', pagadaEsteMes: false });
+  assert.equal(proximoVencimiento(d, [], '2026-10-10').estado, 'hoy');
+  const v = proximoVencimiento(d, [], '2026-10-14');
+  assert.equal(v.estado, 'vencida'); assert.equal(v.dias, -4);
+  const p = proximoVencimiento(d, [pago(10000, '2026-10-02')], '2026-10-14');
+  assert.equal(p.fecha, '2026-11-10'); assert.equal(p.pagadaEsteMes, true);
+  assert.equal(proximoVencimiento(d, [pago(1000, '2026-10-02')], '2026-10-14').estado, 'vencida'); // pago chico no cubre la cuota
+  assert.equal(proximoVencimiento({ ...d, dia_vencimiento: 31 }, [], '2026-02-10').fecha, '2026-02-28');
+  assert.equal(proximoVencimiento({ ...d, fecha_inicio: '2026-10-12' }, [], '2026-10-14').fecha, '2026-11-10'); // venció antes del alta
+  assert.equal(proximoVencimiento({ ...d, dia_vencimiento: null }, [], '2026-10-14'), null);
+  assert.equal(proximoVencimiento({ ...d, estado: 'saldada' }, [], '2026-10-14'), null);
+  const libre = { ...d, cuota_monto: null };
+  assert.equal(proximoVencimiento(libre, [pago(5, '2026-10-02')], '2026-10-14').pagadaEsteMes, true);
+});
+
+test('masUrgente: la vencida gana a la próxima', () => {
+  const a = { id: 'a', estado: 'activa', dia_vencimiento: 20, cuota_monto: 1, fecha_inicio: '2026-01-01', saldo_inicial: 1000 };
+  const b = { id: 'b', estado: 'activa', dia_vencimiento: 5, cuota_monto: 1, fecha_inicio: '2026-01-01', saldo_inicial: 1000 };
+  assert.equal(masUrgente([a, b], [], '2026-10-10').deuda.id, 'b');
+  assert.equal(masUrgente([{ ...a, dia_vencimiento: null }], [], '2026-10-10'), null);
+});
+
+test('cancelacionHoy: capital e intereses solo con cuotas fijas + TNA; cronograma cierra en 0', () => {
+  const d = { ...prestamo, saldo_inicial: 600000, cuota_monto: 50000, cuotas_restantes: 12, tasa_anual: 60 };
+  const c = cancelacionHoy(d, estadoDeuda(d, []));
+  assert.ok(c.capital > 440000 && c.capital < 450000);
+  assert.equal(Math.round(c.capital + c.intereses), 600000);
+  assert.equal(c.cronograma.length, 12);
+  assert.ok(c.cronograma[11].saldo < 0.1);
+  assert.equal(cancelacionHoy({ ...d, tasa_anual: null }, estadoDeuda(d, [])), null);
+  assert.equal(cancelacionHoy({ ...d, cuotas_restantes: null }, estadoDeuda(d, [])), null);
+});
+
+test('validarDeuda: día de vencimiento 1-31 o vacío', () => {
+  const base = { nombre: 'P', tipo: 'prestamo', fecha_inicio: '2026-10-01', saldo_inicial: '1000' };
+  assert.equal(validarDeuda({ ...base, dia_vencimiento: '10' }).fila.dia_vencimiento, 10);
+  assert.equal(validarDeuda({ ...base, dia_vencimiento: '' }).fila.dia_vencimiento, null);
+  assert.equal(validarDeuda({ ...base, dia_vencimiento: '32' }).campo, 'dia_vencimiento');
+  assert.equal(validarDeuda({ ...base, dia_vencimiento: '2,5' }).campo, 'dia_vencimiento');
+});
+
+test('adelantar: el extra derrama a la siguiente deuda cuando cancela la primera', () => {
+  const items = [{ id: 'a', nombre: 'A', saldo: 100000, minimo: 10000, tasa: 100 }, { id: 'b', nombre: 'B', saldo: 300000, minimo: 10000, tasa: 40 }];
+  const r = adelantar(items, 60000, 150000);
+  assert.equal(r.aplicado, 150000);
+  assert.equal(r.deuda, 'A y B');
+});
+
+test('revisión 2: sin mes de más por redondeo del valor presente', () => {
+  const d = { ...prestamo, saldo_inicial: 120000, cuota_monto: 10000, cuotas_restantes: 12, tasa_anual: 120 };
+  const [it] = itemsPlan([d], []);
+  assert.equal(simular([it], 10000).meses, 12);
+  const c = cancelacionHoy(d, estadoDeuda(d, []));
+  assert.equal(c.cronograma.at(-1).saldo, 0);
+});
+
+test('revisión 2: cuotas fijas con TNA y saldo propio simulan con la tasa', () => {
+  const d = { ...prestamo, saldo_inicial: 80000, cuota_monto: 10000, cuotas_restantes: 12, tasa_anual: 120 };
+  const [it] = itemsPlan([d], []);
+  assert.equal(it.tasa, 120);
+  assert.equal(it.saldo, 80000);
+});
+
+test('revisión 2: vencimiento suma pagos del mes, respeta moneda/alta y se apaga al saldar', () => {
+  const d = { id: 'd', estado: 'activa', dia_vencimiento: 10, cuota_monto: 10000, fecha_inicio: '2026-01-01', saldo_inicial: 100000, moneda: 'ARS' };
+  const p = (monto, fecha, extra = {}) => ({ deuda_id: 'd', direccion: 'salida', moneda: 'ARS', monto, fecha, ...extra });
+  assert.equal(proximoVencimiento(d, [p(3000, '2026-10-02'), p(3000, '2026-10-03')], '2026-10-14').pagadaEsteMes, true);
+  assert.equal(proximoVencimiento(d, [p(10000, '2026-10-02', { moneda: 'USD' })], '2026-10-14').estado, 'vencida');
+  assert.equal(proximoVencimiento({ ...d, fecha_inicio: '2026-10-05' }, [p(10000, '2026-10-02')], '2026-10-14').estado, 'vencida');
+  assert.equal(proximoVencimiento({ ...d, saldo_inicial: 100 }, [p(100, '2026-09-20')], '2026-10-05'), null);
 });

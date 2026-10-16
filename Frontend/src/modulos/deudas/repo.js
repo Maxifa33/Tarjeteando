@@ -3,7 +3,7 @@ import { supabase } from '../supabase.js';
 /** Acceso a Supabase de Saldar. RLS filtra por usuario. */
 
 const chk = ({ data, error }) => { if (error) throw error; return data; };
-const CAMPOS = 'id, nombre, tipo, acreedor, moneda, saldo_inicial, fecha_inicio, cuota_monto, cuotas_restantes, tasa_anual, palabra_clave, estado, notas, created_at';
+const CAMPOS = 'id, nombre, tipo, acreedor, moneda, saldo_inicial, fecha_inicio, cuota_monto, cuotas_restantes, tasa_anual, dia_vencimiento, palabra_clave, estado, notas, created_at';
 const MOV = 'id, fecha, monto, moneda, direccion, tipo, estado, descripcion, descripcion_original, contraparte, origen, deuda_id, deudas_descartadas, categoria_id, categoria_previa_id, estado_previo, cuenta_id, categorias!movimientos_categoria_id_fkey(nombre), cuentas(nombre)';
 const num = (d) => ({ ...d, saldo_inicial: Number(d.saldo_inicial), cuota_monto: d.cuota_monto == null ? null : Number(d.cuota_monto), tasa_anual: d.tasa_anual == null ? null : Number(d.tasa_anual) });
 const plano = (m) => ({ ...m, monto: Number(m.monto), categoria: m.categorias?.nombre || null, cuenta: m.cuentas || null });

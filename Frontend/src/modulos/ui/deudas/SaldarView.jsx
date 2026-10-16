@@ -6,9 +6,9 @@ import { movimientosEntre, mesesConDatos } from '../../cuentas/repo.js';
 import { rangoMes, moverMes } from '../../cuentas/resumen.js';
 import { historial } from '../../cuentas/presupuesto.js';
 import { tarjetasPorMes } from '../../puente/tarjeteando.js';
-import { estadoDeuda, sugerirPagos, compararPlanes, itemsPlan, pagadoEnMes, manualParecido, mesMas, TIPOS_DEUDA } from '../../deudas/deudas.js';
+import { estadoDeuda, sugerirPagos, compararPlanes, itemsPlan, pagadoEnMes, manualParecido, mesMas, adelantar, proximoVencimiento, masUrgente, TIPOS_DEUDA } from '../../deudas/deudas.js';
 import { listarDeudas, pagosDeDeudas, candidatos, confirmarPago, descartar, idCategoriaDeudas } from '../../deudas/repo.js';
-import { FormDeuda, DetalleDeuda, hoyISO, plata, fechaDM } from './HojasDeuda.jsx';
+import { FormDeuda, DetalleDeuda, hoyISO, plata, fechaDM, textoVencimiento } from './HojasDeuda.jsx';
 import '../modulos.css';
 
 // Tolerancia de 3 días: el último día del mes puede no tener movimientos.
@@ -34,6 +34,7 @@ async function sugerirMonto(tarjeteando, pagos) {
 const Plan = ({ items, sugerido }) => {
   const minimos = r2(items.reduce((s, d) => s + (d.minimo || 0), 0));
   const [texto, setTexto] = useState('');
+  const [extraTxt, setExtraTxt] = useState('');
   const tocado = useRef(false);
   useEffect(() => {
     if (tocado.current) return;
@@ -41,7 +42,11 @@ const Plan = ({ items, sugerido }) => {
     setTexto(base ? String(base) : '');
   }, [minimos, sugerido]);
   const monto = parseMonto(texto) || 0;
+  const extra = parseMonto(extraTxt) || 0;
   const c = useMemo(() => compararPlanes(items, monto), [items, monto]);
+  const usaBola = !c.iguales && c.recomendada === 'bola';
+  const elegido = usaBola ? c.bola : c.avalancha;
+  const adel = useMemo(() => (extra > 0 && elegido.meses ? adelantar(items, monto, extra, { estrategia: usaBola ? 'bola' : 'avalancha' }) : null), [items, monto, extra, elegido, usaBola]);
   if (!items.length) return null;
 
   const columna = ({ id, titulo, bajada, r }) => {
@@ -56,7 +61,7 @@ const Plan = ({ items, sugerido }) => {
         {r.meses ? (
           <>
             <span className="mod-cifra" style={{ fontSize: 24, fontWeight: 700, letterSpacing: '-.02em' }}>{r.meses} {r.meses === 1 ? 'mes' : 'meses'}</span>
-            <span style={{ fontSize: 14 }}>Terminás en {mesLargo(mesMas(hoyMes(), r.meses))}{c.conTasa ? ` · intereses ${pesos(r.intereses)}` : ''}</span>
+            <span style={{ fontSize: 14 }}>Terminás en {mesLargo(mesMas(hoyMes(), r.meses - 1))}{c.conTasa ? ` · intereses ${pesos(r.intereses)}` : ''}</span>
             <ol style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: 14, color: 'var(--label2)', display: 'flex', flexDirection: 'column', gap: 2 }}>
               {r.orden.map((o) => <li key={o.id}>{o.nombre} <span className="mod-cifra">· mes {o.mes}</span></li>)}
             </ol>
@@ -67,37 +72,78 @@ const Plan = ({ items, sugerido }) => {
   };
 
   return (
-    <section aria-labelledby="sal-plan" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+    <section aria-labelledby="sal-plan" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <h2 id="sal-plan" className="h3" style={{ margin: 0 }}>Plan para saldar</h2>
       <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, color: 'var(--label2)', maxWidth: 360 }}>
         ¿Cuánto podés poner por mes para deudas?
-        <input className="mod-campo" inputMode="decimal" value={texto} onChange={(e) => { tocado.current = true; setTexto(e.target.value); }} style={{ flex: '0 0 auto' }} />
+        <input className="mod-campo" inputMode="decimal" value={texto} onChange={(e) => { tocado.current = true; setTexto(e.target.value); }} onBlur={() => setTexto((t) => { const n = parseMonto(t); return n ? n.toLocaleString('es-AR', { maximumFractionDigits: 2 }) : t; })} style={{ flex: '0 0 auto' }} />
         <span style={{ fontSize: 12 }}>
           {sugerido ? `Sugerido: lo que te quedó en promedio (${sugerido.meses} ${sugerido.meses === 1 ? 'mes' : 'meses'}, Presupuestos) más lo que ya pagás de deudas. ` : ''}
           Mínimo para cubrir cuotas: {pesos(minimos)}.
         </span>
       </label>
-      <div aria-live="polite">
+      <div aria-live="polite" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         {c.avalancha.insuficiente ? (
           <div className="mod-aviso" role="status">No alcanza para las cuotas mínimas ({pesos(minimos)} por mes). Subí el monto o renegociá alguna deuda.</div>
-        ) : (
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            {c.iguales ? columna({ id: 'unico', titulo: 'Tu plan', bajada: items.length === 1 ? `Todo lo que ponés por mes va a ${items[0].nombre}.` : 'Con tus deudas, el orden en que las pagues no cambia el resultado.', r: c.avalancha }) : (
-              <>
-                {columna({ id: 'avalancha', titulo: 'Avalancha', bajada: 'Primero la de tasa más alta. Pagás menos intereses.', r: c.avalancha })}
-                {columna({ id: 'bola', titulo: 'Bola de nieve', bajada: 'Primero la más chica. Cerrás deudas antes y liberás cuotas.', r: c.bola })}
-              </>
+        ) : elegido.meses ? (
+          <>
+            <div className="mod-resumen">
+              <span className="mod-res-et">Libre de deudas en</span>
+              <span className="mod-res-num">{capitalizar(mesLargo(mesMas(hoyMes(), elegido.meses - 1)))}</span>
+              <span className="mod-res-sub">{elegido.meses} {elegido.meses === 1 ? 'mes' : 'meses'}{c.conTasa ? ` · intereses por pagar: ${pesos(elegido.intereses)}` : ''}</span>
+              {elegido.orden.length > 1 && (
+                <span className="mod-res-sub">{usaBola ? 'Bola de nieve' : 'Avalancha'}: {elegido.orden.map((o) => `${o.nombre} (mes ${o.mes})`).join(' → ')}</span>
+              )}
+            </div>
+            {elegido.primerMes?.length > 0 && (
+              <section aria-labelledby="sal-este-mes" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <h3 id="sal-este-mes" className="h3" style={{ margin: 0 }}>Si seguís el plan este mes</h3>
+                <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column' }}>
+                  {elegido.primerMes.map((x) => (
+                    <li key={x.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, minHeight: 48, padding: '6px 0', borderBottom: '0.5px solid var(--sep)' }}>
+                      <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                        <span style={{ fontSize: 16, fontWeight: 500 }}>{x.nombre}</span>
+                        <span style={{ fontSize: 13, color: 'var(--label2)' }}>{x.cuota > 0 ? (x.extra > 0 ? `Cuota ${pesos(x.cuota)} + ${pesos(x.extra)} extra` : 'Solo la cuota') : 'Pago libre: lo que sobra'}</span>
+                      </span>
+                      <span className="mod-cifra" style={{ fontSize: 16, fontWeight: 600 }}>{pesos(x.cuota + x.extra)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
             )}
-          </div>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, color: 'var(--label2)', maxWidth: 360 }}>
+              ¿Y si adelantás plata una sola vez?
+              <input className="mod-campo" inputMode="decimal" placeholder="Ej. un aguinaldo" value={extraTxt} onChange={(e) => setExtraTxt(e.target.value)} onBlur={() => setExtraTxt((t) => { const n = parseMonto(t); return n ? n.toLocaleString('es-AR', { maximumFractionDigits: 2 }) : t; })} style={{ flex: '0 0 auto' }} />
+            </label>
+            {adel && (
+              <div className="mod-aviso" role="status">
+                {adel.mesesMenos > 0 || adel.ahorro > 0
+                  ? <span>Con {pesos(adel.aplicado)} extra a <b>{adel.deuda}</b>{adel.mesesMenos > 0 ? <> terminás <b>{adel.mesesMenos} {adel.mesesMenos === 1 ? 'mes' : 'meses'} antes</b></> : ''}{adel.ahorro > 0 ? <> y ahorrás <b>{pesos(adel.ahorro)}</b> de intereses</> : ''}.</span>
+                  : <span>Con este extra no cambia el plazo. {c.conTasa ? '' : 'Sin tasas cargadas el extra solo adelanta cuotas: no ahorra intereses.'}</span>}
+              </div>
+            )}
+          </>
+        ) : null}
+        {!c.avalancha.insuficiente && !c.iguales && (
+          <details className="mod-mas">
+            <summary>Comparar avalancha y bola de nieve</summary>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 8 }}>
+              {columna({ id: 'avalancha', titulo: 'Avalancha', bajada: 'Primero la de tasa más alta. Pagás menos intereses.', r: c.avalancha })}
+              {columna({ id: 'bola', titulo: 'Bola de nieve', bajada: 'Primero la más chica. Cerrás deudas antes y liberás cuotas.', r: c.bola })}
+            </div>
+          </details>
         )}
+        {c.avalancha.insuficiente || !elegido.meses ? (!c.avalancha.insuficiente && (
+          <div className="mod-aviso" role="status">{c.avalancha.motivo === 'sin_monto' ? 'Poné un monto por mes.' : c.avalancha.motivo === 'muy_largo' ? 'Con este monto tardás más de 30 años.' : 'Con este monto no terminás nunca: los intereses crecen más rápido que lo que pagás. Subí el monto o renegociá la tasa más cara.'}</div>
+        )) : null}
         {!c.avalancha.insuficiente && (
-          <p style={{ margin: '10px 0 0', fontSize: 13, color: 'var(--label2)' }}>
-            {c.iguales ? (items.some((d) => d.fija) ? 'En las deudas en cuotas fijas los intereses ya están en la cuota: poner más solo adelanta cuotas (preguntá al banco si te descuenta intereses o cobra cargo).' : '')
-              : !c.recomendada ? (monto > 0 ? 'Ninguno de los dos termina con este monto: subilo o renegociá la tasa más cara.' : '')
-              : !c.avalancha.meses || !c.bola.meses ? `Solo ${c.recomendada === 'avalancha' ? 'avalancha' : 'bola de nieve'} termina con este monto.`
-                : !c.conTasa ? 'Sin tasas cargadas, los dos planes tardan lo mismo: conviene bola de nieve porque cerrás deudas antes.'
-                  : c.recomendada === 'avalancha' ? `Avalancha te ahorra ${pesos(c.ahorro)} en intereses.`
-                    : 'La diferencia en intereses es chica: bola de nieve te da victorias rápidas.'}
+          <p style={{ margin: 0, fontSize: 13, color: 'var(--label2)' }}>
+            {c.iguales ? (items.some((d) => d.fija) ? 'En las deudas en cuotas fijas sin tasa cargada los intereses ya están en la cuota: poner más solo adelanta cuotas (preguntá al banco si te descuenta intereses o cobra cargo).' : '')
+              : !c.recomendada ? ''
+                : !c.avalancha.meses || !c.bola.meses ? `Solo ${c.recomendada === 'avalancha' ? 'avalancha' : 'bola de nieve'} termina con este monto.`
+                  : !c.conTasa ? 'Sin tasas cargadas, los dos planes tardan lo mismo: conviene bola de nieve porque cerrás deudas antes.'
+                    : c.recomendada === 'avalancha' ? `Avalancha te ahorra ${pesos(c.ahorro)} en intereses.`
+                      : 'La diferencia en intereses es chica: bola de nieve te da victorias rápidas.'}
             {' '}Las deudas en dólares no entran en el plan.
           </p>
         )}
@@ -146,8 +192,9 @@ const SaldarView = ({ tarjeteando }) => {
 
   const activas = deudas.filter((d) => d.estado === 'activa');
   const saldadas = deudas.filter((d) => d.estado === 'saldada');
-  const total = (moneda) => r2(activas.filter((d) => d.moneda === moneda).reduce((s, d) => s + estadoDeuda(d, pagos).saldo, 0));
+  const total = (moneda) => r2(activas.filter((d) => (d.moneda || 'ARS') === moneda).reduce((s, d) => s + estadoDeuda(d, pagos).saldo, 0));
   const detalle = deudas.find((d) => d.id === detalleId) || null;
+  const urgente = masUrgente(activas, pagos, hoyISO());
 
   const accion = async (s, fn) => {
     setOcupado(s.mov.id); setError(null);
@@ -166,6 +213,7 @@ const SaldarView = ({ tarjeteando }) => {
   const tarjeta = (d) => {
     const e = estadoDeuda(d, pagos);
     const tipo = TIPOS_DEUDA.find((t) => t.id === d.tipo)?.label;
+    const venc = proximoVencimiento(d, pagos, hoyISO());
     return (
       <li key={d.id}>
         <button type="button" className="mod-mov" onClick={() => setDetalleId(d.id)} style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8, padding: 16, borderRadius: 20, background: 'var(--fill2)' }}
@@ -178,6 +226,7 @@ const SaldarView = ({ tarjeteando }) => {
             <span className="mod-cifra" style={{ fontSize: 20, fontWeight: 700 }}>{plata(e.saldo, d.moneda)}</span>
           </span>
           <span className="mod-barra" aria-hidden="true"><i style={{ transform: `scaleX(${e.progreso})` }} /></span>
+          {venc && !venc.pagadaEsteMes && <span style={{ fontSize: 13, fontWeight: 600, color: venc.estado === 'vencida' ? 'var(--danger)' : 'var(--label)' }}>{textoVencimiento(venc)}</span>}
           <span style={{ fontSize: 13, color: 'var(--label2)' }}>
             {d.estado === 'saldada' ? `Saldada${e.ultimoPago ? ` · último pago ${fechaDM(e.ultimoPago)}` : ''}`
               : e.saldo <= 0 ? 'Pagada: marcala como saldada'
@@ -202,6 +251,13 @@ const SaldarView = ({ tarjeteando }) => {
             <span style={{ fontSize: 13, color: 'var(--label2)' }}>Pagaste en {capitalizar(mesLargo(hoyMes()))}</span>
             <span className="mod-cifra" style={{ fontSize: 20, lineHeight: '26px', fontWeight: 600 }}>{pesos(pagadoEnMes(pagos, hoyMes()))}</span>
           </div>
+          {urgente && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <span style={{ fontSize: 13, color: 'var(--label2)' }}>{urgente.v.estado === 'vencida' ? 'Vencida' : 'Próximo vencimiento'}</span>
+              <span style={{ fontSize: 20, lineHeight: '26px', fontWeight: 600, color: urgente.v.estado === 'vencida' ? 'var(--danger)' : undefined }}>{textoVencimiento(urgente.v)}</span>
+              <span className="mod-cifra" style={{ fontSize: 13, color: 'var(--label2)' }}>{urgente.deuda.nombre}{urgente.deuda.cuota_monto ? ` · ${plata(urgente.deuda.cuota_monto, urgente.deuda.moneda)}` : ''}</span>
+            </div>
+          )}
         </div>
         <button type="button" className="btn btn-pri" onClick={() => setForm({ deuda: null })} style={{ minHeight: 44, borderRadius: 22, padding: '0 18px' }}>
           <Plus size={16} aria-hidden="true" /> Nueva deuda
@@ -267,15 +323,15 @@ const SaldarView = ({ tarjeteando }) => {
       <Plan items={items} sugerido={sugerido} />
 
       {saldadas.length > 0 && (
-        <details>
-          <summary style={{ cursor: 'pointer', fontSize: 15, fontWeight: 600, minHeight: 44, display: 'flex', alignItems: 'center' }}>Saldadas ({saldadas.length})</summary>
+        <details className="mod-mas">
+          <summary>Saldadas ({saldadas.length})</summary>
           <ul style={{ listStyle: 'none', margin: '8px 0 0', padding: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
             {saldadas.map(tarjeta)}
           </ul>
         </details>
       )}
 
-      <FormDeuda abierta={!!form} deuda={form?.deuda || null} onCerrar={() => setForm(null)} onGuardado={() => cargar()} />
+      <FormDeuda key={form?.deuda?.id ?? 'nueva'} abierta={!!form} deuda={form?.deuda || null} pagos={pagos} onCerrar={() => setForm(null)} onGuardado={() => cargar()} />
       <DetalleDeuda deuda={form ? null : detalle} pagos={pagos} onCerrar={() => setDetalleId(null)} onCambio={cargar}
         onEditar={(d) => setForm({ deuda: d })} />
     </section>

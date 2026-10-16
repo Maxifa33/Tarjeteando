@@ -1,8 +1,9 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { pesos, dolares, mesCorto } from '../../../ui/formato.js';
 import Hoja from '../../../ui/Hoja.jsx';
 import Seg from '../../../ui/Seg.jsx';
-import { TIPOS_DEUDA, validarDeuda, estadoDeuda } from '../../deudas/deudas.js';
+import { TIPOS_DEUDA, estadoDeuda, proximoVencimiento, cancelacionHoy } from '../../deudas/deudas.js';
+import { MODOS, modoDeTipo, formVacio, formDesdeDeuda, derivar, filaDesdeForm } from '../../deudas/formulario.js';
 import { parseMonto } from '../../cuentas/util.js';
 import { crearDeuda, actualizarDeuda, borrarDeuda, quitarPago, registrarPagoManual } from '../../deudas/repo.js';
 import '../modulos.css';
@@ -10,84 +11,205 @@ import '../modulos.css';
 export const hoyISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 /** '2026-10-09' → '9 oct' (con mes: los pagos cruzan meses). */
 export const fechaDM = (iso) => (iso ? `${Number(iso.slice(8, 10))} ${mesCorto(iso.slice(0, 7))}` : '');
+/** 'Vence mañana', 'Venció el 3 oct (hace 4 días)'… para un resultado de proximoVencimiento. */
+export const textoVencimiento = (v) => {
+  const pl = (n) => `${n} ${n === 1 ? 'día' : 'días'}`;
+  if (v.estado === 'vencida') return `Venció el ${fechaDM(v.fecha)} (hace ${pl(-v.dias)})`;
+  if (v.estado === 'hoy') return 'Vence hoy';
+  if (v.dias === 1) return 'Vence mañana';
+  return `Vence el ${fechaDM(v.fecha)} (en ${pl(v.dias)})`;
+};
 export const plata = (n, moneda) => (moneda === 'USD' ? dolares(n) : pesos(n));
 
-const Campo = ({ label, nota, children }) => (
-  <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, color: 'var(--label2)' }}>
-    {label}
+const Fila = ({ id, label, sub, error, children }) => (
+  <div className="mod-filaf" data-error={error ? '1' : undefined}>
+    <label htmlFor={id} className="mod-filaf-et">{label}{sub && <small>{sub}</small>}</label>
     {children}
-    {nota && <span style={{ fontSize: 12 }}>{nota}</span>}
-  </label>
+  </div>
 );
 
 const AYUDA = {
-  prestamo: { acreedor: 'Banco o app (ej. Galicia, Mercado Pago)', nombre: 'Préstamo personal' },
-  persona: { acreedor: 'Nombre y apellido, como aparece en la transferencia', nombre: 'Le debo a…' },
-  atraso: { acreedor: 'Empresa u organismo (ej. Edenor, ARBA)', nombre: 'Luz atrasada' }
+  prestamo: { acreedor: 'Galicia, Mercado Pago…', quien: 'Con quién' },
+  persona: { acreedor: 'Nombre y apellido', quien: 'A quién' },
+  atraso: { acreedor: 'Edenor, ARBA…', quien: 'Con quién' }
+};
+const NOMBRE_AUTO = { prestamo: 'Préstamo', persona: 'Deuda', atraso: 'Atraso' };
+
+const mil = (v) => { const n = parseMonto(v); return n == null ? v : n.toLocaleString('es-AR', { maximumFractionDigits: 2 }); };
+
+/** El resultado en vivo: lo que el formulario entendió, antes de guardar. */
+const Resumen = ({ f, dv }) => {
+  const m = f.moneda;
+  if (!(dv.saldo > 0)) {
+    return (
+      <div className="mod-resumen" aria-live="polite">
+        <span className="mod-res-et">Debés hoy</span>
+        <span className="mod-cifra mod-res-num">—</span>
+        <span className="mod-res-sub">{f.modo === 'cuotas' ? 'Poné la cuota y cuántas faltan.' : 'Poné cuánto debés.'}</span>
+      </div>
+    );
+  }
+  const lineas = [];
+  if (dv.cuotasOk) {
+    lineas.push(<span key="c"><b>{dv.n} {dv.n === 1 ? 'cuota' : 'cuotas'}</b> de {plata(dv.cuota, m)}</span>);
+    if (Math.abs(dv.saldo - dv.auto) > 0.5) lineas.push(<span key="d">Cuota × cuotas daría {plata(dv.auto, m)}; usamos lo que escribiste.</span>);
+  } else if (dv.meses === Infinity) {
+    lineas.push(<span key="i">Con {plata(dv.cuota, m)} por mes no se termina de pagar: no cubre los intereses.</span>);
+  } else if (dv.meses) {
+    lineas.push(<span key="m">Con {plata(dv.cuota, m)} por mes: <b>{dv.meses} {dv.meses === 1 ? 'mes' : 'meses'}</b>.</span>);
+  }
+  if (dv.capitalHoy != null) {
+    lineas.push(<span key="k">Cancelando hoy pagarías unos <b>{plata(dv.capitalHoy, m)}</b>: te ahorrás {plata(dv.ahorro, m)} de intereses.</span>);
+  }
+  return (
+    <div className="mod-resumen" aria-live="polite">
+      <span className="mod-res-et">Debés hoy</span>
+      <span className="mod-cifra mod-res-num">{plata(dv.saldo, m)}</span>
+      {lineas.map((l, k) => <span key={k} className="mod-res-sub">{l}</span>)}
+    </div>
+  );
 };
 
-const vacioForm = () => ({ tipo: 'prestamo', nombre: '', acreedor: '', moneda: 'ARS', saldo_inicial: '', cuota_monto: '', cuotas_restantes: '', tasa_anual: '', palabra_clave: '', notas: '', fecha_inicio: hoyISO() });
-const aForm = (d) => ({
-  tipo: d.tipo, nombre: d.nombre, acreedor: d.acreedor || '', moneda: d.moneda, saldo_inicial: String(d.saldo_inicial).replace('.', ','),
-  cuota_monto: d.cuota_monto == null ? '' : String(d.cuota_monto).replace('.', ','), cuotas_restantes: d.cuotas_restantes ?? '',
-  tasa_anual: d.tasa_anual ?? '', palabra_clave: d.palabra_clave || '', notas: d.notas || '', fecha_inicio: d.fecha_inicio
-});
-
 /** Alta o edición de una deuda. */
-export const FormDeuda = ({ abierta, deuda, onCerrar, onGuardado }) => {
-  const [f, setF] = useState(vacioForm);
-  const [error, setError] = useState(null);
+export const FormDeuda = ({ abierta, deuda, pagos = [], onCerrar, onGuardado }) => {
+  const [f, setF] = useState(() => formVacio(hoyISO()));
+  const [error, setError] = useState(null); // { campo, msg }
   const [guardando, setGuardando] = useState(false);
-  useEffect(() => { if (abierta) { setF(deuda ? aForm(deuda) : vacioForm()); setError(null); } }, [abierta, deuda]);
-  const set = (k) => (e) => setF((x) => ({ ...x, [k]: e?.target ? e.target.value : e }));
-  const ayuda = AYUDA[f.tipo];
-  const cuota = parseMonto(f.cuota_monto);
-  const n = Number(f.cuotas_restantes);
-  const calculado = !f.saldo_inicial && cuota > 0 && Number.isInteger(n) && n > 0 ? cuota * n : null;
+  const [mas, setMas] = useState(false);
+  const modoTocado = useRef(false);
+  const pagosRef = useRef(pagos);
+  pagosRef.current = pagos;
+  useEffect(() => {
+    if (!abierta) return;
+    const ini = deuda ? formDesdeDeuda(deuda, pagosRef.current) : formVacio(hoyISO());
+    setF(ini); setError(null); setGuardando(false);
+    modoTocado.current = !!deuda;
+    setMas(!!deuda && !!(ini.tasa_anual || ini.palabra_clave || ini.notas || ini.moneda !== 'ARS' || (ini.modo === 'cuotas' && ini.saldo_hoy)));
+  }, [abierta, deuda]);
+  useEffect(() => {
+    if (!error?.campo) return;
+    if (['tasa_anual', 'fecha_inicio'].includes(error.campo) || (error.campo === 'saldo_hoy' && f.modo === 'cuotas')) setMas(true);
+    requestAnimationFrame(() => document.getElementById(`fd-${error.campo}`)?.focus());
+  }, [error]);
+
+  const set = (k) => (e) => { setError(null); setF((x) => ({ ...x, [k]: e.target.value })); };
+  const formatear = (k) => () => setF((x) => (x[k] === '' ? x : { ...x, [k]: mil(x[k]) }));
+  const cambiarTipo = (tipo) => setF((x) => ({ ...x, tipo, ...(modoTocado.current ? {} : { modo: modoDeTipo(tipo) }) }));
+  const cambiarModo = (modo) => { modoTocado.current = true; setError(null); setF((x) => ({ ...x, modo })); };
+  const dv = useMemo(() => derivar(f), [f]);
+  const err = (k) => error?.campo === k;
+  const u = f.moneda === 'USD' ? ' (U$S)' : '';
+  const nombreAuto = [NOMBRE_AUTO[f.tipo], f.acreedor.trim()].filter(Boolean).join(' ');
 
   const guardar = async () => {
-    const v = validarDeuda(f);
-    if (v.error) { setError(v.error); return; }
+    const v = filaDesdeForm(f, { deuda, pagos: pagosRef.current });
+    if (v.error) { setError({ campo: v.campo, msg: v.error }); return; }
     setGuardando(true); setError(null);
     try {
       const fila = deuda ? await actualizarDeuda(deuda.id, v.fila) : await crearDeuda(v.fila);
       onGuardado?.(fila); onCerrar();
-    } catch { setError('No se pudo guardar. Revisá tu conexión.'); }
+    } catch { setError({ campo: null, msg: 'No se pudo guardar. Revisá tu conexión y probá de nuevo.' }); }
     finally { setGuardando(false); }
   };
 
+  const monto = (k, ph = '0') => ({
+    id: `fd-${k}`, className: 'mod-filaf-in', inputMode: 'decimal', autoComplete: 'off', placeholder: ph, value: f[k],
+    onChange: set(k), onBlur: formatear(k), 'aria-invalid': err(k) || undefined
+  });
+
   return (
     <Hoja abierta={abierta} onCerrar={onCerrar} titulo={deuda ? 'Editar deuda' : 'Nueva deuda'}>
-      <form onSubmit={(e) => { e.preventDefault(); guardar(); }} style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '4px 4px 8px' }}>
-        <Seg opciones={TIPOS_DEUDA} valor={f.tipo} onCambio={set('tipo')} ariaLabel="Tipo de deuda" />
-        <Campo label="Nombre"><input className="mod-campo" value={f.nombre} onChange={set('nombre')} placeholder={ayuda.nombre} /></Campo>
-        <Campo label={f.tipo === 'persona' ? '¿A quién?' : '¿Con quién?'} nota={ayuda.acreedor + '. Sirve para reconocer los pagos en tus cuentas.'}>
-          <input className="mod-campo" value={f.acreedor} onChange={set('acreedor')} />
-        </Campo>
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-          <Campo label="Cuota mensual (si tiene)"><input className="mod-campo" inputMode="decimal" value={f.cuota_monto} onChange={set('cuota_monto')} placeholder="0" /></Campo>
-          <Campo label={deuda ? 'Cuotas que faltaban' : 'Cuotas que faltan'}><input className="mod-campo" inputMode="numeric" value={f.cuotas_restantes} onChange={set('cuotas_restantes')} placeholder="0" /></Campo>
+      <form onSubmit={(e) => { e.preventDefault(); guardar(); }} noValidate style={{ display: 'flex', flexDirection: 'column', gap: 20, padding: '4px 0 8px' }}>
+        <div className="mod-seg-full"><Seg opciones={TIPOS_DEUDA} valor={f.tipo} onCambio={cambiarTipo} ariaLabel="Tipo de deuda" /></div>
+
+        <div className="mod-grupo">
+          <Fila id="fd-acreedor" label={AYUDA[f.tipo].quien} sub="Reconoce los pagos en tus cuentas">
+            <input id="fd-acreedor" className="mod-filaf-in" autoComplete="off" autoCapitalize="words" placeholder={AYUDA[f.tipo].acreedor} value={f.acreedor} onChange={set('acreedor')} />
+          </Fila>
+          <Fila id="fd-nombre" label="Nombre" error={err('nombre')}>
+            <input id="fd-nombre" className="mod-filaf-in" autoComplete="off" autoCapitalize="sentences" placeholder={nombreAuto || 'Como la querés ver'} value={f.nombre} onChange={set('nombre')} aria-invalid={err('nombre') || undefined} />
+          </Fila>
         </div>
-        <Campo label={deuda ? `Lo que debías el ${fechaDM(f.fecha_inicio)}` : 'Lo que debés hoy'}
-          nota={calculado ? `Si lo dejás vacío: ${plata(calculado, f.moneda)} (cuota × cuotas que faltan).` : deuda ? 'El saldo de esa fecha: los pagos posteriores se descuentan solos.' : 'El total pendiente a hoy.'}>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <input className="mod-campo" inputMode="decimal" value={f.saldo_inicial} onChange={set('saldo_inicial')} placeholder={calculado ? String(calculado) : '0'} />
-            <select className="mod-select" value={f.moneda} onChange={set('moneda')} aria-label="Moneda"><option value="ARS">$</option><option value="USD">U$S</option></select>
+
+        <div>
+          <p className="mod-seccion">¿Cómo la pagás?</p>
+          <div className="mod-seg-full"><Seg opciones={MODOS} valor={f.modo} onCambio={cambiarModo} ariaLabel="Forma de pago" /></div>
+          <div className="mod-grupo" style={{ marginTop: 10 }}>
+            {f.modo === 'cuotas' ? (
+              <>
+                <Fila id="fd-cuota_monto" label={`Cuota mensual${u}`} error={err('cuota_monto')}>
+                  <input {...monto('cuota_monto')} />
+                </Fila>
+                <Fila id="fd-cuotas_restantes" label="Cuotas que faltan" error={err('cuotas_restantes')}>
+                  <input id="fd-cuotas_restantes" className="mod-filaf-in" inputMode="numeric" autoComplete="off" placeholder="0" value={f.cuotas_restantes} onChange={set('cuotas_restantes')} aria-invalid={err('cuotas_restantes') || undefined} />
+                </Fila>
+                <Fila id="fd-dia_vencimiento" label="Vence el día" sub="Opcional: te avisamos si se vence" error={err('dia_vencimiento')}>
+                  <input id="fd-dia_vencimiento" className="mod-filaf-in" inputMode="numeric" autoComplete="off" placeholder="Ej. 10" value={f.dia_vencimiento} onChange={set('dia_vencimiento')} aria-invalid={err('dia_vencimiento') || undefined} />
+                </Fila>
+              </>
+            ) : (
+              <>
+                <Fila id="fd-saldo_hoy" label={`Debés hoy${u}`} error={err('saldo_hoy')}>
+                  <input {...monto('saldo_hoy')} />
+                </Fila>
+                <Fila id="fd-cuota_monto" label={`Pago mensual${u}`} sub="Opcional" error={err('cuota_monto')}>
+                  <input {...monto('cuota_monto')} />
+                </Fila>
+                <Fila id="fd-dia_vencimiento" label="Vence el día" sub="Opcional: te avisamos si se vence" error={err('dia_vencimiento')}>
+                  <input id="fd-dia_vencimiento" className="mod-filaf-in" inputMode="numeric" autoComplete="off" placeholder="Ej. 10" value={f.dia_vencimiento} onChange={set('dia_vencimiento')} aria-invalid={err('dia_vencimiento') || undefined} />
+                </Fila>
+              </>
+            )}
           </div>
-        </Campo>
-        <Campo label="Tasa anual % (opcional)" nota="Solo si lo que debés crece con intereses (tarjeta, préstamo sin cuotas fijas). Con cuota y cuotas que faltan cargadas, la tasa no se usa: ya está en la cuota.">
-          <input className="mod-campo" inputMode="decimal" value={f.tasa_anual} onChange={set('tasa_anual')} placeholder="Ej. 85" />
-        </Campo>
-        <Campo label="Palabra clave (opcional)" nota='Una palabra que aparezca en el movimiento del pago, ej. "PRESTAMO 4521".'>
-          <input className="mod-campo" value={f.palabra_clave} onChange={set('palabra_clave')} />
-        </Campo>
-        <Campo label="Contar pagos desde" nota="Los pagos anteriores a esta fecha no descuentan.">
-          <input className="mod-campo" type="date" max={hoyISO()} value={f.fecha_inicio} onChange={set('fecha_inicio')} />
-        </Campo>
-        {error && <p role="alert" style={{ margin: 0, fontSize: 13, color: 'var(--danger)' }}>{error}</p>}
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button type="button" className="btn" onClick={onCerrar} disabled={guardando} style={{ minHeight: 44 }}>Cancelar</button>
-          <button type="submit" className="btn btn-pri" disabled={guardando} style={{ minHeight: 44, borderRadius: 22, padding: '0 18px' }}>{guardando ? 'Guardando…' : 'Guardar'}</button>
+        </div>
+
+        <Resumen f={f} dv={dv} />
+
+        <details className="mod-mas" open={mas} onToggle={(e) => setMas(e.currentTarget.open)}>
+          <summary>Más opciones</summary>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 6 }}>
+            <div className="mod-grupo">
+              <Fila id="fd-moneda" label="Moneda">
+                <select id="fd-moneda" className="mod-filaf-in" value={f.moneda} onChange={set('moneda')}><option value="ARS">Pesos ($)</option><option value="USD">Dólares (U$S)</option></select>
+              </Fila>
+              {f.modo === 'cuotas' && (
+                <Fila id="fd-saldo_hoy" label={`Saldo actual${u}`} sub="Solo si tu banco dice otro" error={err('saldo_hoy')}>
+                  <input {...monto('saldo_hoy', dv.auto ? mil(dv.auto) : '0')} />
+                </Fila>
+              )}
+              <Fila id="fd-tasa_anual" label="Tasa anual (TNA)" sub={f.modo === 'cuotas' ? 'Del contrato. Calcula cuánto pagás si cancelás hoy' : 'Si crece con intereses, el plan la suma'} error={err('tasa_anual')}>
+                <input id="fd-tasa_anual" className="mod-filaf-in" inputMode="decimal" autoComplete="off" placeholder="Ej. 85" value={f.tasa_anual} onChange={set('tasa_anual')} aria-invalid={err('tasa_anual') || undefined} /><span className="mod-filaf-suf" aria-hidden="true">%</span>
+              </Fila>
+              {f.modo === 'cuotas' && (
+                <Fila id="fd-capital" label="Capital pendiente" sub="Si no sabés la tasa: lo que te prestaron, y la calculamos">
+                  <input {...monto('capital')} />
+                </Fila>
+              )}
+              <Fila id="fd-palabra_clave" label="Palabra clave" sub='Ej. PRESTAMO 4521'>
+                <input id="fd-palabra_clave" className="mod-filaf-in" autoComplete="off" value={f.palabra_clave} onChange={set('palabra_clave')} />
+              </Fila>
+              <Fila id="fd-fecha_inicio" label="Contar pagos desde" sub="Los anteriores no descuentan" error={err('fecha_inicio')}>
+                <input id="fd-fecha_inicio" className="mod-filaf-in" type="date" max={hoyISO()} value={f.fecha_inicio} onChange={set('fecha_inicio')} aria-invalid={err('fecha_inicio') || undefined} />
+              </Fila>
+              <Fila id="fd-notas" label="Notas">
+                <input id="fd-notas" className="mod-filaf-in" autoComplete="off" value={f.notas} onChange={set('notas')} />
+              </Fila>
+            </div>
+            {dv.implicita && (
+              <div className="mod-aviso" role="status" style={{ alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                <span>Tasa implícita: <b>{dv.implicita.tna.toFixed(1).replace('.', ',')} % TNA</b> ({dv.implicita.tea.toFixed(0)} % efectiva anual). Intereses de las {dv.n} cuotas: {plata(dv.implicita.intereses, f.moneda)}.</span>
+                <button type="button" className="btn" style={{ minHeight: 44 }} onClick={() => setF((x) => ({ ...x, tasa_anual: dv.implicita.tna.toFixed(2).replace('.', ',') }))}>Usar esta tasa</button>
+              </div>
+            )}
+            {dv.implicitaInvalida && <div className="mod-aviso" role="status">Con esos datos no cierra: {dv.n} cuotas de {plata(dv.cuota, f.moneda)} suman menos que el capital.</div>}
+          </div>
+        </details>
+
+        <div className="mod-cta">
+          {error && <p role="alert" style={{ margin: 0, fontSize: 14, color: 'var(--danger)' }}>{error.msg}</p>}
+          <button type="submit" className="btn btn-pri" disabled={guardando} style={{ minHeight: 50, borderRadius: 25, fontSize: 17, fontWeight: 600 }}>
+            {guardando ? 'Guardando…' : deuda ? 'Guardar cambios' : 'Guardar deuda'}
+          </button>
         </div>
       </form>
     </Hoja>
@@ -120,6 +242,8 @@ export const DetalleDeuda = ({ deuda, pagos, onCerrar, onCambio, onEditar }) => 
   useEffect(() => { setAvisoDup(null); setMonto(deuda?.cuota_monto ? String(deuda.cuota_monto).replace('.', ',') : ''); setFecha(hoyISO()); setError(null); }, [deuda?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!deuda) return null;
   const e = estadoDeuda(deuda, pagos);
+  const venc = proximoVencimiento(deuda, pagos, hoyISO());
+  const cancel = cancelacionHoy(deuda, e);
   const anteriores = pagos.filter((m) => m.deuda_id === deuda.id && m.fecha < deuda.fecha_inicio);
 
   const hacer = async (fn) => {
@@ -150,10 +274,35 @@ export const DetalleDeuda = ({ deuda, pagos, onCerrar, onCambio, onEditar }) => 
           <span style={{ fontSize: 13, color: 'var(--label2)' }}>{TIPOS_DEUDA.find((t) => t.id === deuda.tipo)?.label}{deuda.acreedor ? ` · ${deuda.acreedor}` : ''}{deuda.estado === 'saldada' ? ' · Saldada' : ''}</span>
           <span className="mod-cifra" style={{ fontSize: 34, lineHeight: '40px', fontWeight: 700, letterSpacing: '-.02em' }}>{plata(e.saldo, deuda.moneda)}</span>
           <span style={{ fontSize: 14, color: 'var(--label2)' }}>
-            Pagaste {plata(e.pagado, deuda.moneda)} de {plata(deuda.saldo_inicial, deuda.moneda)}{e.cuotasRestantes != null ? ` · faltan ${e.cuotasRestantes} cuotas` : ''}{deuda.tasa_anual ? ` · ${deuda.tasa_anual}% anual` : ''}
+            Pagaste {plata(e.pagado, deuda.moneda)} de {plata(deuda.saldo_inicial, deuda.moneda)}{e.cuotasRestantes != null ? ` · ${e.cuotasRestantes === 1 ? 'falta 1 cuota' : `faltan ${e.cuotasRestantes} cuotas`}` : ''}{deuda.tasa_anual ? ` · ${deuda.tasa_anual} % TNA` : ''}
           </span>
           <div className="mod-barra" aria-hidden="true"><i style={{ transform: `scaleX(${e.progreso})` }} /></div>
+          {venc && <span style={{ fontSize: 14, fontWeight: 600, color: venc.estado === 'vencida' && !venc.pagadaEsteMes ? 'var(--danger)' : undefined }}>{venc.pagadaEsteMes ? `Este mes ya pagaste. ${textoVencimiento(venc)}` : textoVencimiento(venc)}</span>}
         </div>
+
+        {cancel && deuda.estado === 'activa' && (
+          <section aria-labelledby="dd-cancel" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <h3 id="dd-cancel" className="h3" style={{ margin: 0 }}>Si cancelás hoy</h3>
+            <div className="mod-resumen">
+              <span className="mod-res-et">Pagarías unos</span>
+              <span className="mod-cifra mod-res-num">{plata(cancel.capital, deuda.moneda)}</span>
+              <span className="mod-res-sub">En vez de {plata(e.saldo, deuda.moneda)}: te ahorrás <b>{plata(cancel.intereses, deuda.moneda)}</b> de intereses (con {deuda.tasa_anual} % TNA). Confirmá el monto exacto con el banco: puede haber cargos de cancelación.</span>
+            </div>
+            <details className="mod-mas">
+              <summary>Cuánto de cada cuota es interés</summary>
+              <div style={{ overflowX: 'auto' }}><table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead><tr style={{ color: 'var(--label2)', textAlign: 'right' }}><th scope="col" style={{ textAlign: 'left', fontWeight: 500, padding: '6px 0' }}>Cuota</th><th scope="col" style={{ fontWeight: 500 }}>Interés</th><th scope="col" style={{ fontWeight: 500 }}>Capital</th><th scope="col" style={{ fontWeight: 500 }}>Queda</th></tr></thead>
+                <tbody>
+                  {cancel.cronograma.map((r) => (
+                    <tr key={r.n} className="mod-cifra" style={{ textAlign: 'right', borderTop: '0.5px solid var(--sep)' }}>
+                      <th scope="row" style={{ textAlign: 'left', fontWeight: 500, padding: '8px 0' }}>{r.n}</th><td>{plata(r.interes, deuda.moneda)}</td><td>{plata(r.amortizacion, deuda.moneda)}</td><td>{plata(r.saldo, deuda.moneda)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table></div>
+            </details>
+          </section>
+        )}
 
         {deuda.estado === 'activa' && (
           <section aria-labelledby="dd-pagar" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
