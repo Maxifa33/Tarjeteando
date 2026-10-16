@@ -1,7 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, Smartphone } from 'lucide-react';
 import { pesos, dolares, mesCorto, capitalizar, mesLargo } from '../../../ui/formato.js';
-import { movimientosEntre, mesesConDatos } from '../../cuentas/repo.js';
+import { movimientosEntre, mesesConDatos, listarBolsillos } from '../../cuentas/repo.js';
+import { resumenReservas, movsManuales } from '../../alcancia/reservas.js';
+import { movimientosDeReservas, listarAjustes, listarMovsManuales, preciosPara } from '../../alcancia/repo.js';
+import { hoyISO } from '../deudas/HojasDeuda.jsx';
 import { rangoMes, moverMes } from '../../cuentas/resumen.js';
 import { historial } from '../../cuentas/presupuesto.js';
 import { tarjetasPorMes } from '../../puente/tarjeteando.js';
@@ -41,6 +44,20 @@ const PresupuestosView = ({ tarjeteando }) => {
   const [error, setError] = useState(null);
   const [cargadoMes, setCargadoMes] = useState(null);
   const pedido = useRef(0);
+  // Saldo de tus reservas (Alcancía): solo informativo, no entra en la cuenta del mes.
+  const [reservas, setReservas] = useState(null);
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      try {
+        const [bs, ms, as, mans, ps] = await Promise.all([listarBolsillos(), movimientosDeReservas(null, { todas: true }), listarAjustes(), listarMovsManuales(), preciosPara([]).catch(() => new Map())]);
+        const f = ps.get('dolar|bolsa');
+        const r = resumenReservas(bs, [...ms, ...movsManuales(mans)], as, hoyISO(), { mep: f ? Number(f.compra || f.precio) : null });
+        if (vivo) setReservas(r);
+      } catch { if (vivo) setReservas(null); }
+    })();
+    return () => { vivo = false; };
+  }, []);
   const tarjetas = useMemo(() => tarjetasPorMes(tarjeteando?.evolucion || []), [tarjeteando]);
 
   useEffect(() => {
@@ -88,9 +105,10 @@ const PresupuestosView = ({ tarjeteando }) => {
               {p.recuperosNoSe > 0 && <Linea signo="+" label="Otros recuperos" valor={p.recuperosNoSe} nota="Te devolvieron plata de gastos que no recordás cómo pagaste" />}
               <Linea label={p.teQueda >= 0 ? 'Te queda' : 'Gastaste de más'} valor={Math.abs(p.teQueda)} fuerte />
             </ul>
-            {(p.apartado || p.ahorrado) ? (
+            {reservas && (reservas.equivalente.mostrar ? reservas.equivalente.ars : reservas.total) > 0 ? (
               <p style={{ margin: '12px 0 0', fontSize: 14, color: 'var(--label2)' }}>
-                Separaste {pesos(p.apartado)} en reservas para gastos que vienen{p.ahorrado ? ` y ahorraste ${pesos(p.ahorrado)}` : ''}. <strong style={{ color: 'var(--label)' }}>Libre de verdad: {pesos(p.libre)}</strong>.
+                Aparte, en tus reservas (Alcancía) tenés {pesos(reservas.equivalente.mostrar ? reservas.equivalente.ars : reservas.total)}
+                {reservas.equivalente.mostrar && !reservas.equivalente.completo ? ` (sin contar ${reservas.equivalente.faltan.join(', ')})` : ''}. No se resta de lo que te queda.
               </p>
             ) : null}
           </section>

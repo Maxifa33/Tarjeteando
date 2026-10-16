@@ -4,7 +4,7 @@ import { resumenPlatita, resumenBilletera, moverMes } from './resumen.js';
 /**
  * Presupuesto del mes real (Presupuestos v1). Puro.
  *   Te queda = Ingresos − Tarjetas − Gastos sin tarjeta + Recuperos de compras con tarjeta
- *   Libre    = Te queda − Apartado en reservas − Ahorrado
+ * Las reservas (Apartado/Ahorro) NO entran en la cuenta: su saldo se ve en Alcancía.
  * Tarjetas = lo que vence ese mes (Evolución de Tarjeteando): pagado, en curso o comprometido.
  */
 export function presupuestoDelMes(mesKey, movsDelMes = [], tarjetasMes = null) {
@@ -26,9 +26,6 @@ export function presupuestoDelMes(mesKey, movsDelMes = [], tarjetasMes = null) {
     recuperosTarjeta: b.recuperadoTarjeta,
     recuperosNoSe: b.recuperadoNoSe,
     teQueda,
-    apartado: b.apartado,
-    ahorrado: b.ahorrado,
-    libre: r2(teQueda - b.apartado - b.ahorrado),
     conCuentas: movsDelMes.length > 0,
     pendientes: p.revisar.length + b.revisar.length,
     pendientesMonto: r2([...p.revisar, ...b.revisar].reduce((s, m) => s + m.monto, 0))

@@ -81,8 +81,8 @@ const BilleteraView = ({ tarjeteando }) => {
         <>
           <div style={{ display: 'flex', gap: 28, flexWrap: 'wrap', alignItems: 'flex-end' }} aria-busy={cargando}>
             <Cifra label="Gastos sin tarjeta" valor={pesos(r.total)} fuerte />
-            <Cifra label="Apartado en reservas" valor={pesos(r.apartado)} nota="Separado para gastos que vienen" />
-            <Cifra label="Ahorrado" valor={pesos(r.ahorrado)} nota="Fondos como Emergencia" />
+            <Cifra label="Apartado este mes" valor={pesos(r.apartado)} nota="Movimiento del mes. El saldo total está en Alcancía › Reservas" />
+            <Cifra label="Ahorrado este mes" valor={pesos(r.ahorrado)} nota="Movimiento del mes en fondos como Emergencia (retiros restan)" />
             {r.recuperado > 0 && <Cifra label="Recuperado" valor={pesos(r.recuperado)} nota={[r.recuperadoTarjeta ? `${pesos(r.recuperadoTarjeta)} de compras con tarjeta` : null, r.recuperadoNoSe ? `${pesos(r.recuperadoNoSe)} sin saber cómo se pagó` : null].filter(Boolean).join(' · ') || 'Plata que te devolvieron'} />}
           </div>
           {r.recuperado - r.recuperadoTarjeta - r.recuperadoNoSe > 0 && (

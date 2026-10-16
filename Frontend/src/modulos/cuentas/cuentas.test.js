@@ -222,7 +222,7 @@ test('regla por contraparte: las transferencias de esa persona entran como recup
   assert.equal(interna.tipo, 'transferencia_interna');
 });
 
-test('presupuesto del mes real: ingresos − tarjetas − sin tarjeta + recuperos de tarjeta; libre descuenta reservas', async () => {
+test('presupuesto del mes real: ingresos − tarjetas − sin tarjeta + recuperos de tarjeta; las reservas no entran en la cuenta', async () => {
   const { presupuestoDelMes, historial } = await import('./presupuesto.js');
   const movs = [
     { fecha: '2026-09-02', tipo: 'ingreso', estado: 'confirmado', direccion: 'entrada', naturaleza: 'activo', monto: 1000000 },
@@ -233,8 +233,9 @@ test('presupuesto del mes real: ingresos − tarjetas − sin tarjeta + recupero
     { fecha: '2026-09-07', tipo: 'ingreso', estado: 'revisar', direccion: 'entrada', monto: 9999 }
   ];
   const p = presupuestoDelMes('2026-09', movs, { total: 600000, tipo: 'pagado', usd: 0 });
-  assert.deepEqual([p.ingresos, p.tarjetas, p.sinTarjeta, p.recuperosTarjeta, p.teQueda, p.apartado, p.libre, p.pendientes],
-    [1000000, 600000, 200000, 50000, 250000, 100000, 150000, 1]);
+  assert.deepEqual([p.ingresos, p.tarjetas, p.sinTarjeta, p.recuperosTarjeta, p.teQueda, p.pendientes],
+    [1000000, 600000, 200000, 50000, 250000, 1]);
+  assert.equal('libre' in p, false);
   const sin = presupuestoDelMes('2026-09', movs, null);
   assert.deepEqual([sin.tarjetasTipo, sin.tarjetas], ['desde_cuentas', 600000]); // sin Tarjeteando: lo pagado desde cuentas
   assert.equal(presupuestoDelMes('2026-09', [], null).tarjetasTipo, 'sin_datos');
