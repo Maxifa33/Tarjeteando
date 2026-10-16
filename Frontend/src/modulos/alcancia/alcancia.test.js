@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { estadoMeta, planMetas, netoReserva, valuar, totalCartera, validarMeta, validarInversion, interesPlazoFijo, aTexto } from './alcancia.js';
+import { estadoMeta, planMetas, netoReserva, valuar, totalCartera, validarMeta, validarInversion, interesPlazoFijo, aTexto, aportadoEstimado, rendimientoSeguro, inflacionDelPeriodo } from './alcancia.js';
 
 // Datos ficticios.
 const meta = { id: 'm1', nombre: 'Viaje', objetivo: 1200000, moneda: 'ARS', fecha_objetivo: '2026-12-20', bolsillo_id: 'b1', saldo_inicial: 100000, estado: 'activa', created_at: '2026-06-01T00:00:00Z' };
@@ -162,4 +162,74 @@ test('estadoMeta: reserva sin saldo propio mantiene el neto sin clamp (retiro ne
   const e = estadoMeta(m, { hoyMes: '2026-10', movs: [res({ monto: 300, direccion: 'entrada', fecha: '2026-09-01' })], saldosReserva: { b1: { saldo: 0, ancla: false } } });
   assert.equal(e.reserva, -300);
   assert.equal(e.juntado, 700);
+});
+
+test('seguro con ahorro: vale el rescate, ganancia contra lo aportado (estimado si no se carga)', () => {
+  const ctx = { mep: 1000, hoy: '2026-10-16' };
+  const base = { tipo: 'seguro', subtipo: 'unit_linked', moneda: 'USD', valor_manual: 1200, valor_rescate: 900, aporte_monto: 100, aporte_frecuencia: 'mensual', fecha_inicio: '2025-11-05', valor_fecha: '2026-10-01' };
+  const v = valuar(base, new Map(), ctx);
+  assert.equal(v.usd, 900); assert.equal(v.ars, 900000);
+  assert.equal(v.seguro.aportado, 1100); // hasta la fecha del valor (01/10): 11 aportes, nov-25 a sep-26
+  assert.equal(v.seguro.aportadoEstimado, true);
+  assert.equal(v.ganancia, -200);
+  assert.equal(v.fechaPrecio, null);
+  assert.equal(aportadoEstimado({ aporte_monto: 100, fecha_inicio: '2026-01-31' }, '2026-02-28'), 200); // fin de mes
+  assert.equal(aportadoEstimado({ aporte_monto: 100, fecha_inicio: '2026-11-01' }, '2026-10-16'), null); // alta futura
+  assert.equal(valuar({ ...base, valor_fecha: null }, new Map(), ctx).seguro.viejo, true);
+  assert.equal(v.seguro.viejo, false);
+  const sinRescate = valuar({ ...base, valor_rescate: null, capital: 1000 }, new Map(), ctx);
+  assert.equal(sinRescate.usd, 1200); assert.equal(sinRescate.ganancia, 200); assert.equal(sinRescate.seguro.aportadoEstimado, false);
+  assert.equal(valuar({ ...base, valor_fecha: '2026-07-01' }, new Map(), ctx).seguro.viejo, true);
+  assert.equal(aportadoEstimado({ aporte_monto: 600, aporte_frecuencia: 'semestral', fecha_inicio: '2026-01-10' }, '2026-10-16'), 1200);
+  assert.equal(valuar({ ...base, valor_manual: null, valor_rescate: null }, new Map(), ctx).sinPrecio, true);
+});
+
+test('validarInversion: seguro', () => {
+  const f = { tipo: 'seguro', nombre: 'Zurich Invest Future Joven', subtipo: 'unit_linked', moneda: 'USD', valor_manual: '1.200', aporte_monto: '100', aporte_frecuencia: 'mensual', valor_fecha: '2026-10-01' };
+  const op = { hoy: '2026-10-16' };
+  const ok = validarInversion(f, op).fila;
+  assert.equal(ok.valor_manual, 1200); assert.equal(ok.aporte_monto, 100); assert.equal(ok.subtipo, 'unit_linked'); assert.equal(ok.moneda, 'USD');
+  assert.match(validarInversion({ ...f, valor_manual: '' }, op).error, /valor de la cuenta/);
+  assert.match(validarInversion({ ...f, subtipo: '' }, op).error, /tipo de seguro/);
+  assert.match(validarInversion({ ...f, valor_rescate: '2000' }, op).error, /rescate/);
+  assert.match(validarInversion({ ...f, valor_fecha: '' }, op).error, /fecha/);
+  assert.match(validarInversion({ ...f, valor_fecha: '2026-11-01' }, op).error, /futura/);
+  assert.match(validarInversion({ ...f, fecha_inicio: '2026-12-01' }, op).error, /futura/);
+  assert.match(validarInversion({ ...f, capital: 'abc' }, op).error, /total aportado/);
+  assert.equal(validarInversion({ tipo: 'otro', nombre: 'X', valor_manual: '5' }).fila.subtipo, null);
+});
+
+test('rendimientoSeguro: TIR con tiempo real, aniversario, frecuencias y casos borde', () => {
+  const pol = { aporte_monto: 100, aporte_frecuencia: 'mensual', fecha_inicio: '2016-10-01' };
+  const r = rendimientoSeguro(pol, 14500, null, '2026-09-30'); // 120 aportes de 100 → 14.500
+  assert.ok(Math.abs(r.anual - 3.7) <= 0.1); assert.equal(r.estimado, true);
+  assert.equal(rendimientoSeguro(pol, 12000, 12000, '2026-09-25').anual, 0);
+  assert.equal(rendimientoSeguro(pol, 12000, 12000, '2026-09-25').estimado, false);
+  assert.equal(rendimientoSeguro({ ...pol, fecha_inicio: '2026-03-01' }, 800, null, '2026-09-30').corto, true);
+  assert.equal(rendimientoSeguro(pol, 0, null, '2026-09-30').anual, -100);
+  assert.equal(rendimientoSeguro({ ...pol, aporte_monto: null }, 100, null, '2026-09-30'), null);
+  assert.equal(rendimientoSeguro(pol, NaN, null, '2026-09-30'), null);
+  assert.equal(rendimientoSeguro({ ...pol, aporte_frecuencia: 'anual', aporte_monto: 1200 }, 1e18, null, '2026-09-30').dudoso, true); // > 1000 % anual
+  // Anual al 10 % verdadero: el día del aniversario (2º pago recién hecho) tiene que seguir dando 10 %.
+  const an = { aporte_monto: 1200, aporte_frecuencia: 'anual', fecha_inicio: '2025-10-01' };
+  assert.ok(Math.abs(rendimientoSeguro(an, 1320, null, '2026-09-30').anual - 10) < 0.3);
+  assert.ok(Math.abs(rendimientoSeguro(an, 2520, null, '2026-10-01').anual - 10) < 0.3);
+  // Trimestral al 10 % anual, valor justo después del 5º pago.
+  const q = (1.1 ** 0.25); const vq = 300 * (q ** 4 + q ** 3 + q ** 2 + q + 1);
+  assert.ok(Math.abs(rendimientoSeguro({ aporte_monto: 300, aporte_frecuencia: 'trimestral', fecha_inicio: '2025-10-01' }, vq, null, '2026-10-01').anual - 10) < 0.3);
+});
+
+test('inflacionDelPeriodo y seguro en pesos: real contra el mismo período; sin total aportado no inventa', () => {
+  const serie = new Map(); for (let a = 2024; a <= 2026; a++) for (let m = 1; m <= 12; m++) { const k = `${a}-${String(m).padStart(2, '0')}`; if (k <= '2026-09') serie.set(k, 2); }
+  const anual2 = (1.02 ** 12 - 1) * 100;
+  assert.ok(Math.abs(inflacionDelPeriodo(serie, '2024-10-01', '2026-10-16') - anual2) < 1e-9); // oct no publicado: hasta sep
+  assert.equal(inflacionDelPeriodo(serie, '2020-01-01', '2026-10-16'), null); // sin datos de todo el período
+  assert.equal(inflacionDelPeriodo(serie, '2026-02-01', '2026-10-16'), null); // menos de 12 meses
+  const base = { tipo: 'seguro', subtipo: 'retiro', moneda: 'ARS', valor_manual: 2000000, valor_rescate: 1800000, aporte_monto: 50000, fecha_inicio: '2024-10-01', valor_fecha: '2026-09-30', capital: 1250000 };
+  const v = valuar(base, new Map(), { mep: 1000, hoy: '2026-10-16', inflacion: serie });
+  assert.ok(v.seguro.rinde.anual > 0); assert.ok(v.seguro.rindeCuenta.anual > v.seguro.rinde.anual); // rinde = sobre el rescate (lo que se muestra)
+  assert.ok(v.seguro.real < v.seguro.rinde.anual); assert.ok(Math.abs(v.seguro.inflacion - 26.8) < 0.1);
+  const sinCap = valuar({ ...base, capital: null }, new Map(), { mep: 1000, hoy: '2026-10-16', inflacion: serie });
+  assert.equal(sinCap.seguro.rinde, null); assert.equal(sinCap.ganancia, null); assert.equal(sinCap.seguro.faltaAportado, true);
+  assert.equal(valuar({ ...base, moneda: 'USD', capital: null }, new Map(), { mep: 1000, hoy: '2026-10-16', inflacion: serie }).seguro.real, null);
 });

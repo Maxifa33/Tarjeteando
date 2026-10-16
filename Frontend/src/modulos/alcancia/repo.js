@@ -32,8 +32,13 @@ export async function movimientosDeReservas(bolsilloIds, { todas = false } = {})
   return out.map((m) => ({ ...m, monto: Number(m.monto) }));
 }
 
-const INV = 'id, tipo, nombre, simbolo, cantidad, moneda, capital, fecha_inicio, tna, plazo_dias, valor_manual, estado, notas, created_at';
-const numInv = (i) => ({ ...i, cantidad: n(i.cantidad), capital: n(i.capital), tna: n(i.tna), valor_manual: n(i.valor_manual) });
+const INV = 'id, tipo, nombre, simbolo, cantidad, moneda, capital, fecha_inicio, tna, plazo_dias, valor_manual, estado, notas, created_at, subtipo, aseguradora, suma_asegurada, valor_rescate, aporte_monto, aporte_frecuencia, valor_fecha';
+const numInv = (i) => ({ ...i, cantidad: n(i.cantidad), capital: n(i.capital), tna: n(i.tna), valor_manual: n(i.valor_manual), suma_asegurada: n(i.suma_asegurada), valor_rescate: n(i.valor_rescate), aporte_monto: n(i.aporte_monto) });
+/** Serie de inflación mensual del INDEC: Map 'YYYY-MM' → variación %. */
+export async function serieInflacion() {
+  const f = await supabase.from('inflacion_mensual').select('periodo, variacion').order('periodo').then(chk);
+  return new Map((f || []).filter((x) => x.variacion != null && Number.isFinite(Number(x.variacion))).map((x) => [String(x.periodo).slice(0, 7), Number(x.variacion)]));
+}
 export const listarInversiones = async () => (await supabase.from('inversiones').select(INV).order('created_at').then(chk)).map(numInv);
 export const crearInversion = async (fila) => numInv(await supabase.from('inversiones').insert(fila).select(INV).single().then(chk));
 export const actualizarInversion = async (id, cambios) => numInv(await supabase.from('inversiones').update(cambios).eq('id', id).select(INV).single().then(chk));

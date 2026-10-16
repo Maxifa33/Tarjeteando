@@ -8,7 +8,7 @@ import { historial } from '../../cuentas/presupuesto.js';
 import { tarjetasPorMes } from '../../puente/tarjeteando.js';
 import { resumenReservas, estadoReserva, movsManuales, MEDIOS } from '../../alcancia/reservas.js';
 import { estadoMeta, planMetas, valuar, totalCartera, interesPlazoFijo, TIPOS_INVERSION } from '../../alcancia/alcancia.js';
-import { listarMetas, listarAportes, movimientosDeReservas, listarAjustes, listarMovsManuales, listarInversiones, preciosPara, tasasPlazoFijo } from '../../alcancia/repo.js';
+import { listarMetas, listarAportes, movimientosDeReservas, listarAjustes, listarMovsManuales, listarInversiones, preciosPara, tasasPlazoFijo, serieInflacion } from '../../alcancia/repo.js';
 import { hoyISO, plata, fechaDM } from '../deudas/HojasDeuda.jsx';
 import { FormMeta, DetalleMeta } from './HojasMeta.jsx';
 import { FormInversion, DetalleInversion } from './HojasInversion.jsx';
@@ -281,6 +281,7 @@ const Inversiones = ({ tarjeteando }) => {
   const [invs, setInvs] = useState(null);
   const [precios, setPrecios] = useState(new Map());
   const [tasas, setTasas] = useState([]);
+  const [inflacion, setInflacion] = useState(null);
   const [capacidad, setCapacidad] = useState(null);
   const [error, setError] = useState(null);
   const [form, setForm] = useState(null);
@@ -291,9 +292,10 @@ const Inversiones = ({ tarjeteando }) => {
     const id = ++pedido.current; setError(null);
     try {
       const is = await listarInversiones();
-      const [ps, ts] = await Promise.all([preciosPara(is), tasasPlazoFijo().catch(() => [])]);
+      const conSeguroPesos = is.some((i) => i.tipo === 'seguro' && i.moneda === 'ARS');
+      const [ps, ts, inf] = await Promise.all([preciosPara(is), tasasPlazoFijo().catch(() => []), conSeguroPesos ? serieInflacion().catch(() => null) : null]);
       if (id !== pedido.current) return;
-      setInvs(is); setPrecios(ps); setTasas(ts);
+      setInvs(is); setPrecios(ps); setTasas(ts); setInflacion(inf);
     } catch { if (id === pedido.current) { setError('No se pudieron leer tus inversiones. Revisá tu conexión.'); setInvs((x) => x || []); } }
   }, []);
   useEffect(() => { cargar(); }, [cargar]);
@@ -302,7 +304,7 @@ const Inversiones = ({ tarjeteando }) => {
   const mepFila = precios.get('dolar|bolsa');
   const mep = mepFila ? Number(mepFila.compra || mepFila.precio) : null;
   const hoy = hoyISO();
-  const valores = useMemo(() => Object.fromEntries((invs || []).map((i) => [i.id, valuar(i, precios, { mep, hoy })])), [invs, precios, mep, hoy]);
+  const valores = useMemo(() => Object.fromEntries((invs || []).map((i) => [i.id, valuar(i, precios, { mep, hoy, inflacion })])), [invs, precios, mep, hoy, inflacion]);
   if (!invs) return <p role="status" style={{ margin: 0 }}>Cargando…</p>;
   const activas = invs.filter((i) => i.estado === 'activa');
   const cerradas = invs.filter((i) => i.estado === 'cerrada');
@@ -315,13 +317,15 @@ const Inversiones = ({ tarjeteando }) => {
   const tarjeta = (i) => {
     const v = valores[i.id];
     const tipo = TIPOS_INVERSION.find((x) => x.id === i.tipo)?.label;
-    const valor = v.sinPrecio ? '—' : v.moneda === 'USD' && v.usd != null ? dolares(v.usd) : pesos(v.ars);
+    const valor = v.sinPrecio ? '—' : v.moneda === 'USD' && v.usd != null ? dolares(v.usd) : v.ars != null ? pesos(v.ars) : '—';
     const pie = v.sinPrecio ? 'Sin cotización todavía'
       : [v.ganancia != null ? `${v.ganancia >= 0 ? '+' : '−'}${plata(Math.abs(v.ganancia), v.gananciaMoneda)}${v.gananciaPct != null ? ` (${v.gananciaPct >= 0 ? '+' : '−'}${Math.abs(v.gananciaPct).toFixed(1).replace('.', ',')}%)` : ''}` : null,
-        v.sinMep ? 'sin dólar para pasar a pesos' : null, v.estimado ? 'estimado' : null, v.vence ? `${v.vencido ? 'venció' : 'vence'} ${fechaDM(v.vence)}` : null].filter(Boolean).join(' · ') || null;
+        v.sinMep ? 'sin dólar para pasar a pesos' : null, v.estimado ? 'estimado' : null, v.seguro?.viejo ? 'actualizá el valor' : null, v.seguro && v.seguro.rescate == null && v.seguro.cuenta != null ? 'sin descontar rescate' : null, v.seguro?.rinde?.anual != null ? `${v.seguro.rescate != null ? 'si rescatás, ' : ''}rinde ${v.seguro.rinde.anual >= 0 ? '' : '−'}${Math.abs(v.seguro.rinde.anual).toFixed(1).replace('.', ',')}% anual${v.seguro.rinde.estimado ? ' (estimado)' : ''}${v.seguro.real != null ? ` · real ${v.seguro.real >= 0 ? '+' : '−'}${Math.abs(v.seguro.real).toFixed(1).replace('.', ',')}%` : ''}` : null,
+        v.seguro?.faltaAportado ? 'cargá el total aportado' : null, v.seguro?.rinde?.dudoso ? 'revisá los datos' : null,
+        v.seguro?.aportadoEstimado && v.ganancia != null ? 'aportado estimado' : null, v.vence ? `${v.vencido ? 'venció' : 'vence'} ${fechaDM(v.vence)}` : null].filter(Boolean).join(' · ') || null;
     return (
       <Tarjeta key={i.id} onClick={() => setDetalleId(i.id)} label={`${i.nombre}: ${valor}. Ver detalle`} titulo={i.nombre}
-        sub={`${tipo}${i.simbolo && i.tipo !== 'dolar' && i.simbolo !== i.nombre ? ` · ${i.simbolo}` : ''}`} valor={valor} pie={pie} />
+        sub={i.tipo === 'seguro' ? `Seguro${i.aseguradora ? ` · ${i.aseguradora}` : ''}` : `${tipo}${i.simbolo && i.tipo !== 'dolar' && i.simbolo !== i.nombre ? ` · ${i.simbolo}` : ''}`} valor={valor} pie={pie} />
     );
   };
 

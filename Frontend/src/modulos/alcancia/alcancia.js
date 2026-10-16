@@ -102,8 +102,87 @@ export const TIPOS_INVERSION = [
   { id: 'accion', label: 'Acción' },
   { id: 'bono', label: 'Bono / ON / Letra' },
   { id: 'cripto', label: 'Cripto' },
+  { id: 'seguro', label: 'Seguro con ahorro (vida / retiro)' },
   { id: 'otro', label: 'Otro' }
 ];
+/** Seguros con componente de ahorro que se venden en Argentina. */
+export const SUBTIPOS_SEGURO = [
+  { id: 'unit_linked', label: 'Vida con inversión en fondos (unit linked)', ej: 'Zurich Invest Future / Advanced' },
+  { id: 'universal_life', label: 'Vida universal (rendimiento mínimo garantizado)', ej: 'Orígenes Universal Life' },
+  { id: 'capitalizacion', label: 'Vida con capitalización', ej: 'Sancor Vida Ahorro' },
+  { id: 'dotal', label: 'Vida mixto / dotal (paga al vencimiento o fallecimiento)', ej: 'La Segunda Vida Dotal' },
+  { id: 'retiro', label: 'Seguro de retiro', ej: 'Galicia, San Cristóbal, Orígenes' }
+];
+export const FRECUENCIAS = [
+  { id: 'mensual', label: 'por mes', meses: 1 }, { id: 'trimestral', label: 'por trimestre', meses: 3 },
+  { id: 'semestral', label: 'por semestre', meses: 6 }, { id: 'anual', label: 'por año', meses: 12 }
+];
+const mesesEntre = (desde, hasta) => {
+  const [a1, m1, d1] = desde.split('-').map(Number); const [a2, m2, d2] = hasta.split('-').map(Number);
+  const finMes = new Date(a2, m2, 0).getDate(); // alta el 31: en meses cortos el aporte cae el último día
+  return Math.max(0, (a2 - a1) * 12 + (m2 - m1) + (d2 >= Math.min(d1, finMes) ? 1 : 0)); // cuenta el aporte del mes de alta
+};
+/** Total aportado estimado: aporte × cantidad de pagos desde el alta. */
+export function aportadoEstimado(inv, hoy) {
+  const f = FRECUENCIAS.find((x) => x.id === (inv.aporte_frecuencia || 'mensual'));
+  if (!(Number(inv.aporte_monto) > 0) || !inv.fecha_inicio || !f) return null;
+  const pagos = Math.ceil(mesesEntre(inv.fecha_inicio, hoy) / f.meses);
+  if (!pagos) return null;
+  return r2(Number(inv.aporte_monto) * pagos);
+}
+/**
+ * Rendimiento anual de un seguro con ahorro (TIR): la tasa que hace que los aportes iguales, hechos al inicio de cada
+ * período, valgan `valor` a la fecha `hasta`. Usa el tiempo real transcurrido (el aporte recién hecho no capitaliza).
+ * `aportado` = total aportado; si no coincide con aporte × pagos, se usa el aporte promedio (estimado).
+ * Devuelve { anual (%), estimado, corto, dudoso } o null.
+ */
+export function rendimientoSeguro(inv, valor, aportado, hasta) {
+  const f = FRECUENCIAS.find((x) => x.id === (inv.aporte_frecuencia || 'mensual'));
+  if (valor == null || !Number.isFinite(Number(valor)) || !inv.fecha_inicio || !f || !(Number(inv.aporte_monto) > 0)) return null;
+  valor = Number(valor);
+  const meses = mesesEntre(inv.fecha_inicio, hasta);
+  const n = Math.ceil(meses / f.meses);
+  if (!n) return null;
+  if (meses < 12) return { anual: null, corto: true, estimado: false, dudoso: false };
+  const teorico = Number(inv.aporte_monto) * n;
+  const total = aportado ?? teorico;
+  const estimado = aportado == null || Math.abs(total - teorico) > teorico * 0.05; // el aporte cambió en el tiempo
+  const a = total / n;
+  if (!(a > 0)) return null;
+  const T = Math.max(n - 1, dias(inv.fecha_inicio, hasta) / 30.4375 / f.meses); // períodos desde el primer aporte
+  const vf = (p) => { let t = 0; for (let k = 0; k < n; k++) t += a * (1 + p) ** (T - k); return t; };
+  let anual;
+  if (valor <= 0) anual = -100;
+  else {
+    let lo = -0.9999; let hi = 1;
+    while (vf(hi) < valor && hi < 64) hi *= 2;
+    if (vf(hi) < valor) return { anual: null, corto: false, estimado, dudoso: true };
+    for (let k = 0; k < 200; k++) { const m = (lo + hi) / 2; if (vf(m) > valor) hi = m; else lo = m; }
+    anual = ((1 + (lo + hi) / 2) ** (12 / f.meses) - 1) * 100;
+  }
+  if (anual > 1000) return { anual: null, corto: false, estimado, dudoso: true };
+  return { anual: Math.round(anual * 10) / 10 + 0, corto: false, estimado, dudoso: false }; // + 0: sin "−0"
+}
+
+const mesesDif = (a, b) => { const [y1, m1] = a.split('-').map(Number); const [y2, m2] = b.split('-').map(Number); return (y2 - y1) * 12 + (m2 - m1); };
+/**
+ * Inflación anualizada (%) entre dos fechas con la serie mensual del INDEC (Map 'YYYY-MM' → variación %).
+ * Toma desde el mes del alta hasta el mes de `hasta`; si los últimos 1–2 meses no se publicaron todavía, usa hasta
+ * el último publicado. Si falta cualquier otro mes, null (no se puede comparar).
+ */
+export function inflacionDelPeriodo(serie, desde, hasta) {
+  if (!serie?.size || !desde || !hasta) return null;
+  const meses = [];
+  let [a, m] = desde.slice(0, 7).split('-').map(Number);
+  const fin = hasta.slice(0, 7);
+  for (let g = 0; g < 1200; g++) { const k = `${a}-${String(m).padStart(2, '0')}`; meses.push(k); if (k >= fin) break; m += 1; if (m > 12) { m = 1; a += 1; } }
+  while (meses.length && !serie.has(meses[meses.length - 1])) meses.pop(); // meses que el INDEC todavía no publicó
+  if (!meses.length || mesesDif(meses[meses.length - 1], fin) > 2) return null;
+  if (meses.length < 12 || meses.some((k) => !Number.isFinite(serie.get(k)))) return null;
+  const acum = meses.reduce((x, k) => x * (1 + serie.get(k) / 100), 1);
+  return (acum ** (12 / meses.length) - 1) * 100;
+}
+
 export const CASAS_DOLAR = [
   { id: 'bolsa', label: 'MEP' }, { id: 'oficial', label: 'Oficial' }, { id: 'blue', label: 'Blue' }, { id: 'cripto', label: 'Cripto' }, { id: 'contadoconliqui', label: 'CCL' }
 ];
@@ -123,7 +202,7 @@ export function precioDe(inv, precios) {
  * `mep`: dólar MEP compra (para pasar entre monedas). `hoy`: 'YYYY-MM-DD'.
  * capital está en `inv.moneda` (lo que pusiste); ganancia = valor en esa moneda − capital.
  */
-export function valuar(inv, precios, { mep, hoy }) {
+export function valuar(inv, precios, { mep, hoy, inflacion = null }) { // inflacion: Map 'YYYY-MM' → variación % (INDEC)
   const conv = (v, de) => (de === 'USD' ? { ars: mep ? r2(v * mep) : null, usd: r2(v) } : { ars: r2(v), usd: mep ? r2(v / mep) : null });
   const cap = inv.capital == null ? null : Number(inv.capital);
   let nativo = null; let moneda = inv.moneda || 'ARS'; let estimado = false; let fechaPrecio = null; let sinPrecio = false; let vence = null;
@@ -140,6 +219,29 @@ export function valuar(inv, precios, { mep, hoy }) {
     } else if (cap != null) nativo = cap; // sin fecha: lo que pusiste, sin intereses
     else sinPrecio = true;
     estimado = nativo != null;
+  } else if (inv.tipo === 'seguro') {
+    // Lo que cuenta es lo que te darían si rescatás hoy (los primeros años el rescate tiene penalidad).
+    const cuenta = inv.valor_manual != null ? Number(inv.valor_manual) : null;
+    const rescate = inv.valor_rescate != null ? Number(inv.valor_rescate) : null;
+    nativo = rescate ?? cuenta;
+    if (nativo == null) sinPrecio = true;
+    const aportado = cap ?? aportadoEstimado(inv, inv.valor_fecha || hoy); // hasta la fecha del valor, no hasta hoy
+    const v = nativo == null ? { ars: null, usd: null } : conv(nativo, moneda);
+    const enCap = moneda === 'USD' ? v.usd : v.ars;
+    const gan = aportado != null && enCap != null && !(moneda === 'ARS' && cap == null) ? r2(enCap - aportado) : null;
+    const viejo = !inv.valor_fecha || dias(inv.valor_fecha, hoy) > 60;
+    const hasta = inv.valor_fecha || hoy;
+    // En pesos los aportes se indexan: sin el total aportado real, la ganancia y el rendimiento serían inventados.
+    const sinBase = moneda === 'ARS' && cap == null;
+    const rinde = sinBase ? null : rendimientoSeguro(inv, nativo, cap, hasta); // sobre lo que se muestra (rescate si hay)
+    const rindeCuenta = sinBase || rescate == null || cuenta == null || rescate === cuenta ? null : rendimientoSeguro(inv, cuenta, cap, hasta);
+    // Real: contra la inflación anualizada del MISMO período (no la del último año).
+    const inflPeriodo = moneda === 'ARS' && rinde?.anual != null ? inflacionDelPeriodo(inflacion, inv.fecha_inicio, hasta) : null;
+    const real = inflPeriodo != null ? Math.round((((1 + rinde.anual / 100) / (1 + inflPeriodo / 100)) - 1) * 1000) / 10 + 0 : null;
+    return { ...v, moneda, ganancia: gan, gananciaMoneda: moneda, gananciaPct: gan != null && aportado > 0 ? r2((gan / aportado) * 100) : null,
+      estimado: false, fechaPrecio: null, // la fecha del seguro no es una cotización: no entra en "cotizaciones al cierre del…"
+      sinPrecio: nativo == null, sinMep: nativo != null && v.ars == null, vence: null, vencido: false,
+      seguro: { cuenta, rescate, aportado, aportadoEstimado: cap == null && aportado != null, viejo, suma: inv.suma_asegurada != null ? Number(inv.suma_asegurada) : null, rinde, rindeCuenta, real, inflacion: inflPeriodo != null ? Math.round(inflPeriodo * 10) / 10 : null, faltaAportado: moneda === 'ARS' && cap == null } };
   } else if (inv.tipo === 'otro') {
     nativo = inv.valor_manual != null ? Number(inv.valor_manual) : cap;
     if (nativo == null) sinPrecio = true;
@@ -218,14 +320,16 @@ export function validarMeta(f, { nueva = false, hoy = null } = {}) {
   return { fila: { nombre, objetivo: r2(objetivo), moneda: f.moneda || 'ARS', fecha_objetivo: f.fecha_objetivo || null, bolsillo_id: f.bolsillo_id || null, saldo_inicial: r2(inicial || 0), notas: String(f.notas || '').trim() || null } };
 }
 
-export function validarInversion(f) {
+const hoyLocal = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+
+export function validarInversion(f, { hoy = hoyLocal() } = {}) {
   const nombre = String(f.nombre || f.simbolo || '').trim();
   const tipo = f.tipo;
   if (!TIPOS_INVERSION.some((t) => t.id === tipo)) return { error: 'Elegí el tipo.' };
   if (!nombre) return { error: 'Poné un nombre.' };
   const cantidad = parseCantidad(f.cantidad, tipo); const capital = num(f.capital); const tna = pct(f.tna); const valor = num(f.valor_manual);
   const plazo = f.plazo_dias === '' || f.plazo_dias == null ? null : Number(f.plazo_dias);
-  for (const [v, msg] of [[cantidad, 'La cantidad'], [capital, 'Lo que pusiste'], [valor, 'El valor']]) if (v != null && !(v >= 0)) return { error: `${msg} tiene que ser un número.` };
+  for (const [v, msg] of [[cantidad, 'La cantidad'], [capital, tipo === 'seguro' ? 'El total aportado' : 'Lo que pusiste'], [valor, 'El valor']]) if (v != null && !(v >= 0)) return { error: `${msg} tiene que ser un número.` };
   if (tna != null && !(tna >= 0 && tna <= 1000)) return { error: 'La TNA es en %, entre 0 y 1000.' };
   if (plazo != null && !(Number.isInteger(plazo) && plazo > 0)) return { error: 'El plazo es en días.' };
   if (f.fecha_inicio && !iso(f.fecha_inicio)) return { error: 'La fecha no es válida.' };
@@ -236,12 +340,27 @@ export function validarInversion(f) {
   if (tipo === 'plazo_fijo' && !(capital > 0 && f.fecha_inicio && plazo)) return { error: 'Poné el capital, la fecha en que lo hiciste y el plazo.' };
   if (tipo === 'fci' && !(cantidad > 0 && f.simbolo) && !(capital > 0)) return { error: 'Elegí el fondo y las cuotapartes, o poné lo que pusiste.' };
   if (tipo === 'otro' && valor == null && capital == null) return { error: 'Poné cuánto vale.' };
+  const rescate = num(f.valor_rescate); const suma = num(f.suma_asegurada); const aporte = num(f.aporte_monto);
+  for (const [v, msg] of [[rescate, 'El valor de rescate'], [suma, 'La suma asegurada'], [aporte, 'El aporte']]) if (v != null && !(v >= 0)) return { error: `${msg} tiene que ser un número.` };
+  if (tipo === 'seguro') {
+    if (!SUBTIPOS_SEGURO.some((x) => x.id === f.subtipo)) return { error: 'Elegí qué tipo de seguro es.' };
+    if (valor == null && rescate == null) return { error: 'Poné el valor de la cuenta (está en tu estado de cuenta o en la web de la aseguradora).' };
+    if (rescate != null && valor != null && rescate > valor) return { error: 'El rescate no puede ser mayor que el valor de la cuenta.' };
+    if (!iso(f.valor_fecha)) return { error: 'Poné la fecha de esos valores (la del estado de cuenta).' };
+    if (f.valor_fecha > hoy) return { error: 'La fecha de los valores no puede ser futura.' };
+    if (f.fecha_inicio && f.fecha_inicio > hoy) return { error: 'La fecha de alta no puede ser futura.' };
+    if (f.fecha_inicio && f.fecha_inicio > f.valor_fecha) return { error: 'La fecha de los valores es anterior al alta de la póliza.' };
+  }
   return {
     fila: {
       tipo, nombre, simbolo: f.simbolo || null, cantidad: cantidad || null,
       moneda: tipo === 'dolar' ? 'ARS' : f.moneda || 'ARS', // en dólares, "lo que pusiste" son pesos
       capital: capital ?? null, fecha_inicio: f.fecha_inicio || null, tna: tna ?? null, plazo_dias: plazo,
-      valor_manual: valor ?? null, notas: String(f.notas || '').trim() || null
+      valor_manual: valor ?? null, notas: String(f.notas || '').trim() || null,
+      ...(tipo === 'seguro' ? {
+        subtipo: f.subtipo, aseguradora: String(f.aseguradora || '').trim() || null, suma_asegurada: suma ?? null, valor_rescate: rescate ?? null,
+        aporte_monto: aporte ?? null, aporte_frecuencia: aporte != null ? f.aporte_frecuencia || 'mensual' : null, valor_fecha: f.valor_fecha || null
+      } : { subtipo: null, aseguradora: null, suma_asegurada: null, valor_rescate: null, aporte_monto: null, aporte_frecuencia: null, valor_fecha: null })
     }
   };
 }
