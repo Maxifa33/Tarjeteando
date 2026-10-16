@@ -117,3 +117,8 @@
 .tj .mod-seg-full .seg button { flex: 1 1 0; }
 .tj .mod-cta { position: sticky; bottom: -32px; z-index: 1; display: flex; flex-direction: column; gap: 8px; margin: 0 -20px -32px; padding: 12px 20px calc(24px + env(safe-area-inset-bottom)); background: var(--win); -webkit-backdrop-filter: blur(20px) saturate(1.4); backdrop-filter: blur(20px) saturate(1.4); border-top: 0.5px solid var(--sep); }
 .tj.rt .mod-cta { background: var(--solid); -webkit-backdrop-filter: none; backdrop-filter: none; }
+
+/* Gráfico de inflación: columnas de hover/foco sobre el SVG */
+.tj .mod-grafcol { position: absolute; top: 0; padding: 0; border: 0; background: transparent; border-radius: 10px; cursor: default; }
+.tj .mod-grafcol:hover, .tj .mod-grafcol:focus-visible { background: var(--fill2); }
+.tj .mod-grafcol:focus-visible { outline: 2px solid var(--r2); outline-offset: -2px; }

@@ -8,6 +8,7 @@ import { historial } from '../../cuentas/presupuesto.js';
 import { tarjetasPorMes } from '../../puente/tarjeteando.js';
 import { estadoDeuda, sugerirPagos, compararPlanes, itemsPlan, pagadoEnMes, manualParecido, mesMas, adelantar, proximoVencimiento, masUrgente, TIPOS_DEUDA } from '../../deudas/deudas.js';
 import { listarDeudas, pagosDeDeudas, candidatos, confirmarPago, descartar, idCategoriaDeudas } from '../../deudas/repo.js';
+import InflacionPanel from './InflacionPanel.jsx';
 import { FormDeuda, DetalleDeuda, hoyISO, plata, fechaDM, textoVencimiento } from './HojasDeuda.jsx';
 import '../modulos.css';
 
@@ -321,6 +322,8 @@ const SaldarView = ({ tarjeteando }) => {
       </section>
 
       <Plan items={items} sugerido={sugerido} />
+
+      <InflacionPanel deudas={deudas} pagos={pagos} />
 
       {saldadas.length > 0 && (
         <details className="mod-mas">

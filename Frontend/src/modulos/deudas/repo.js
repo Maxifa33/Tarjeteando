@@ -135,3 +135,13 @@ export async function registrarPagoManual(deuda, { monto, fecha, nota }) {
     contraparte: deuda.acreedor || null, origen: 'manual', huella, estado: 'confirmado', cuenta_en_presupuesto: true, deuda_id: deuda.id
   }).select('id').single().then(chk);
 }
+
+/** Inflación mensual (últimos ~16 meses) y tasas de referencia. Lectura pública para usuarios logueados. */
+export async function referenciasInflacionTasas() {
+  const [inflacion, plazoFijo, billeteras] = await Promise.all([
+    supabase.from('inflacion_mensual').select('periodo, variacion, interanual, fuente, actualizado').order('periodo', { ascending: false }).limit(16).then(chk),
+    supabase.from('tasas_plazo_fijo').select('entidad, tna, fecha').limit(200).then(chk),
+    supabase.from('tasas_billeteras').select('entidad, producto, tna, fecha').limit(50).then(chk)
+  ]);
+  return { inflacion, plazoFijo, billeteras };
+}
