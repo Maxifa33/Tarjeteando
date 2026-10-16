@@ -544,8 +544,19 @@ Si no puedes leer algún dato, usa null. NO inventes datos.`;
         validacion.advertencias.forEach(adv => console.log('[Vision] ⚠️', adv));
       }
       
+      // Rechazar archivos que no son un resumen de tarjeta (sin movimientos, sin período o banco no reconocido)
+      if (!datosExtraidos.movimientos || datosExtraidos.movimientos.length === 0) {
+        return { exito: false, error: 'El archivo no parece un resumen de tarjeta (no se encontraron movimientos)', metodo: 'vision' };
+      }
+      if (!datosExtraidos.periodo?.mes || !datosExtraidos.periodo?.anio) {
+        return { exito: false, error: 'El archivo no parece un resumen de tarjeta (no se detectó el período)', metodo: 'vision' };
+      }
+
       // Convertir al formato del sistema
       const resultado = this.convertirAFormatoSistema(datosExtraidos, nombreArchivo);
+      if (resultado.banco === 'Desconocido') {
+        return { exito: false, error: 'No se reconoció el banco del resumen', metodo: 'vision' };
+      }
       resultado.validacion = validacion;
       
       console.log(`[Vision] ✓ Extraídos ${resultado.movimientos.length} movimientos`);

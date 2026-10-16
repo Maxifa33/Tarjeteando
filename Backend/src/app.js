@@ -626,6 +626,11 @@ app.post('/api/v1/resumenes/upload', upload.array('pdfs'), async (req, res) => {
         }
       }
 
+      // Guard defensivo: no crear tarjeta ni resumen sin período ni movimientos
+      if (resultado.exito && (!resultado.resumen?.mes || !resultado.resumen?.anio || !resultado.movimientos?.length)) {
+        resultado = { exito: false, error: 'No se reconoció como resumen de tarjeta' };
+      }
+
       if (resultado.exito) {
         // Para Vision, la estructura es ligeramente diferente
         const tarjetaNombre = resultado.tarjeta?.nombre || resultado.tarjeta;
