@@ -66,6 +66,15 @@ tarjetas-proyecto/
 
 ---
 
+## Estructura de carpetas
+
+Desde el 16/10/2026 todo vive en este repo (antes había copias en `~/Claude/Projects/Tarjeteando` y `~/Documents/Proyectos y Apps IA/Platita`).
+
+- **`diseno/`** — mockups y prototipos de diseño (SuperCard, propuestas B/C, app web/iPhone en HTML). **Versionado.** `diseno/_to_delete/` queda local (lo ignora la regla `_to_delete/`).
+- **`datos-personales/`** — datos financieros reales: extractos de cuenta (`platita/`), resúmenes, capturas con montos. **Nunca a git** (está en `.gitignore`). Para tests usar siempre datos ficticios.
+
+---
+
 ## Arquitectura del Frontend
 
 `App.jsx` conecta estado y handlers; la UI de cada sección vive en `src/views/` y los cálculos en `src/services/` (funciones puras con test). Regla: **código nuevo fuera de `App.jsx`**.
