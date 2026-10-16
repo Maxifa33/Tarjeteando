@@ -10,7 +10,7 @@ const chk = ({ data, error }) => { if (error) throw error; return data; };
 export async function cargarContexto() {
   const [cuentas, bolsillos, categorias, importaciones, reglas] = await Promise.all([
     supabase.from('cuentas').select('id, nombre, tipo, institucion, numero, moneda, titular_nombre, titular_cuit').then(chk),
-    supabase.from('bolsillos').select('id, cuenta_id, nombre, tipo').then(chk),
+    supabase.from('bolsillos').select('id, cuenta_id, nombre, tipo, origen').then(chk),
     supabase.from('categorias').select('id, nombre, tipo, user_id, reemplaza').then(chk),
     supabase.from('importaciones').select('hash_archivo').then(chk),
     supabase.from('reglas_contraparte').select('contraparte, direccion, tipo, categoria_id').then(chk)
@@ -28,7 +28,7 @@ export async function cargarContexto() {
     titulares: cuentas.filter((c) => c.titular_nombre || c.titular_cuit).map((c) => ({ nombre: c.titular_nombre, cuit: c.titular_cuit })),
     huellasExistentes: huellas,
     hashesImportados: new Set(importaciones.map((i) => i.hash_archivo)),
-    bolsillosExistentes: new Set(bolsillos.map((b) => `${porId[b.cuenta_id]?.institucion}|${b.nombre}`))
+    bolsillosExistentes: new Set(bolsillos.flatMap((b) => [`${porId[b.cuenta_id]?.institucion}|${b.nombre}`, `${porId[b.cuenta_id]?.institucion}|${String(b.nombre).replace(/ \(MP\)$/, '')}`]))
   };
 }
 
@@ -51,9 +51,11 @@ async function asegurarCuenta(cuenta, titular, ctx) {
 async function asegurarBolsillos(cuentaId, nombres, tiposElegidos, ctx) {
   const ids = {};
   for (const nombre of nombres) {
-    const ya = ctx.bolsillos.find((b) => b.cuenta_id === cuentaId && b.nombre === nombre);
+    const ya = ctx.bolsillos.find((b) => b.cuenta_id === cuentaId && (b.nombre === nombre || b.nombre === `${nombre} (MP)`));
     if (ya) { ids[nombre] = ya.id; continue; }
-    const fila = await supabase.from('bolsillos').insert({ cuenta_id: cuentaId, nombre, tipo: tiposElegidos[nombre] || 'apartado' })
+    // Si ya tenés una reserva manual con ese nombre, la de Mercado Pago entra como "<nombre> (MP)" para no mezclarlas.
+    const chocaConManual = ctx.bolsillos.some((b) => b.origen === 'manual' && String(b.nombre).trim().toLowerCase() === nombre.trim().toLowerCase());
+    const fila = await supabase.from('bolsillos').insert({ cuenta_id: cuentaId, nombre: chocaConManual ? `${nombre} (MP)` : nombre, tipo: tiposElegidos[nombre] || 'apartado' })
       .select('id, cuenta_id, nombre, tipo').single().then(chk);
     ctx.bolsillos.push(fila);
     ids[nombre] = fila.id;
@@ -108,7 +110,7 @@ export async function guardarArchivo(archivo, { tiposBolsillo = {}, titular = nu
   return { cuentaId, guardados: filas.length };
 }
 
-const SELECT_MOV = 'id, fecha, monto, moneda, direccion, tipo, modulo, estado, descripcion, descripcion_original, contraparte, naturaleza, cuenta_en_presupuesto, categoria_id, bolsillo_id, cuenta_id, origen, vinculo_tarjeta, recupero_pago, compartido_pendiente, deuda_id, categorias!movimientos_categoria_id_fkey(nombre), bolsillos(nombre, tipo), cuentas(nombre, institucion)';
+const SELECT_MOV = 'id, fecha, monto, moneda, direccion, tipo, modulo, estado, descripcion, descripcion_original, contraparte, naturaleza, cuenta_en_presupuesto, categoria_id, bolsillo_id, cuenta_id, origen, vinculo_tarjeta, recupero_pago, compartido_pendiente, deuda_id, categorias!movimientos_categoria_id_fkey(nombre), bolsillos(nombre, tipo, moneda, origen), cuentas(nombre, institucion)';
 
 export async function movimientosEntre(desde, hasta) {
   const out = [];
@@ -168,22 +170,40 @@ export async function listarImportaciones() {
   return filas.map((f) => ({ ...f, cuenta: f.cuentas?.nombre || '', cantidad: f.movimientos?.[0]?.count ?? f.filas_nuevas }));
 }
 
+/**
+ * Antes de borrar movimientos importados, los que estaban vinculados a una reserva manual pasan a ser depósitos/retiros manuales
+ * de esa reserva: así su saldo no cambia. Insertar primero y desvincular después evita perderlos si se corta a mitad
+ * (como mucho, un reintento los duplica una vez: el saldo real se corrige desde el detalle de la reserva).
+ */
+async function conservarVinculados(filtro) {
+  const filas = await filtro(supabase.from('movimientos').select('id, fecha, monto, direccion, bolsillo_id, descripcion, descripcion_original').not('previo_reserva', 'is', null)).then(chk);
+  if (!filas.length) return;
+  await supabase.from('reserva_movs').insert(filas.map((m) => ({
+    bolsillo_id: m.bolsillo_id, fecha: m.fecha, monto: Number(m.monto), sentido: m.direccion === 'salida' ? 'deposito' : 'retiro',
+    nota: `Era un movimiento importado: ${m.descripcion || m.descripcion_original || 'sin detalle'}`.slice(0, 120)
+  }))).then(chk);
+  for (const m of filas) await supabase.rpc('economics_desvincular_reserva', { p_mov: m.id }).then(chk);
+}
+
 /** Borra un archivo importado y todos sus movimientos (incluidos los cambios que les hiciste). */
 export async function borrarImportacion(id) {
+  await conservarVinculados((q) => q.eq('importacion_id', id));
   await supabase.from('movimientos').delete().eq('importacion_id', id).then(chk);
   return supabase.from('importaciones').delete().eq('id', id).then(chk);
 }
 
 /**
- * Empezar de cero: borra movimientos, archivos, reservas y cuentas.
+ * Empezar de cero: borra movimientos, archivos, reservas de Mercado Pago y cuentas.
+ * Las reservas manuales NO se borran: no salen de ningún archivo y no se pueden reimportar.
  * Pasos idempotentes y en orden de dependencias: si se corta a mitad, volver a tocar termina el trabajo.
  * Con `todo`, también tus categorías propias y reglas por persona. No toca Tarjeteando.
  */
 export async function borrarTodo({ todo = false } = {}) {
   const todos = (q) => q.not('id', 'is', null);
+  await conservarVinculados((q) => q);
   await todos(supabase.from('movimientos').delete()).then(chk);
   await todos(supabase.from('importaciones').delete()).then(chk);
-  await todos(supabase.from('bolsillos').delete()).then(chk);
+  await todos(supabase.from('bolsillos').delete()).eq('origen', 'importada').then(chk);
   await todos(supabase.from('cuentas').delete()).then(chk);
   if (todo) {
     await todos(supabase.from('reglas_contraparte').delete()).then(chk);
@@ -196,7 +216,7 @@ export async function actualizarMovimiento(id, cambios) {
 }
 
 export async function listarBolsillos() {
-  return supabase.from('bolsillos').select('id, nombre, tipo, cuenta_id').order('nombre').then(chk);
+  return supabase.from('bolsillos').select('id, nombre, tipo, cuenta_id, origen, moneda, medio, archivada, cotizacion_ars, cotizacion_fecha, notas').order('nombre').then(chk);
 }
 
 export async function cambiarTipoBolsillo(id, tipo) {

@@ -134,3 +134,32 @@ test('validaciones', () => {
   assert.equal(validarInversion({ tipo: 'plazo_fijo', nombre: 'PF', capital: '1.000.000', fecha_inicio: '2026-10-01', tna: '35,5', plazo_dias: '30' }).fila.tna, 35.5);
   assert.equal(interesPlazoFijo(1000000, 0.365, 30), 30000);
 });
+
+test('estadoMeta con saldosReserva: reserva con saldo propio ignora saldo_inicial (no duplica)', () => {
+  const base = { hoyMes: '2026-10', aportes: [{ meta_id: 'm1', fecha: '2026-09-10', monto: 100000 }], movs: [res({ monto: 200000, fecha: '2026-08-05' })] };
+  // Con saldo real/manual: a mano 100.000 + reserva 350.000, sin sumar los 100.000 de saldo_inicial
+  const e = estadoMeta(meta, { ...base, saldosReserva: { b1: { saldo: 350000, ancla: true } } });
+  assert.equal(e.juntado, 450000);
+  assert.equal(e.reserva, 350000);
+  assert.equal(e.inicial, 0);
+  // Reserva de MP sin saldo real: conserva saldo_inicial como siempre
+  const e2 = estadoMeta(meta, { ...base, saldosReserva: { b1: { saldo: 200000, ancla: false } } });
+  assert.equal(e2.juntado, 400000);
+  assert.equal(e2.inicial, 100000);
+  // Sin saldosReserva: comportamiento anterior intacto
+  assert.equal(estadoMeta(meta, base).juntado, 400000);
+});
+
+test('estadoMeta en dólares con reserva manual en USD', () => {
+  const usd = { ...meta, moneda: 'USD', objetivo: 5000, saldo_inicial: 0, fecha_objetivo: null };
+  const e = estadoMeta(usd, { hoyMes: '2026-10', saldosReserva: { b1: { saldo: 1250.5, ancla: true } } });
+  assert.equal(e.juntado, 1250.5);
+  assert.equal(e.falta, 3749.5);
+});
+
+test('estadoMeta: reserva sin saldo propio mantiene el neto sin clamp (retiro neto por rendimiento)', () => {
+  const m = { ...meta, saldo_inicial: 1000, objetivo: 5000 };
+  const e = estadoMeta(m, { hoyMes: '2026-10', movs: [res({ monto: 300, direccion: 'entrada', fecha: '2026-09-01' })], saldosReserva: { b1: { saldo: 0, ancla: false } } });
+  assert.equal(e.reserva, -300);
+  assert.equal(e.juntado, 700);
+});

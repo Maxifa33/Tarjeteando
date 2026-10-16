@@ -27,19 +27,24 @@ function aportesPorMes(meta, aportes, movs) {
 
 /**
  * Estado de una meta. `hoy` 'YYYY-MM-DD' (o solo `hoyMes`).
+ * `saldosReserva`: { bolsilloId: { saldo, ancla } } (ver reservas.js). Con una reserva vinculada que tiene saldo propio (manual o
+ * con saldo real cargado), lo juntado = a mano + saldo de la reserva y `saldo_inicial` se ignora (si no, se contaría dos veces).
+ * Una reserva de Mercado Pago sin saldo real conserva el comportamiento de siempre (inicial + movimientos).
  * porMes: cuánto poner cada mes (contando este) para llegar en la fecha, calculado con lo que tenías al empezar el mes
  * (si no, aportar este mes "bajaría" la cuota). esteMes: lo que falta poner este mes.
  * ritmo: promedio de los últimos meses cerrados (hasta 3, desde que existe la meta).
  */
-export function estadoMeta(meta, { aportes = [], movs = [], hoyMes, hoy }) {
+export function estadoMeta(meta, { aportes = [], movs = [], hoyMes, hoy, saldosReserva = null }) {
   hoyMes = hoyMes || String(hoy).slice(0, 7);
   hoy = hoy || `${hoyMes}-01`;
   const manual = r2(aportes.filter((a) => a.meta_id === meta.id).reduce((s, a) => s + Number(a.monto), 0));
-  const reserva = meta.bolsillo_id ? netoReserva(movs, meta.bolsillo_id) : 0;
-  const juntado = r2(Math.max(0, Number(meta.saldo_inicial || 0) + manual + reserva));
+  const propia = meta.bolsillo_id && saldosReserva ? saldosReserva[meta.bolsillo_id] : null;
+  const reserva = propia?.ancla ? propia.saldo : meta.bolsillo_id ? netoReserva(movs, meta.bolsillo_id) : 0;
+  const inicial = propia?.ancla ? 0 : Number(meta.saldo_inicial || 0);
+  const juntado = r2(Math.max(0, inicial + manual + reserva));
   const objetivo = Number(meta.objetivo);
   const falta = r2(Math.max(0, objetivo - juntado));
-  const out = { juntado, manual, reserva, falta, progreso: objetivo > 0 ? Math.min(1, juntado / objetivo) : 0, cumplida: falta <= 0, porMes: null, esteMes: null, meses: null, vencida: false, ritmo: 0, llegaEn: null };
+  const out = { juntado, manual, reserva, inicial, falta, progreso: objetivo > 0 ? Math.min(1, juntado / objetivo) : 0, cumplida: falta <= 0, porMes: null, esteMes: null, meses: null, vencida: false, ritmo: 0, llegaEn: null };
   const pm = aportesPorMes(meta, aportes, movs);
   const esteMes = pm.get(hoyMes) || 0;
 

@@ -15,7 +15,8 @@ const Reservas = ({ onCambio }) => {
   const [lista, setLista] = useState([]);
   const [error, setError] = useState(null);
   useEffect(() => { listarBolsillos().then(setLista).catch(() => {}); }, []);
-  if (!lista.length) return null;
+  const visibles = lista.filter((b) => !b.archivada);
+  if (!visibles.length) return null;
   const cambiar = async (b, tipo) => {
     setLista((l) => l.map((x) => (x.id === b.id ? { ...x, tipo } : x)));
     try { await cambiarTipoBolsillo(b.id, tipo); onCambio?.(); }
@@ -26,9 +27,9 @@ const Reservas = ({ onCambio }) => {
       <h2 id="bil-reservas" className="h3" style={{ margin: 0 }}>Tus reservas</h2>
       <p style={{ margin: 0, fontSize: 14, color: 'var(--label2)' }}>Apartado: plata separada para un gasto que viene. Ahorro: fondo que no pensás gastar.</p>
       <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {lista.map((b) => (
+        {visibles.map((b) => (
           <li key={b.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 15 }}>{b.nombre}</span>
+            <span style={{ fontSize: 15 }}>{b.nombre}{b.origen === 'manual' ? <span style={{ fontSize: 12, color: 'var(--label2)' }}> · manual{b.moneda && b.moneda !== 'ARS' ? ` · ${b.moneda}` : ''}</span> : null}</span>
             <Seg opciones={[{ id: 'apartado', label: 'Apartado' }, { id: 'ahorro', label: 'Ahorro' }]} valor={b.tipo} onCambio={(t) => cambiar(b, t)} ariaLabel={`Tipo de la reserva ${b.nombre}`} />
           </li>
         ))}

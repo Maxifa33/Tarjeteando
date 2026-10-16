@@ -20,7 +20,7 @@ export const DobleToque = ({ texto, confirmar, onConfirmado, disabled }) => {
   const t = useRef(null);
   useEffect(() => () => clearTimeout(t.current), []);
   return (
-    <button type="button" className="btn" disabled={disabled} style={{ minHeight: 44, color: armado ? 'var(--danger)' : undefined }}
+    <button type="button" className="btn" disabled={disabled} aria-live="polite" style={{ minHeight: 44, color: armado ? 'var(--danger)' : undefined }}
       onClick={() => {
         if (armado) { clearTimeout(t.current); setArmado(false); onConfirmado(); return; }
         setArmado(true); t.current = setTimeout(() => setArmado(false), 4000);
@@ -52,12 +52,15 @@ export const FormMeta = ({ abierta, meta, bolsillos, usados, conMovimientos, onC
   }, [abierta, meta]);
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e?.target ? e.target.value : e }));
   // Una reserva alimenta una sola meta (si no, se contaría dos veces).
-  const libres = bolsillos.filter((b) => !usados.has(b.id) || b.id === meta?.bolsillo_id);
+  const libres = bolsillos.filter((b) => !b.archivada && (b.moneda || 'ARS') === f.moneda && (!usados.has(b.id) || b.id === meta?.bolsillo_id));
+  const conSaldoPropio = !!bolsillos.find((b) => b.id === f.bolsillo_id)?.ancla;
 
   const guardar = async () => {
     const v = validarMeta(f, { nueva: !meta, hoy: hoyISO() });
     if (v.error) { setError(v.error); return; }
-    if (v.fila.bolsillo_id && v.fila.moneda !== 'ARS') { setError('Las reservas de Mercado Pago son en pesos: elegí $ o sacá la reserva.'); return; }
+    const elegida = bolsillos.find((b) => b.id === v.fila.bolsillo_id);
+    if (elegida && (elegida.moneda || 'ARS') !== v.fila.moneda) { setError('La reserva y la meta tienen que ser de la misma moneda.'); return; }
+    if (elegida?.ancla) v.fila.saldo_inicial = 0; // la reserva ya tiene su propio saldo
     setOcupado(true); setError(null);
     try { await (meta ? actualizarMeta(meta.id, v.fila) : crearMeta(v.fila)); onGuardado?.(); onCerrar(); }
     catch { setError('No se pudo guardar. Revisá tu conexión.'); }
@@ -78,15 +81,15 @@ export const FormMeta = ({ abierta, meta, bolsillos, usados, conMovimientos, onC
         <Campo label="¿Para cuándo? (opcional)" nota="Con fecha, Alcancía te dice cuánto separar por mes.">
           <input className="mod-campo" type="date" value={f.fecha_objetivo} onChange={set('fecha_objetivo')} />
         </Campo>
-        <Campo label="Reserva de Mercado Pago (opcional)" nota={libres.length ? 'Lo que entra y sale de esa reserva cuenta solo para esta meta, cada vez que importás.' : 'Cuando importes Mercado Pago, vas a poder vincular una reserva.'}>
+        <Campo label="Reserva (opcional)" nota={libres.length ? 'El saldo de esa reserva cuenta solo para esta meta. Tiene que ser de la misma moneda que la meta.' : 'No hay reservas libres en esta moneda. Creá una en Alcancía › Reservas o importá Mercado Pago.'}>
           <select className="mod-select" value={f.bolsillo_id} onChange={set('bolsillo_id')} disabled={!libres.length}>
             <option value="">Sin reserva: la cargo a mano</option>
-            {libres.map((b) => <option key={b.id} value={b.id}>{b.nombre}</option>)}
+            {libres.map((b) => <option key={b.id} value={b.id}>{b.nombre}{b.origen === 'manual' ? ' (manual)' : ''}</option>)}
           </select>
         </Campo>
-        <Campo label="Lo que ya tenés juntado (opcional)" nota={f.bolsillo_id ? 'Solo lo que no aparece en lo importado (ej. lo que había en la reserva antes de tu primer resumen).' : 'Lo que ya separaste hasta hoy.'}>
+        {!conSaldoPropio && <Campo label="Lo que ya tenés juntado (opcional)" nota={f.bolsillo_id ? 'Solo lo que no aparece en lo importado (ej. lo que había en la reserva antes de tu primer resumen).' : 'Lo que ya separaste hasta hoy.'}>
           <input className="mod-campo" inputMode="decimal" value={f.saldo_inicial} onChange={set('saldo_inicial')} placeholder="0" />
-        </Campo>
+        </Campo>}
         {error && <p role="alert" style={{ margin: 0, fontSize: 13, color: 'var(--danger)' }}>{error}</p>}
         <Botonera onCerrar={onCerrar} ocupado={ocupado} />
       </form>
@@ -125,14 +128,14 @@ export const DetalleMeta = ({ meta, estado, aportes, reserva, onCerrar, onCambio
           <span style={{ fontSize: 14, color: 'var(--label2)' }}>de {plata(meta.objetivo, meta.moneda)}{meta.fecha_objetivo ? ` para el ${fechaDM(meta.fecha_objetivo)}` : ''}</span>
           <div className="mod-barra" aria-hidden="true"><i style={{ transform: `scaleX(${estado.progreso})` }} /></div>
           <span style={{ fontSize: 13, color: 'var(--label2)' }}>
-            {meta.saldo_inicial ? `Ya tenías ${plata(meta.saldo_inicial, meta.moneda)} · ` : ''}A mano {plata(estado.manual, meta.moneda)}{meta.bolsillo_id ? ` · Reserva "${reserva?.nombre || ''}" ${plata(estado.reserva, meta.moneda)}` : ''}
+            {estado.inicial ? `Ya tenías ${plata(estado.inicial, meta.moneda)} · ` : ''}A mano {plata(estado.manual, meta.moneda)}{meta.bolsillo_id ? ` · Reserva "${reserva?.nombre || ''}" ${plata(estado.reserva, meta.moneda)}` : ''}
           </span>
         </div>
 
         {meta.estado === 'activa' && (
           <section aria-labelledby="dm-mover" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <h3 id="dm-mover" className="h3" style={{ margin: 0 }}>Mover plata</h3>
-            {meta.bolsillo_id && <p style={{ margin: 0, fontSize: 13, color: 'var(--label2)' }}>Lo que pasa por la reserva se suma solo al importar. Usá esto para plata que tenés en otro lado.</p>}
+            {meta.bolsillo_id && <p style={{ margin: 0, fontSize: 13, color: 'var(--label2)' }}>{reserva?.origen === 'manual' ? 'El saldo de la reserva se suma solo (movelo desde Alcancía › Reservas).' : 'Lo que pasa por la reserva se suma solo al importar.'} Usá esto para plata que tenés en otro lado.</p>}
             <Seg opciones={[{ id: 'aporte', label: 'Sumé' }, { id: 'retiro', label: 'Saqué' }]} valor={sentido} onCambio={setSentido} ariaLabel="Sumar o sacar" />
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <input className="mod-campo" inputMode="decimal" aria-label="Monto" placeholder="Monto" value={monto} onChange={(e) => setMonto(e.target.value)} />

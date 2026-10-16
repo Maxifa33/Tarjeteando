@@ -23,7 +23,7 @@ export async function movimientosDeReservas(bolsilloIds, { todas = false } = {})
   if (!todas && !bolsilloIds?.length) return [];
   const out = [];
   for (let i = 0; ; i += 1000) {
-    let q = supabase.from('movimientos').select('id, fecha, monto, direccion, tipo, bolsillo_id').eq('tipo', 'reserva');
+    let q = supabase.from('movimientos').select('id, fecha, monto, direccion, tipo, bolsillo_id, previo_reserva, created_at').eq('tipo', 'reserva');
     if (!todas) q = q.in('bolsillo_id', bolsilloIds); // { todas: true }: todas las reservas
     const filas = await q.order('fecha').order('id').range(i, i + 999).then(chk);
     out.push(...filas);
@@ -65,7 +65,50 @@ export const tasasPlazoFijo = async () => (await supabase.from('tasas_plazo_fijo
   .map((t) => ({ ...t, tna: Number(t.tna) }));
 
 /** Saldos reales de las reservas (los extractos no los traen). Ver alcancia/reservas.js. */
-export const listarAjustes = async () => (await supabase.from('reserva_ajustes').select('id, bolsillo_id, fecha, saldo_real, nota').order('fecha').then(chk))
+export const listarAjustes = async () => (await supabase.from('reserva_ajustes').select('id, bolsillo_id, fecha, saldo_real, nota, created_at').order('fecha').then(chk))
   .map((a) => ({ ...a, saldo_real: Number(a.saldo_real) }));
 export const guardarAjuste = (fila) => supabase.from('reserva_ajustes').upsert(fila, { onConflict: 'bolsillo_id,fecha' }).select('id').single().then(chk);
 export const borrarAjuste = (id) => supabase.from('reserva_ajustes').delete().eq('id', id).then(chk);
+
+/* ---------- Reservas manuales (las que no salen de ningún extracto) ---------- */
+
+/** Crea la reserva y, si ya tenés plata, su primer saldo real de hoy. Si el saldo falla, deshace la reserva. */
+export async function crearReserva(fila, saldo, hoy) {
+  const b = await supabase.from('bolsillos').insert({ ...fila, origen: 'manual' }).select('id').single().then(chk);
+  if (saldo != null) {
+    try { await supabase.from('reserva_ajustes').insert({ bolsillo_id: b.id, fecha: hoy, saldo_real: saldo, nota: 'Saldo inicial' }).then(chk); }
+    catch (e) { await supabase.from('bolsillos').delete().eq('id', b.id); throw e; }
+  }
+  return b;
+}
+export const actualizarReserva = (id, cambios) => supabase.from('bolsillos').update(cambios).eq('id', id).eq('origen', 'manual').select('id').single().then(chk);
+export const archivarReserva = (id, archivada) => actualizarReserva(id, { archivada });
+
+/** Borra una reserva manual: primero devuelve los movimientos importados que tenía vinculados (vuelven a ser lo que eran). */
+export async function borrarReserva(id) {
+  // Una meta vinculada perdería su saldo en silencio: primero hay que desvincularla.
+  const metas = await supabase.from('metas').select('nombre').eq('bolsillo_id', id).then(chk);
+  if (metas.length) throw Object.assign(new Error('vinculada a una meta'), { codigo: 'meta', metas: metas.map((m) => m.nombre) });
+  const vinculados = await supabase.from('movimientos').select('id').eq('bolsillo_id', id).not('previo_reserva', 'is', null).then(chk);
+  for (const m of vinculados) await desvincularMovimiento(m.id);
+  return supabase.from('bolsillos').delete().eq('id', id).eq('origen', 'manual').then(chk);
+}
+
+export const listarMovsManuales = async () => (await supabase.from('reserva_movs').select('id, bolsillo_id, fecha, monto, sentido, nota, created_at').order('fecha').then(chk))
+  .map((m) => ({ ...m, monto: Number(m.monto) }));
+export const crearMovReserva = (fila) => supabase.from('reserva_movs').insert(fila).select('id').single().then(chk);
+export const borrarMovReserva = (id) => supabase.from('reserva_movs').delete().eq('id', id).then(chk);
+
+/** Vincula un movimiento importado a una reserva manual (deja de ser gasto/ingreso). Ver RPC economics_vincular_reserva. */
+export const vincularMovimiento = (movId, bolsilloId) => supabase.rpc('economics_vincular_reserva', { p_mov: movId, p_bolsillo: bolsilloId }).then(chk);
+export const desvincularMovimiento = (movId) => supabase.rpc('economics_desvincular_reserva', { p_mov: movId }).then(chk);
+
+/** Movimientos importados que se pueden vincular: misma moneda, sin reserva ni deuda, últimos 90 días. */
+export async function candidatosVincular(moneda, hoy) {
+  const d = new Date(`${hoy}T12:00:00`); d.setDate(d.getDate() - 90);
+  const desde = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const filas = await supabase.from('movimientos').select('id, fecha, monto, direccion, tipo, descripcion, contraparte, descripcion_original')
+    .in('tipo', ['gasto', 'ingreso', 'transferencia_interna']).is('bolsillo_id', null).is('deuda_id', null).eq('moneda', moneda).gte('fecha', desde)
+    .order('fecha', { ascending: false }).order('id').limit(80).then(chk);
+  return filas.map((m) => ({ ...m, monto: Number(m.monto) }));
+}

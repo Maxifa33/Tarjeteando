@@ -6,13 +6,15 @@ import { movimientosEntre, mesesConDatos, listarBolsillos } from '../../cuentas/
 import { rangoMes, moverMes } from '../../cuentas/resumen.js';
 import { historial } from '../../cuentas/presupuesto.js';
 import { tarjetasPorMes } from '../../puente/tarjeteando.js';
-import { resumenReservas } from '../../alcancia/reservas.js';
+import { resumenReservas, estadoReserva, movsManuales, MEDIOS } from '../../alcancia/reservas.js';
 import { estadoMeta, planMetas, valuar, totalCartera, interesPlazoFijo, TIPOS_INVERSION } from '../../alcancia/alcancia.js';
-import { listarMetas, listarAportes, movimientosDeReservas, listarAjustes, listarInversiones, preciosPara, tasasPlazoFijo } from '../../alcancia/repo.js';
+import { listarMetas, listarAportes, movimientosDeReservas, listarAjustes, listarMovsManuales, listarInversiones, preciosPara, tasasPlazoFijo } from '../../alcancia/repo.js';
 import { hoyISO, plata, fechaDM } from '../deudas/HojasDeuda.jsx';
 import { FormMeta, DetalleMeta } from './HojasMeta.jsx';
 import { FormInversion, DetalleInversion } from './HojasInversion.jsx';
 import { DetalleReserva } from './HojasReserva.jsx';
+import FormReserva from './FormReserva.jsx';
+import { dinero, etiquetaMoneda } from './dinero.js';
 import '../modulos.css';
 
 // Tolerancia de 3 días: el último día del mes puede no tener movimientos.
@@ -73,6 +75,7 @@ const Metas = ({ tarjeteando }) => {
   const [aportes, setAportes] = useState([]);
   const [movs, setMovs] = useState([]);
   const [bolsillos, setBolsillos] = useState([]);
+  const [ajustes, setAjustes] = useState([]);
   const [capacidad, setCapacidad] = useState(undefined);
   const [error, setError] = useState(null);
   const [form, setForm] = useState(null);
@@ -82,18 +85,30 @@ const Metas = ({ tarjeteando }) => {
   const cargar = useCallback(async () => {
     const id = ++pedido.current; setError(null);
     try {
-      const [ms, as, bs] = await Promise.all([listarMetas(), listarAportes(), listarBolsillos()]);
+      const [ms, as, bs, ajs, mans] = await Promise.all([listarMetas(), listarAportes(), listarBolsillos(), listarAjustes(), listarMovsManuales()]);
       const ids = [...new Set(ms.map((m) => m.bolsillo_id).filter(Boolean))];
       const rs = await movimientosDeReservas(ids);
       if (id !== pedido.current) return;
-      setMetas(ms); setAportes(as); setBolsillos(bs); setMovs(rs);
+      setMetas(ms); setAportes(as); setBolsillos(bs); setAjustes(ajs); setMovs([...rs, ...movsManuales(mans)]);
     } catch { if (id === pedido.current) { setError('No se pudieron leer tus metas. Revisá tu conexión.'); setMetas((m) => m || []); } }
   }, []);
   useEffect(() => { cargar(); }, [cargar]);
   useEffect(() => { let vivo = true; capacidadMensual(tarjeteando).then((c) => { if (vivo) setCapacidad(c); }).catch(() => { if (vivo) setCapacidad(null); }); return () => { vivo = false; }; }, [tarjeteando]);
 
   const hoy = hoyISO();
-  const estados = useMemo(() => Object.fromEntries((metas || []).map((m) => [m.id, estadoMeta(m, { aportes, movs, hoy })])), [metas, aportes, movs, hoy]);
+  // Saldo de cada reserva vinculada; `ancla`: tiene saldo propio (manual o con saldo real) y entonces 'lo que ya tenés' no suma.
+  const saldosReserva = useMemo(() => {
+    const out = {};
+    (metas || []).forEach((m) => {
+      const b = m.bolsillo_id && bolsillos.find((x) => x.id === m.bolsillo_id);
+      if (!b || out[b.id]) return;
+      const e = estadoReserva(b, movs, ajustes);
+      out[b.id] = { saldo: e.saldo, ancla: b.origen === 'manual' || !e.sinAnclar };
+    });
+    return out;
+  }, [metas, bolsillos, movs, ajustes]);
+  const bolsillosForm = useMemo(() => bolsillos.map((b) => ({ ...b, ancla: b.origen === 'manual' || ajustes.some((a) => a.bolsillo_id === b.id) })), [bolsillos, ajustes]);
+  const estados = useMemo(() => Object.fromEntries((metas || []).map((m) => [m.id, estadoMeta(m, { aportes, movs, hoy, saldosReserva })])), [metas, aportes, movs, hoy, saldosReserva]);
   if (!metas) return <p role="status" style={{ margin: 0 }}>Cargando…</p>;
   const activas = metas.filter((m) => m.estado === 'activa');
   const logradas = metas.filter((m) => m.estado === 'lograda');
@@ -154,7 +169,7 @@ const Metas = ({ tarjeteando }) => {
         </details>
       )}
 
-      <FormMeta abierta={!!form} meta={form?.meta || null} bolsillos={bolsillos} usados={usados}
+      <FormMeta abierta={!!form} meta={form?.meta || null} bolsillos={bolsillosForm} usados={usados}
         conMovimientos={!!form?.meta && (form.meta.saldo_inicial > 0 || aportes.some((a) => a.meta_id === form.meta.id) || !!form.meta.bolsillo_id)} onCerrar={() => setForm(null)} onGuardado={cargar} />
       <DetalleMeta meta={form ? null : detalle} estado={detalle ? estados[detalle.id] : null} aportes={aportes}
         reserva={detalle ? bolsillos.find((b) => b.id === detalle.bolsillo_id) : null}
@@ -163,46 +178,85 @@ const Metas = ({ tarjeteando }) => {
   );
 };
 
-/* ---------- Reservas de Mercado Pago ---------- */
+/* ---------- Reservas (Mercado Pago y manuales) ---------- */
+const TotalesReservas = ({ r }) => {
+  const { monedas, equivalente } = r;
+  if (!monedas.length) return <Grande label="Plata en tus reservas" valor={pesos(0)} />;
+  // Las monedas sin plata no hacen ruido: solo se listan las que tienen saldo (si ninguna tiene, la primera).
+  const lista = monedas.some((t) => t.total > 0) ? monedas.filter((t) => t.total > 0) : monedas.slice(0, 1);
+  if (lista.length === 1) {
+    const t = lista[0];
+    const enPesos = t.moneda !== 'ARS' && t.total > 0 && !t.faltaCotizacion ? ` · ≈ ${pesos(t.ars)}` : '';
+    return <Grande label="Plata en tus reservas" valor={dinero(t.total, t.moneda)} nota={`Ahorro ${dinero(t.ahorro, t.moneda)} · Apartado ${dinero(t.apartado, t.moneda)}${enPesos}`} />;
+  }
+  return (
+    <section aria-label="Plata en tus reservas" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <span style={{ fontSize: 13, color: 'var(--label2)' }}>Plata en tus reservas</span>
+      {lista.map((t) => (
+        <span key={t.moneda} style={{ display: 'flex', flexDirection: 'column' }}>
+          <span className="mod-cifra" style={{ fontSize: t.moneda === 'ARS' ? 34 : 24, lineHeight: t.moneda === 'ARS' ? '40px' : '30px', fontWeight: 700, letterSpacing: '-.02em' }}>{dinero(t.total, t.moneda)}</span>
+          <span className="mod-cifra" style={{ fontSize: 13, color: 'var(--label2)' }}>Ahorro {dinero(t.ahorro, t.moneda)} · Apartado {dinero(t.apartado, t.moneda)}</span>
+        </span>
+      ))}
+      {equivalente.mostrar && (
+        <span style={{ fontSize: 14, color: 'var(--label2)' }}>
+          {equivalente.completo ? <>En pesos, todo junto: <strong className="mod-cifra">≈ {pesos(equivalente.ars)}</strong></>
+            : <>Equivalente en pesos: <strong className="mod-cifra">≈ {pesos(equivalente.ars)}</strong> sin contar {equivalente.faltan.join(', ')} (falta la cotización)</>}
+        </span>
+      )}
+    </section>
+  );
+};
+
 const Reservas = () => {
   const [datos, setDatos] = useState(null);
   const [error, setError] = useState(null);
   const [detalleId, setDetalleId] = useState(null);
+  const [alta, setAlta] = useState(false);
   const pedido = useRef(0);
 
   const cargar = useCallback(async () => {
     const id = ++pedido.current; setError(null);
     try {
-      const [bs, ms, as] = await Promise.all([listarBolsillos(), movimientosDeReservas(null, { todas: true }), listarAjustes()]);
+      const [bs, ms, as, mans, ps] = await Promise.all([listarBolsillos(), movimientosDeReservas(null, { todas: true }), listarAjustes(), listarMovsManuales(), preciosPara([]).catch(() => new Map())]);
       if (id !== pedido.current) return;
-      setDatos({ bs, ms, as });
-    } catch { if (id === pedido.current) { setError('No se pudieron leer tus reservas. Revisá tu conexión.'); setDatos((d) => d || { bs: [], ms: [], as: [] }); } }
+      const f = ps.get('dolar|bolsa');
+      setDatos({ bs, movs: [...ms, ...movsManuales(mans)], as, mep: f ? Number(f.compra || f.precio) : null });
+    } catch { if (id === pedido.current) { setError('No se pudieron leer tus reservas. Revisá tu conexión.'); setDatos((d) => d || { bs: [], movs: [], as: [], mep: null }); } }
   }, []);
   useEffect(() => { cargar(); }, [cargar]);
 
   const hoy = hoyISO();
-  const r = useMemo(() => (datos ? resumenReservas(datos.bs, datos.ms, datos.as, hoy) : null), [datos, hoy]);
+  const r = useMemo(() => (datos ? resumenReservas(datos.bs, datos.movs, datos.as, hoy, { mep: datos.mep }) : null), [datos, hoy]);
   if (!r) return <p role="status" style={{ margin: 0 }}>Cargando…</p>;
   const conSaldo = r.estados.filter((e) => e.saldo > 0);
   const vacias = r.estados.filter((e) => e.saldo <= 0);
-  const detalle = r.estados.find((e) => e.id === detalleId) || null;
+  const detalle = [...r.estados, ...r.archivadas].find((e) => e.id === detalleId) || null;
 
   const tarjeta = (e) => {
-    const pie = e.sinAnclar ? (e.movimientos ? 'Saldo sin confirmar: tocá para cargar el de Mercado Pago' : 'Sin movimientos importados')
-      : `Confirmado el ${fechaDM(e.ultimoAjuste)}${e.diasDesdeAjuste > 35 ? ' · conviene actualizarlo' : ''}`;
-    return <Tarjeta key={e.id} onClick={() => setDetalleId(e.id)} label={`${e.nombre}: ${pesos(e.saldo)}. Ver movimientos`}
-      titulo={e.nombre} sub={e.tipo === 'ahorro' ? 'Ahorro' : 'Apartado'} valor={pesos(e.saldo)} pie={pie} />;
+    const manual = e.origen === 'manual';
+    const equiv = e.moneda !== 'ARS' && e.saldo > 0 ? (e.equivalenteARS != null ? `≈ ${pesos(e.equivalenteARS)}` : 'sin cotización') : null;
+    const pie = manual ? [MEDIOS.find((x) => x.id === e.medio)?.label || null, equiv, e.archivada ? 'archivada' : null].filter(Boolean).join(' · ') || null
+      : e.sinAnclar ? (e.movimientos ? 'Saldo sin confirmar: tocá para cargar el de Mercado Pago' : 'Sin movimientos importados')
+        : `Confirmado el ${fechaDM(e.ultimoAjuste)}${e.diasDesdeAjuste > 35 ? ' · conviene actualizarlo' : ''}${equiv ? ` · ${equiv}` : ''}`;
+    return <Tarjeta key={e.id} onClick={() => setDetalleId(e.id)} label={`${e.nombre}: ${dinero(e.saldo, e.moneda)}. Ver movimientos`}
+      titulo={e.nombre} sub={`${e.tipo === 'ahorro' ? 'Ahorro' : 'Apartado'} · ${manual ? etiquetaMoneda(e.moneda) : 'Mercado Pago'}`} valor={dinero(e.saldo, e.moneda)} pie={pie} />;
   };
 
   return (
     <section style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
-      <Grande label="Plata en tus reservas" valor={pesos(r.total)} nota={`Ahorro ${pesos(r.ahorro)} · Apartado ${pesos(r.apartado)}`} />
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap' }}>
+        <TotalesReservas r={r} />
+        <button type="button" className="btn btn-pri" onClick={() => setAlta(true)} style={{ minHeight: 44, borderRadius: 22, padding: '0 18px' }}>
+          <Plus size={16} aria-hidden="true" /> Nueva reserva
+        </button>
+      </div>
       {error && <div className="mod-aviso" role="alert">{error} <button type="button" className="btn" onClick={cargar} style={{ minHeight: 44 }}>Reintentar</button></div>}
-      {r.sinAnclar > 0 && <div className="mod-aviso" role="status">{r.sinAnclar} {r.sinAnclar === 1 ? 'reserva tiene' : 'reservas tienen'} el saldo sin confirmar: el extracto no lo trae. Abrila y cargá el que ves en Mercado Pago.</div>}
+      {r.sinAnclar > 0 && <div className="mod-aviso" role="status">{r.sinAnclar} {r.sinAnclar === 1 ? 'reserva de Mercado Pago tiene' : 'reservas de Mercado Pago tienen'} el saldo sin confirmar: el extracto no lo trae. Abrila y cargá el que ves en Mercado Pago.</div>}
       <section aria-labelledby="alc-res" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         <h2 id="alc-res" className="h3" style={{ margin: 0 }}>Con plata</h2>
         {conSaldo.length ? <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>{conSaldo.map(tarjeta)}</ul>
-          : error ? null : <Vacio titulo={r.estados.length ? 'Ninguna reserva tiene plata.' : 'Todavía no hay reservas.'} texto="Aparecen solas cuando importás tu resumen de Mercado Pago con 'Dinero reservado'." />}
+          : error ? null : <Vacio titulo={r.estados.length ? 'Ninguna reserva tiene plata.' : 'Todavía no hay reservas.'} texto="Cargá las tuyas (efectivo, dólares, euros, lo que uses) con 'Nueva reserva'. Las de Mercado Pago aparecen solas cuando importás el resumen." />}
       </section>
       {vacias.length > 0 && (
         <details>
@@ -210,7 +264,14 @@ const Reservas = () => {
           <ul style={{ listStyle: 'none', margin: '8px 0 0', padding: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>{vacias.map(tarjeta)}</ul>
         </details>
       )}
-      <DetalleReserva estado={detalle} onCerrar={() => setDetalleId(null)} onCambio={cargar} />
+      {r.archivadas.length > 0 && (
+        <details>
+          <summary style={{ cursor: 'pointer', fontSize: 15, fontWeight: 600, minHeight: 44, display: 'flex', alignItems: 'center' }}>Archivadas ({r.archivadas.length})</summary>
+          <ul style={{ listStyle: 'none', margin: '8px 0 0', padding: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>{r.archivadas.map(tarjeta)}</ul>
+        </details>
+      )}
+      <FormReserva abierta={alta} reserva={null} existentes={datos.bs} onCerrar={() => setAlta(false)} onGuardado={cargar} />
+      <DetalleReserva estado={alta ? null : detalle} existentes={datos.bs} onCerrar={() => setDetalleId(null)} onCambio={cargar} />
     </section>
   );
 };
