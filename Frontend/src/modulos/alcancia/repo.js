@@ -19,12 +19,13 @@ export const crearAporte = (fila) => supabase.from('meta_aportes').insert(fila).
 export const borrarAporte = (id) => supabase.from('meta_aportes').delete().eq('id', id).then(chk);
 
 /** Todos los movimientos de las reservas vinculadas (desde siempre: el saldo de una reserva es acumulado). */
-export async function movimientosDeReservas(bolsilloIds) {
-  if (!bolsilloIds.length) return [];
+export async function movimientosDeReservas(bolsilloIds, { todas = false } = {}) {
+  if (!todas && !bolsilloIds?.length) return [];
   const out = [];
   for (let i = 0; ; i += 1000) {
-    const filas = await supabase.from('movimientos').select('id, fecha, monto, direccion, tipo, bolsillo_id')
-      .eq('tipo', 'reserva').in('bolsillo_id', bolsilloIds).order('fecha').order('id').range(i, i + 999).then(chk);
+    let q = supabase.from('movimientos').select('id, fecha, monto, direccion, tipo, bolsillo_id').eq('tipo', 'reserva');
+    if (!todas) q = q.in('bolsillo_id', bolsilloIds); // { todas: true }: todas las reservas
+    const filas = await q.order('fecha').order('id').range(i, i + 999).then(chk);
     out.push(...filas);
     if (filas.length < 1000) break;
   }
@@ -62,3 +63,9 @@ export async function buscarPrecios(tipo, q) {
 
 export const tasasPlazoFijo = async () => (await supabase.from('tasas_plazo_fijo').select('entidad, tna, fecha').order('tna', { ascending: false }).limit(5).then(chk))
   .map((t) => ({ ...t, tna: Number(t.tna) }));
+
+/** Saldos reales de las reservas (los extractos no los traen). Ver alcancia/reservas.js. */
+export const listarAjustes = async () => (await supabase.from('reserva_ajustes').select('id, bolsillo_id, fecha, saldo_real, nota').order('fecha').then(chk))
+  .map((a) => ({ ...a, saldo_real: Number(a.saldo_real) }));
+export const guardarAjuste = (fila) => supabase.from('reserva_ajustes').upsert(fila, { onConflict: 'bolsillo_id,fecha' }).select('id').single().then(chk);
+export const borrarAjuste = (id) => supabase.from('reserva_ajustes').delete().eq('id', id).then(chk);

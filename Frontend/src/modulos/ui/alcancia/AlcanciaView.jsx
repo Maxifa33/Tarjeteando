@@ -6,18 +6,20 @@ import { movimientosEntre, mesesConDatos, listarBolsillos } from '../../cuentas/
 import { rangoMes, moverMes } from '../../cuentas/resumen.js';
 import { historial } from '../../cuentas/presupuesto.js';
 import { tarjetasPorMes } from '../../puente/tarjeteando.js';
+import { resumenReservas } from '../../alcancia/reservas.js';
 import { estadoMeta, planMetas, valuar, totalCartera, interesPlazoFijo, TIPOS_INVERSION } from '../../alcancia/alcancia.js';
-import { listarMetas, listarAportes, movimientosDeReservas, listarInversiones, preciosPara, tasasPlazoFijo } from '../../alcancia/repo.js';
+import { listarMetas, listarAportes, movimientosDeReservas, listarAjustes, listarInversiones, preciosPara, tasasPlazoFijo } from '../../alcancia/repo.js';
 import { hoyISO, plata, fechaDM } from '../deudas/HojasDeuda.jsx';
 import { FormMeta, DetalleMeta } from './HojasMeta.jsx';
 import { FormInversion, DetalleInversion } from './HojasInversion.jsx';
+import { DetalleReserva } from './HojasReserva.jsx';
 import '../modulos.css';
 
 // Tolerancia de 3 días: el último día del mes puede no tener movimientos.
 const menosDias = (iso, n) => { const d = new Date(`${iso}T12:00:00`); d.setDate(d.getDate() - n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const hoyMes = () => hoyISO().slice(0, 7);
 const TAB_KEY = 'alcancia_pestana';
-const leerTab = () => { try { return localStorage.getItem(TAB_KEY) === 'inversiones' ? 'inversiones' : 'metas'; } catch { return 'metas'; } };
+const leerTab = () => { try { const t = localStorage.getItem(TAB_KEY); return t === 'inversiones' || t === 'reservas' ? t : 'metas'; } catch { return 'metas'; } };
 
 /** Lo que te quedó en promedio por mes (Presupuestos), solo meses cerrados con cuentas importadas. */
 async function capacidadMensual(tarjeteando) {
@@ -161,6 +163,58 @@ const Metas = ({ tarjeteando }) => {
   );
 };
 
+/* ---------- Reservas de Mercado Pago ---------- */
+const Reservas = () => {
+  const [datos, setDatos] = useState(null);
+  const [error, setError] = useState(null);
+  const [detalleId, setDetalleId] = useState(null);
+  const pedido = useRef(0);
+
+  const cargar = useCallback(async () => {
+    const id = ++pedido.current; setError(null);
+    try {
+      const [bs, ms, as] = await Promise.all([listarBolsillos(), movimientosDeReservas(null, { todas: true }), listarAjustes()]);
+      if (id !== pedido.current) return;
+      setDatos({ bs, ms, as });
+    } catch { if (id === pedido.current) { setError('No se pudieron leer tus reservas. Revisá tu conexión.'); setDatos((d) => d || { bs: [], ms: [], as: [] }); } }
+  }, []);
+  useEffect(() => { cargar(); }, [cargar]);
+
+  const hoy = hoyISO();
+  const r = useMemo(() => (datos ? resumenReservas(datos.bs, datos.ms, datos.as, hoy) : null), [datos, hoy]);
+  if (!r) return <p role="status" style={{ margin: 0 }}>Cargando…</p>;
+  const conSaldo = r.estados.filter((e) => e.saldo > 0);
+  const vacias = r.estados.filter((e) => e.saldo <= 0);
+  const detalle = r.estados.find((e) => e.id === detalleId) || null;
+
+  const tarjeta = (e) => {
+    const pie = e.sinAnclar ? (e.movimientos ? 'Saldo sin confirmar: tocá para cargar el de Mercado Pago' : 'Sin movimientos importados')
+      : `Confirmado el ${fechaDM(e.ultimoAjuste)}${e.diasDesdeAjuste > 35 ? ' · conviene actualizarlo' : ''}`;
+    return <Tarjeta key={e.id} onClick={() => setDetalleId(e.id)} label={`${e.nombre}: ${pesos(e.saldo)}. Ver movimientos`}
+      titulo={e.nombre} sub={e.tipo === 'ahorro' ? 'Ahorro' : 'Apartado'} valor={pesos(e.saldo)} pie={pie} />;
+  };
+
+  return (
+    <section style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+      <Grande label="Plata en tus reservas" valor={pesos(r.total)} nota={`Ahorro ${pesos(r.ahorro)} · Apartado ${pesos(r.apartado)}`} />
+      {error && <div className="mod-aviso" role="alert">{error} <button type="button" className="btn" onClick={cargar} style={{ minHeight: 44 }}>Reintentar</button></div>}
+      {r.sinAnclar > 0 && <div className="mod-aviso" role="status">{r.sinAnclar} {r.sinAnclar === 1 ? 'reserva tiene' : 'reservas tienen'} el saldo sin confirmar: el extracto no lo trae. Abrila y cargá el que ves en Mercado Pago.</div>}
+      <section aria-labelledby="alc-res" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <h2 id="alc-res" className="h3" style={{ margin: 0 }}>Con plata</h2>
+        {conSaldo.length ? <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>{conSaldo.map(tarjeta)}</ul>
+          : error ? null : <Vacio titulo={r.estados.length ? 'Ninguna reserva tiene plata.' : 'Todavía no hay reservas.'} texto="Aparecen solas cuando importás tu resumen de Mercado Pago con 'Dinero reservado'." />}
+      </section>
+      {vacias.length > 0 && (
+        <details>
+          <summary style={{ cursor: 'pointer', fontSize: 15, fontWeight: 600, minHeight: 44, display: 'flex', alignItems: 'center' }}>Sin saldo ({vacias.length})</summary>
+          <ul style={{ listStyle: 'none', margin: '8px 0 0', padding: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>{vacias.map(tarjeta)}</ul>
+        </details>
+      )}
+      <DetalleReserva estado={detalle} onCerrar={() => setDetalleId(null)} onCambio={cargar} />
+    </section>
+  );
+};
+
 /* ---------- Inversiones ---------- */
 const Inversiones = ({ tarjeteando }) => {
   const [invs, setInvs] = useState(null);
@@ -264,8 +318,8 @@ const AlcanciaView = ({ tarjeteando }) => {
   const cambiar = (t) => { setTab(t); try { localStorage.setItem(TAB_KEY, t); } catch { /* sin storage */ } };
   return (
     <section style={{ display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 760 }}>
-      <Seg opciones={[{ id: 'metas', label: 'Metas' }, { id: 'inversiones', label: 'Inversiones' }]} valor={tab} onCambio={cambiar} ariaLabel="Sección de Alcancía" />
-      {tab === 'metas' ? <Metas tarjeteando={tarjeteando} /> : <Inversiones tarjeteando={tarjeteando} />}
+      <Seg opciones={[{ id: 'metas', label: 'Metas' }, { id: 'reservas', label: 'Reservas' }, { id: 'inversiones', label: 'Inversiones' }]} valor={tab} onCambio={cambiar} ariaLabel="Sección de Alcancía" />
+      {tab === 'metas' ? <Metas tarjeteando={tarjeteando} /> : tab === 'reservas' ? <Reservas /> : <Inversiones tarjeteando={tarjeteando} />}
     </section>
   );
 };
