@@ -163,7 +163,6 @@ const EvolucionChart = ({
               {nFut > 0 && (
                 <>
                   <div aria-hidden="true" style={{ position: 'absolute', left: jFut * slot - 2, width: nFut * slot + 4, top: -14, bottom: 0, borderRadius: 14, background: 'var(--fill2)' }} />
-                  {!compacto && <span className="cap" aria-hidden="true" style={{ position: 'absolute', left: jFut * slot + 12, top: -12, fontWeight: 600 }}>Ya comprometido</span>}
                 </>
               )}
               {jCurso > 0 && (
