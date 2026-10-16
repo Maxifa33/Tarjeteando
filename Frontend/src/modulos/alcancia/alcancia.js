@@ -1,4 +1,5 @@
 import { r2, parseMonto } from '../cuentas/util.js';
+import { rendimientoFlujos } from './aportes.js';
 
 /**
  * Alcancía: lógica pura (sin Supabase).
@@ -202,7 +203,7 @@ export function precioDe(inv, precios) {
  * `mep`: dólar MEP compra (para pasar entre monedas). `hoy`: 'YYYY-MM-DD'.
  * capital está en `inv.moneda` (lo que pusiste); ganancia = valor en esa moneda − capital.
  */
-export function valuar(inv, precios, { mep, hoy, inflacion = null }) { // inflacion: Map 'YYYY-MM' → variación % (INDEC)
+export function valuar(inv, precios, { mep, hoy, inflacion = null, aportes = null }) { // inflacion: Map 'YYYY-MM' → variación % (INDEC)
   const conv = (v, de) => (de === 'USD' ? { ars: mep ? r2(v * mep) : null, usd: r2(v) } : { ars: r2(v), usd: mep ? r2(v / mep) : null });
   const cap = inv.capital == null ? null : Number(inv.capital);
   let nativo = null; let moneda = inv.moneda || 'ARS'; let estimado = false; let fechaPrecio = null; let sinPrecio = false; let vence = null;
@@ -225,23 +226,32 @@ export function valuar(inv, precios, { mep, hoy, inflacion = null }) { // inflac
     const rescate = inv.valor_rescate != null ? Number(inv.valor_rescate) : null;
     nativo = rescate ?? cuenta;
     if (nativo == null) sinPrecio = true;
-    const aportado = cap ?? aportadoEstimado(inv, inv.valor_fecha || hoy); // hasta la fecha del valor, no hasta hoy
+    const hasta = inv.valor_fecha || hoy;
+    // Con cobros asociados (prima en la tarjeta o débito en la cuenta), lo aportado son esos cobros reales.
+    const ap = aportes?.[inv.id];
+    const pendiente = !!ap?.pendiente; // falta el historial del dólar para convertir los cobros: no mostrar números a medias
+    const flujos = ap?.flujos?.filter((f) => f.fecha <= hasta) || [];
+    const conCobros = !pendiente && flujos.some((f) => !f.estimado);
+    const aportado = conCobros ? r2(flujos.reduce((x, f) => x + f.monto, 0)) : cap ?? aportadoEstimado(inv, hasta); // hasta la fecha del valor, no hasta hoy
     const v = nativo == null ? { ars: null, usd: null } : conv(nativo, moneda);
     const enCap = moneda === 'USD' ? v.usd : v.ars;
-    const gan = aportado != null && enCap != null && !(moneda === 'ARS' && cap == null) ? r2(enCap - aportado) : null;
+    // En pesos los aportes se indexan: sin el total aportado real (cargado o por cobros), ganancia y rendimiento serían inventados.
+    const sinBase = pendiente || (conCobros ? !!ap.faltaBase : moneda === 'ARS' && cap == null);
+    const gan = aportado != null && enCap != null && !sinBase ? r2(enCap - aportado) : null;
     const viejo = !inv.valor_fecha || dias(inv.valor_fecha, hoy) > 60;
-    const hasta = inv.valor_fecha || hoy;
-    // En pesos los aportes se indexan: sin el total aportado real, la ganancia y el rendimiento serían inventados.
-    const sinBase = moneda === 'ARS' && cap == null;
-    const rinde = sinBase ? null : rendimientoSeguro(inv, nativo, cap, hasta); // sobre lo que se muestra (rescate si hay)
-    const rindeCuenta = sinBase || rescate == null || cuenta == null || rescate === cuenta ? null : rendimientoSeguro(inv, cuenta, cap, hasta);
+    const tir = (valor) => {
+      if (conCobros) { const r = rendimientoFlujos(flujos, valor, hasta); return r && { ...r, estimado: flujos.some((f) => f.estimado) }; }
+      return rendimientoSeguro(inv, valor, cap, hasta);
+    };
+    const rinde = sinBase ? null : tir(nativo); // sobre lo que se muestra (rescate si hay)
+    const rindeCuenta = sinBase || rescate == null || cuenta == null || rescate === cuenta ? null : tir(cuenta);
     // Real: contra la inflación anualizada del MISMO período (no la del último año).
-    const inflPeriodo = moneda === 'ARS' && rinde?.anual != null ? inflacionDelPeriodo(inflacion, inv.fecha_inicio, hasta) : null;
+    const inflPeriodo = moneda === 'ARS' && rinde?.anual != null ? inflacionDelPeriodo(inflacion, conCobros ? flujos[0].fecha : inv.fecha_inicio, hasta) : null;
     const real = inflPeriodo != null ? Math.round((((1 + rinde.anual / 100) / (1 + inflPeriodo / 100)) - 1) * 1000) / 10 + 0 : null;
     return { ...v, moneda, ganancia: gan, gananciaMoneda: moneda, gananciaPct: gan != null && aportado > 0 ? r2((gan / aportado) * 100) : null,
       estimado: false, fechaPrecio: null, // la fecha del seguro no es una cotización: no entra en "cotizaciones al cierre del…"
       sinPrecio: nativo == null, sinMep: nativo != null && v.ars == null, vence: null, vencido: false,
-      seguro: { cuenta, rescate, aportado, aportadoEstimado: cap == null && aportado != null, viejo, suma: inv.suma_asegurada != null ? Number(inv.suma_asegurada) : null, rinde, rindeCuenta, real, inflacion: inflPeriodo != null ? Math.round(inflPeriodo * 10) / 10 : null, faltaAportado: moneda === 'ARS' && cap == null } };
+      seguro: { cuenta, rescate, aportado, aportadoEstimado: conCobros ? flujos.some((f) => f.estimado) : cap == null && aportado != null, conCobros, cobros: ap ? { reales: ap.reales, estimados: ap.estimados, huecos: ap.huecos, sinCotizacion: ap.sinCotizacion, conversion: ap.conversion, pendiente } : null, viejo, suma: inv.suma_asegurada != null ? Number(inv.suma_asegurada) : null, rinde, rindeCuenta, real, inflacion: inflPeriodo != null ? Math.round(inflPeriodo * 10) / 10 : null, faltaAportado: sinBase && !pendiente } };
   } else if (inv.tipo === 'otro') {
     nativo = inv.valor_manual != null ? Number(inv.valor_manual) : cap;
     if (nativo == null) sinPrecio = true;
@@ -359,8 +369,9 @@ export function validarInversion(f, { hoy = hoyLocal() } = {}) {
       valor_manual: valor ?? null, notas: String(f.notas || '').trim() || null,
       ...(tipo === 'seguro' ? {
         subtipo: f.subtipo, aseguradora: String(f.aseguradora || '').trim() || null, suma_asegurada: suma ?? null, valor_rescate: rescate ?? null,
-        aporte_monto: aporte ?? null, aporte_frecuencia: aporte != null ? f.aporte_frecuencia || 'mensual' : null, valor_fecha: f.valor_fecha || null
-      } : { subtipo: null, aseguradora: null, suma_asegurada: null, valor_rescate: null, aporte_monto: null, aporte_frecuencia: null, valor_fecha: null })
+        aporte_monto: aporte ?? null, aporte_frecuencia: f.aporte_frecuencia || 'mensual', valor_fecha: f.valor_fecha || null,
+        cotizacion_aportes: (f.moneda || 'ARS') === 'USD' ? (['oficial_15', 'oficial_dia', 'mep_dia'].includes(f.cotizacion_aportes) ? f.cotizacion_aportes : 'oficial_15') : null
+      } : { cotizacion_aportes: null, subtipo: null, aseguradora: null, suma_asegurada: null, valor_rescate: null, aporte_monto: null, aporte_frecuencia: null, valor_fecha: null })
     }
   };
 }

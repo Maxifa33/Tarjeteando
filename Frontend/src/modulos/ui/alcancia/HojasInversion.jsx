@@ -6,11 +6,13 @@ import { crearInversion, actualizarInversion, borrarInversion, buscarPrecios } f
 import { hoyISO, plata, fechaDM } from '../deudas/HojasDeuda.jsx';
 import { parseMonto } from '../../cuentas/util.js';
 import { Campo, DobleToque, Botonera } from './HojasMeta.jsx';
+import { CobrosInversion } from './CobrosInversion.jsx';
+import { COTIZACIONES_APORTES } from '../../alcancia/aportes.js';
 import '../modulos.css';
 
 const BUSCA = { accion: 'Ticker (ej. GGAL, YPFD)', cedear: 'Ticker (ej. AAPL; AAPLD = en dólares)', bono: 'Ticker (ej. AL30, GD30; terminado en D = dólares)', cripto: 'BTC, ETH, USDT…', fci: 'Nombre del fondo' };
 const aTexto = cantidadTexto;
-const vacia = (tipo = 'cedear') => ({ tipo, nombre: '', simbolo: tipo === 'dolar' ? 'bolsa' : '', cantidad: '', moneda: 'ARS', capital: '', fecha_inicio: tipo === 'plazo_fijo' ? hoyISO() : '', tna: '', plazo_dias: tipo === 'plazo_fijo' ? '30' : '', valor_manual: '', notas: '', subtipo: tipo === 'seguro' ? 'unit_linked' : '', aseguradora: '', suma_asegurada: '', valor_rescate: '', aporte_monto: '', aporte_frecuencia: 'mensual', valor_fecha: tipo === 'seguro' ? hoyISO() : '' });
+const vacia = (tipo = 'cedear') => ({ tipo, nombre: '', simbolo: tipo === 'dolar' ? 'bolsa' : '', cantidad: '', moneda: 'ARS', capital: '', fecha_inicio: tipo === 'plazo_fijo' ? hoyISO() : '', tna: '', plazo_dias: tipo === 'plazo_fijo' ? '30' : '', valor_manual: '', notas: '', subtipo: tipo === 'seguro' ? 'unit_linked' : '', aseguradora: '', suma_asegurada: '', valor_rescate: '', aporte_monto: '', aporte_frecuencia: 'mensual', valor_fecha: tipo === 'seguro' ? hoyISO() : '', cotizacion_aportes: 'oficial_15' });
 
 /** Buscador de ticker o fondo contra los precios del último cierre. */
 const Buscador = ({ tipo, valor, onElegir }) => {
@@ -66,7 +68,7 @@ export const FormInversion = ({ abierta, inversion, onCerrar, onGuardado }) => {
       ...vacia(inversion.tipo), ...inversion, cantidad: cantidadTexto(inversion.cantidad), capital: aTexto(inversion.capital), tna: aTexto(inversion.tna),
       plazo_dias: inversion.plazo_dias ?? '', valor_manual: aTexto(inversion.valor_manual), fecha_inicio: inversion.fecha_inicio || '', simbolo: inversion.simbolo || '', notas: inversion.notas || '',
       subtipo: inversion.subtipo || (inversion.tipo === 'seguro' ? 'unit_linked' : ''), aseguradora: inversion.aseguradora || '', suma_asegurada: aTexto(inversion.suma_asegurada),
-      valor_rescate: aTexto(inversion.valor_rescate), aporte_monto: aTexto(inversion.aporte_monto), aporte_frecuencia: inversion.aporte_frecuencia || 'mensual', valor_fecha: inversion.valor_fecha || ''
+      valor_rescate: aTexto(inversion.valor_rescate), aporte_monto: aTexto(inversion.aporte_monto), aporte_frecuencia: inversion.aporte_frecuencia || 'mensual', valor_fecha: inversion.valor_fecha || '', cotizacion_aportes: inversion.cotizacion_aportes || 'oficial_15'
     } : vacia());
   }, [abierta, inversion]);
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e?.target ? e.target.value : e }));
@@ -146,6 +148,11 @@ export const FormInversion = ({ abierta, inversion, onCerrar, onGuardado }) => {
               <Campo label="Aseguradora"><input className="mod-campo" value={f.aseguradora} onChange={set('aseguradora')} placeholder="Ej. Zurich" /></Campo>
               <Campo label="Moneda de la póliza" nota="Si los aportes son en pesos pero se ajustan por dólar, elegí U$S.">{monedaSel}</Campo>
             </div>
+            {f.moneda === 'USD' && (
+              <Campo label="Dólar para los cobros en pesos" nota={COTIZACIONES_APORTES.find((x) => x.id === (f.cotizacion_aportes || 'oficial_15'))?.nota || 'Se usa para pasar a dólares los cobros asociados.'}>
+                <select className="mod-select" value={f.cotizacion_aportes || 'oficial_15'} onChange={set('cotizacion_aportes')}>{COTIZACIONES_APORTES.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}</select>
+              </Campo>
+            )}
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
               <Campo label="Valor de la cuenta" nota="El fondo acumulado, en tu estado de cuenta."><input className="mod-campo" inputMode="decimal" value={f.valor_manual} onChange={set('valor_manual')} placeholder="0" /></Campo>
               <Campo label="Valor de rescate (opcional)" nota="Lo que te darían si lo retirás hoy. Es lo que suma a tu cartera."><input className="mod-campo" inputMode="decimal" value={f.valor_rescate} onChange={set('valor_rescate')} placeholder="0" /></Campo>
@@ -161,7 +168,7 @@ export const FormInversion = ({ abierta, inversion, onCerrar, onGuardado }) => {
               <Campo label="Desde"><input className="mod-campo" type="date" max={hoyISO()} value={f.fecha_inicio} onChange={set('fecha_inicio')} /></Campo>
             </div>
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-              <Campo label="Total aportado (opcional)" nota="Si no lo ponés, se estima con el aporte y la fecha."><input className="mod-campo" inputMode="decimal" value={f.capital} onChange={set('capital')} placeholder="0" /></Campo>
+              <Campo label="Total aportado (opcional)" nota="Si asociás el cobro de la prima, se calcula solo. Si no, se estima con el aporte y la fecha."><input className="mod-campo" inputMode="decimal" value={f.capital} onChange={set('capital')} placeholder="0" /></Campo>
               <Campo label="Cobertura por fallecimiento (opcional)"><input className="mod-campo" inputMode="decimal" value={f.suma_asegurada} onChange={set('suma_asegurada')} placeholder="0" /></Campo>
             </div>
           </>
@@ -174,7 +181,7 @@ export const FormInversion = ({ abierta, inversion, onCerrar, onGuardado }) => {
 };
 
 /** Detalle: valor, ganancia, de dónde sale el precio; editar, cerrar, borrar. */
-export const DetalleInversion = ({ inversion: i, valor: v, onCerrar, onCambio, onEditar }) => {
+export const DetalleInversion = ({ inversion: i, valor: v, onCerrar, onCambio, onEditar, cobrosCtx = null }) => {
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState(null);
   if (!i || !v) return null;
@@ -230,6 +237,7 @@ export const DetalleInversion = ({ inversion: i, valor: v, onCerrar, onCambio, o
             </span>
           </div>
         )}
+        {i.tipo === 'seguro' && cobrosCtx && <CobrosInversion inversion={i} ctx={cobrosCtx} onCambio={onCambio} />}
         {error && <p role="alert" style={{ margin: 0, fontSize: 13, color: 'var(--danger)' }}>{error}</p>}
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           <DobleToque texto="Borrar" confirmar="¿Borrar?" disabled={ocupado} onConfirmado={async () => { if (await hacer(() => borrarInversion(i.id))) onCerrar(); }} />

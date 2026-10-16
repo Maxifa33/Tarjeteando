@@ -32,12 +32,41 @@ export async function movimientosDeReservas(bolsilloIds, { todas = false } = {})
   return out.map((m) => ({ ...m, monto: Number(m.monto) }));
 }
 
-const INV = 'id, tipo, nombre, simbolo, cantidad, moneda, capital, fecha_inicio, tna, plazo_dias, valor_manual, estado, notas, created_at, subtipo, aseguradora, suma_asegurada, valor_rescate, aporte_monto, aporte_frecuencia, valor_fecha';
+const INV = 'id, tipo, nombre, simbolo, cantidad, moneda, capital, fecha_inicio, tna, plazo_dias, valor_manual, estado, notas, created_at, subtipo, aseguradora, suma_asegurada, valor_rescate, aporte_monto, aporte_frecuencia, valor_fecha, cotizacion_aportes';
 const numInv = (i) => ({ ...i, cantidad: n(i.cantidad), capital: n(i.capital), tna: n(i.tna), valor_manual: n(i.valor_manual), suma_asegurada: n(i.suma_asegurada), valor_rescate: n(i.valor_rescate), aporte_monto: n(i.aporte_monto) });
 /** Serie de inflación mensual del INDEC: Map 'YYYY-MM' → variación %. */
 export async function serieInflacion() {
   const f = await supabase.from('inflacion_mensual').select('periodo, variacion').order('periodo').then(chk);
   return new Map((f || []).filter((x) => x.variacion != null && Number.isFinite(Number(x.variacion))).map((x) => [String(x.periodo).slice(0, 7), Number(x.variacion)]));
+}
+/** Vínculos de inversiones con cobros recurrentes (tarjeta o cuenta). */
+export const listarVinculos = async () => (await supabase.from('inversion_vinculos').select('id, inversion_id, origen, clave, ref, etiqueta, created_at').order('created_at').then(chk)) || [];
+export const crearVinculo = (fila) => supabase.from('inversion_vinculos').insert(fila).select('id').single().then(chk);
+export const borrarVinculo = (id) => supabase.from('inversion_vinculos').delete().eq('id', id).then(chk);
+
+/** Gastos de cuenta (columnas mínimas) desde `desde`, para asociar cobros recurrentes. */
+export async function movimientosParaCobros(desde) {
+  const out = [];
+  for (let i = 0; ; i += 1000) {
+    const filas = await supabase.from('movimientos').select('id, fecha, monto, moneda, tipo, direccion, estado, descripcion, descripcion_original, contraparte, cuenta_id, cuentas(nombre)')
+      .eq('tipo', 'gasto').eq('direccion', 'salida').gte('fecha', desde).order('fecha').order('id').range(i, i + 999).then(chk);
+    out.push(...filas.map((m) => ({ ...m, monto: Number(m.monto) })));
+    if (filas.length < 1000) break;
+  }
+  return out;
+}
+
+/** Historial del dólar oficial y MEP desde `desde` (para pasar cobros en pesos a dólares). { oficial: [{fecha, venta}], bolsa: [...] } */
+export async function historicoDolar(desde) {
+  const out = { oficial: [], bolsa: [] };
+  for (const casa of ['oficial', 'bolsa']) {
+    for (let i = 0; ; i += 1000) {
+      const filas = await supabase.from('cotizaciones_historicas').select('fecha, venta').eq('casa', casa).gte('fecha', desde).order('fecha').range(i, i + 999).then(chk);
+      out[casa].push(...filas.map((f) => ({ fecha: f.fecha, venta: Number(f.venta) })));
+      if (filas.length < 1000) break;
+    }
+  }
+  return out;
 }
 export const listarInversiones = async () => (await supabase.from('inversiones').select(INV).order('created_at').then(chk)).map(numInv);
 export const crearInversion = async (fila) => numInv(await supabase.from('inversiones').insert(fila).select(INV).single().then(chk));

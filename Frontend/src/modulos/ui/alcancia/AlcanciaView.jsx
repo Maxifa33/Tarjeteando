@@ -5,10 +5,11 @@ import Seg from '../../../ui/Seg.jsx';
 import { movimientosEntre, mesesConDatos, listarBolsillos } from '../../cuentas/repo.js';
 import { rangoMes, moverMes } from '../../cuentas/resumen.js';
 import { historial } from '../../cuentas/presupuesto.js';
-import { tarjetasPorMes } from '../../puente/tarjeteando.js';
+import { tarjetasPorMes, cobrosDeTarjeta } from '../../puente/tarjeteando.js';
+import { cobrosDeCuenta, cobrosDe, aportesDe, cobroAtrasado } from '../../alcancia/aportes.js';
 import { resumenReservas, estadoReserva, movsManuales, MEDIOS } from '../../alcancia/reservas.js';
 import { estadoMeta, planMetas, valuar, totalCartera, interesPlazoFijo, TIPOS_INVERSION } from '../../alcancia/alcancia.js';
-import { listarMetas, listarAportes, movimientosDeReservas, listarAjustes, listarMovsManuales, listarInversiones, preciosPara, tasasPlazoFijo, serieInflacion } from '../../alcancia/repo.js';
+import { listarMetas, listarAportes, movimientosDeReservas, listarAjustes, listarMovsManuales, listarInversiones, preciosPara, tasasPlazoFijo, serieInflacion, listarVinculos, historicoDolar, movimientosParaCobros } from '../../alcancia/repo.js';
 import { hoyISO, plata, fechaDM } from '../deudas/HojasDeuda.jsx';
 import { FormMeta, DetalleMeta } from './HojasMeta.jsx';
 import { FormInversion, DetalleInversion } from './HojasInversion.jsx';
@@ -282,6 +283,13 @@ const Inversiones = ({ tarjeteando }) => {
   const [precios, setPrecios] = useState(new Map());
   const [tasas, setTasas] = useState([]);
   const [inflacion, setInflacion] = useState(null);
+  const [vinculos, setVinculos] = useState([]);
+  const [errorVinculos, setErrorVinculos] = useState(false);
+  // Gastos de cuenta para cobros: se bajan una sola vez, solo si hay un vínculo de cuenta o abrís el selector.
+  const [movsCuenta, setMovsCuenta] = useState(null);
+  const [quiereCuenta, setQuiereCuenta] = useState(false);
+  const pidioCuenta = useRef(false);
+  const [historico, setHistorico] = useState({ datos: null, desde: null, error: false });
   const [capacidad, setCapacidad] = useState(null);
   const [error, setError] = useState(null);
   const [form, setForm] = useState(null);
@@ -293,9 +301,12 @@ const Inversiones = ({ tarjeteando }) => {
     try {
       const is = await listarInversiones();
       const conSeguroPesos = is.some((i) => i.tipo === 'seguro' && i.moneda === 'ARS');
-      const [ps, ts, inf] = await Promise.all([preciosPara(is), tasasPlazoFijo().catch(() => []), conSeguroPesos ? serieInflacion().catch(() => null) : null]);
+      const seguros = is.filter((i) => i.tipo === 'seguro');
+      const [ps, ts, inf, vs] = await Promise.all([preciosPara(is), tasasPlazoFijo().catch(() => []), conSeguroPesos ? serieInflacion().catch(() => null) : null,
+        seguros.length ? listarVinculos().then((v) => ({ ok: v }), () => ({ error: true })) : { ok: [] }]);
       if (id !== pedido.current) return;
       setInvs(is); setPrecios(ps); setTasas(ts); setInflacion(inf);
+      if (vs.ok) { setVinculos(vs.ok); setErrorVinculos(false); } else setErrorVinculos(true);
     } catch { if (id === pedido.current) { setError('No se pudieron leer tus inversiones. Revisá tu conexión.'); setInvs((x) => x || []); } }
   }, []);
   useEffect(() => { cargar(); }, [cargar]);
@@ -304,7 +315,56 @@ const Inversiones = ({ tarjeteando }) => {
   const mepFila = precios.get('dolar|bolsa');
   const mep = mepFila ? Number(mepFila.compra || mepFila.precio) : null;
   const hoy = hoyISO();
-  const valores = useMemo(() => Object.fromEntries((invs || []).map((i) => [i.id, valuar(i, precios, { mep, hoy, inflacion })])), [invs, precios, mep, hoy, inflacion]);
+  // Cobros asociados (prima en la tarjeta o débito en la cuenta) → aportes reales de cada seguro.
+  const cobrosT = useMemo(() => cobrosDeTarjeta(tarjeteando?.movimientos || [], tarjeteando?.resumenes || []), [tarjeteando]);
+  const necesitaCuenta = quiereCuenta || vinculos.some((v) => v.origen === 'cuenta');
+  const cargarCuenta = useCallback(() => {
+    pidioCuenta.current = true; setMovsCuenta((m) => (m === 'error' ? null : m));
+    const hace6 = `${Number(hoyISO().slice(0, 4)) - 6}${hoyISO().slice(4)}`;
+    movimientosParaCobros(hace6).then(setMovsCuenta, () => setMovsCuenta('error'));
+  }, []);
+  useEffect(() => { if (necesitaCuenta && !pidioCuenta.current) cargarCuenta(); }, [necesitaCuenta, cargarCuenta]);
+  const movsC = Array.isArray(movsCuenta) ? movsCuenta : [];
+  const cobrosC = useMemo(() => cobrosDeCuenta(movsC), [movsCuenta]); // eslint-disable-line react-hooks/exhaustive-deps
+  const todosCobros = useMemo(() => [...cobrosT, ...cobrosC], [cobrosT, cobrosC]);
+  const porInv = useMemo(() => {
+    const out = {};
+    (invs || []).filter((i) => i.tipo === 'seguro').forEach((i) => { const vs = vinculos.filter((v) => v.inversion_id === i.id); out[i.id] = { vinculos: vs, cobros: cobrosDe(vs, todosCobros, vinculos) }; });
+    return out;
+  }, [invs, vinculos, todosCobros]);
+  // Solo si hace falta pasar pesos a dólares, se baja el historial del dólar desde el primer cobro.
+  const desdeHist = useMemo(() => {
+    const fs = (invs || []).filter((i) => i.tipo === 'seguro' && i.moneda === 'USD').flatMap((i) => porInv[i.id]?.cobros.filter((c) => c.moneda === 'ARS').map((c) => c.fecha) || []).sort();
+    if (!fs.length) return null;
+    const d = new Date(`${fs[0]}T12:00:00`); d.setDate(d.getDate() - 40); return d.toISOString().slice(0, 10);
+  }, [invs, porInv]);
+  const [reintento, setReintento] = useState(0);
+  useEffect(() => {
+    let vivo = true;
+    if (!desdeHist || (historico.datos && historico.desde <= desdeHist)) return undefined;
+    setHistorico((h) => ({ ...h, error: false }));
+    historicoDolar(desdeHist).then((d) => { if (vivo) setHistorico({ datos: d, desde: desdeHist, error: false }); }, () => { if (vivo) setHistorico((h) => ({ ...h, error: true })); });
+    return () => { vivo = false; };
+  }, [desdeHist, reintento]); // eslint-disable-line react-hooks/exhaustive-deps
+  const histListo = !desdeHist || (historico.datos && historico.desde <= desdeHist);
+  // Último dato de CADA fuente (esa tarjeta, esa cuenta): la alerta solo salta si importaste algo posterior de esa misma fuente.
+  const ultimaPorFuente = useMemo(() => {
+    const u = {};
+    [...cobrosT, ...movsC.map((m) => ({ fuente: `cuenta:${m.cuenta_id || ''}`, fecha: m.fecha }))].forEach((c) => { if (c.fecha && (!u[c.fuente] || c.fecha > u[c.fuente])) u[c.fuente] = c.fecha; });
+    return u;
+  }, [cobrosT, movsCuenta]); // eslint-disable-line react-hooks/exhaustive-deps
+  const aportes = useMemo(() => {
+    const out = {};
+    (invs || []).filter((i) => i.tipo === 'seguro').forEach((i) => {
+      const cs = porInv[i.id]?.cobros || [];
+      if (!cs.length) return;
+      const necesitaHist = i.moneda === 'USD' && cs.some((c) => c.moneda === 'ARS');
+      if (necesitaHist && !histListo) { out[i.id] = { pendiente: true, error: historico.error, flujos: [], reales: 0 }; return; }
+      out[i.id] = { ...aportesDe(i, cs, historico.datos, { hasta: i.valor_fecha || hoy }), atrasado: i.estado === 'activa' ? cobroAtrasado(i, cs, ultimaPorFuente, hoy) : null };
+    });
+    return out;
+  }, [invs, porInv, historico, histListo, ultimaPorFuente, hoy]);
+  const valores = useMemo(() => Object.fromEntries((invs || []).map((i) => [i.id, valuar(i, precios, { mep, hoy, inflacion, aportes })])), [invs, precios, mep, hoy, inflacion, aportes]);
   if (!invs) return <p role="status" style={{ margin: 0 }}>Cargando…</p>;
   const activas = invs.filter((i) => i.estado === 'activa');
   const cerradas = invs.filter((i) => i.estado === 'cerrada');
@@ -321,7 +381,7 @@ const Inversiones = ({ tarjeteando }) => {
     const pie = v.sinPrecio ? 'Sin cotización todavía'
       : [v.ganancia != null ? `${v.ganancia >= 0 ? '+' : '−'}${plata(Math.abs(v.ganancia), v.gananciaMoneda)}${v.gananciaPct != null ? ` (${v.gananciaPct >= 0 ? '+' : '−'}${Math.abs(v.gananciaPct).toFixed(1).replace('.', ',')}%)` : ''}` : null,
         v.sinMep ? 'sin dólar para pasar a pesos' : null, v.estimado ? 'estimado' : null, v.seguro?.viejo ? 'actualizá el valor' : null, v.seguro && v.seguro.rescate == null && v.seguro.cuenta != null ? 'sin descontar rescate' : null, v.seguro?.rinde?.anual != null ? `${v.seguro.rescate != null ? 'si rescatás, ' : ''}rinde ${v.seguro.rinde.anual >= 0 ? '' : '−'}${Math.abs(v.seguro.rinde.anual).toFixed(1).replace('.', ',')}% anual${v.seguro.rinde.estimado ? ' (estimado)' : ''}${v.seguro.real != null ? ` · real ${v.seguro.real >= 0 ? '+' : '−'}${Math.abs(v.seguro.real).toFixed(1).replace('.', ',')}%` : ''}` : null,
-        v.seguro?.faltaAportado ? 'cargá el total aportado' : null, v.seguro?.rinde?.dudoso ? 'revisá los datos' : null,
+        v.seguro?.faltaAportado ? 'cargá el total aportado o asociá el cobro' : null, aportes[i.id]?.atrasado ? 'no aparece el último cobro' : null, aportes[i.id]?.pendiente ? (aportes[i.id].error ? 'no se pudo leer el dólar histórico' : 'calculando…') : null, v.seguro?.rinde?.dudoso ? 'revisá los datos' : null,
         v.seguro?.aportadoEstimado && v.ganancia != null ? 'aportado estimado' : null, v.vence ? `${v.vencido ? 'venció' : 'vence'} ${fechaDM(v.vence)}` : null].filter(Boolean).join(' · ') || null;
     return (
       <Tarjeta key={i.id} onClick={() => setDetalleId(i.id)} label={`${i.nombre}: ${valor}. Ver detalle`} titulo={i.nombre}
@@ -372,7 +432,12 @@ const Inversiones = ({ tarjeteando }) => {
 
       <FormInversion abierta={!!form} inversion={form?.inversion || null} onCerrar={() => setForm(null)} onGuardado={cargar} />
       <DetalleInversion inversion={form ? null : detalle} valor={detalle ? valores[detalle.id] : null} onCerrar={() => setDetalleId(null)} onCambio={cargar}
-        onEditar={(i) => setForm({ inversion: i })} />
+        onEditar={(i) => setForm({ inversion: i })}
+        cobrosCtx={detalle?.tipo === 'seguro' ? {
+          ...porInv[detalle.id], todos: todosCobros, todosVinculos: vinculos, aportes: aportes[detalle.id] || null, atrasado: aportes[detalle.id]?.atrasado || null, sinTarjetaLocal: !cobrosT.length,
+          errorVinculos, cuenta: movsCuenta === 'error' ? 'error' : movsCuenta ? 'ok' : necesitaCuenta ? 'cargando' : 'sin_pedir',
+          onAbrir: () => setQuiereCuenta(true), onReintentarCuenta: cargarCuenta, onReintentarHist: () => setReintento((n) => n + 1)
+        } : null} />
     </section>
   );
 };

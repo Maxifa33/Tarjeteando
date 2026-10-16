@@ -10,6 +10,11 @@
  * existe en el dispositivo donde se importaron los resúmenes.
  */
 
+import { claveComercio } from '../../services/series.js';
+
+/** Identidad estable de un comercio/cobro (misma regla que las series de Tarjeteando). */
+export const claveCobro = claveComercio;
+
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 /**
@@ -101,6 +106,52 @@ export function tarjetasPorMes(columnas = []) {
     // Un mes 'pagado' sin ningún resumen (no lo importaste) no es "0 de tarjetas": es "sin datos".
     if (c.tipo === 'pagado' && !Object.keys(c.porTarjeta || {}).length) return;
     out[c.mesKey] = { total: r2(c.total), tipo: c.tipo, usd: r2(c.usdAparte || 0) };
+  });
+  return out;
+}
+
+// ───────────── Cobros recurrentes (para asociarlos a una inversión) ─────────────
+
+const pad2 = (n) => String(n).padStart(2, '0');
+/** Número largo de la referencia (ej. N° de póliza en 'ZURICH INTERNA0000003393731'), sin ceros adelante. Distingue dos pólizas del mismo comercio. */
+export function refNumerica(texto = '') {
+  const runs = String(texto).match(/\d{5,}/g) || [];
+  const largo = runs.sort((a, b) => b.length - a.length)[0];
+  return largo ? largo.replace(/^0+/, '') || null : null;
+}
+
+/** Mes en que se paga un resumen: su vencimiento; sin vencimiento, el mes siguiente al período. */
+function mesDePagoResumen(r) {
+  const v = String(r?.fecha_vencimiento || '');
+  if (/^\d{4}-\d{2}/.test(v)) return v.slice(0, 7);
+  if (r?.anio && r?.mes) { const t = Number(r.anio) * 12 + Number(r.mes); return `${Math.floor(t / 12)}-${pad2((t % 12) + 1)}`; }
+  return null;
+}
+
+/**
+ * Consumos con tarjeta aptos para asociar como cobro recurrente (SOLO LECTURA): sin pagos, reintegros ni cuotas.
+ * @returns [{ id, origen:'tarjeta', fecha, monto, moneda, clave, etiqueta, tarjeta, mesPago }]
+ */
+export function cobrosDeTarjeta(movimientos = [], resumenes = []) {
+  const porId = new Map((resumenes || []).map((r) => [r.id, r]));
+  const vistos = new Set();
+  const out = [];
+  (movimientos || []).forEach((m) => {
+    if (!m || m.es_pago || vistos.has(m.id)) return;
+    if (m.es_cuota && Number(m.total_cuotas) > 1) return;
+    const pesos = Number(m.monto_pesos) || 0; const usd = Number(m.monto_dolares) || 0;
+    if (pesos <= 0 && usd <= 0) return;
+    const texto = m.referencia_original || m.referencia_limpia || '';
+    const clave = claveComercio(texto);
+    if (!clave) return;
+    vistos.add(m.id);
+    const r = porId.get(m.resumen_id);
+    const fecha = m.fecha_compra || null;
+    out.push({
+      id: `t:${m.id}`, origen: 'tarjeta', fecha, monto: r2(pesos > 0 ? pesos : usd), moneda: pesos > 0 ? 'ARS' : 'USD',
+      clave, ref: refNumerica(texto), etiqueta: m.referencia_limpia || texto, tarjeta: m.tarjeta_label || m.tarjeta || '', fuente: `tarjeta:${m.tarjeta || ''}`,
+      mesPago: mesDePagoResumen(r) || (m.anio_resumen && m.mes_resumen ? mesDePagoResumen({ anio: m.anio_resumen, mes: m.mes_resumen }) : null)
+    });
   });
   return out;
 }

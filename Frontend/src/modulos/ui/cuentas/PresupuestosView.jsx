@@ -3,11 +3,12 @@ import { AlertCircle, Smartphone } from 'lucide-react';
 import { pesos, dolares, mesCorto, capitalizar, mesLargo } from '../../../ui/formato.js';
 import { movimientosEntre, mesesConDatos, listarBolsillos } from '../../cuentas/repo.js';
 import { resumenReservas, movsManuales } from '../../alcancia/reservas.js';
-import { movimientosDeReservas, listarAjustes, listarMovsManuales, preciosPara } from '../../alcancia/repo.js';
+import { movimientosDeReservas, listarAjustes, listarMovsManuales, preciosPara, listarVinculos } from '../../alcancia/repo.js';
+import { cobrosDeCuenta, aportesDelMes } from '../../alcancia/aportes.js';
 import { hoyISO } from '../deudas/HojasDeuda.jsx';
 import { rangoMes, moverMes } from '../../cuentas/resumen.js';
 import { historial } from '../../cuentas/presupuesto.js';
-import { tarjetasPorMes } from '../../puente/tarjeteando.js';
+import { tarjetasPorMes, cobrosDeTarjeta } from '../../puente/tarjeteando.js';
 import { SelectorMes } from './comunes.jsx';
 import '../modulos.css';
 
@@ -59,6 +60,10 @@ const PresupuestosView = ({ tarjeteando }) => {
     return () => { vivo = false; };
   }, []);
   const tarjetas = useMemo(() => tarjetasPorMes(tarjeteando?.evolucion || []), [tarjeteando]);
+  // Cobros asociados a inversiones (Alcancía): siguen restando, pero se muestran como aportes y no como consumo.
+  const [vinculos, setVinculos] = useState([]);
+  useEffect(() => { let vivo = true; listarVinculos().then((v) => { if (vivo) setVinculos(v); }).catch(() => {}); return () => { vivo = false; }; }, []);
+  const cobrosT = useMemo(() => (vinculos.length ? cobrosDeTarjeta(tarjeteando?.movimientos || [], tarjeteando?.resumenes || []) : []), [vinculos, tarjeteando]);
 
   useEffect(() => {
     let vivo = true;
@@ -81,6 +86,11 @@ const PresupuestosView = ({ tarjeteando }) => {
   const h = useMemo(() => (mes ? historial(mes, movs, tarjetas, 6) : []), [mes, movs, tarjetas]);
   if (!mes) return <p role="status" style={{ margin: 0 }}>Cargando…</p>;
   const p = cargadoMes === mes ? h[0] : null; // nunca mostrar la cuenta de un mes con datos de otro
+  const ap = p && vinculos.length ? aportesDelMes(mes, vinculos, ['pagado', 'en_curso', 'comprometido'].includes(p.tarjetasTipo) ? cobrosT : [], cobrosDeCuenta(movs)) : null;
+  // Nunca más que la línea de la que sale (datos de otro dispositivo o un mes a medias).
+  const apT = ap ? Math.min(ap.tarjeta, p.tarjetas) : 0; const apC = ap ? Math.min(ap.cuenta, Math.max(0, p.sinTarjeta)) : 0;
+  const apRecortado = ap && (apT < ap.tarjeta - 0.5 || apC < ap.cuenta - 0.5);
+  const r2l = (n) => Math.round(n * 100) / 100;
   const sinDatos = !cargando && p && !p.ingresos && !p.sinTarjeta && !p.tarjetas;
   const max = Math.max(1, ...h.map((x) => Math.max(x.ingresos, x.tarjetas + x.sinTarjeta)));
 
@@ -99,8 +109,9 @@ const PresupuestosView = ({ tarjeteando }) => {
           <section aria-label={`Cuenta de ${mesLargo(mes)}`} aria-busy={cargando} style={{ padding: '18px 20px 20px', borderRadius: 22, background: 'var(--fill2)' }}>
             <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
               <Linea label="Ingresos" valor={p.ingresos} nota={`Activos ${pesos(p.activos)} · Pasivos ${pesos(p.pasivos)}`} />
-              <Linea signo="−" label="Tarjetas" valor={p.tarjetas} nota={NOTA_TARJETAS[p.tarjetasTipo] + (p.tarjetasUsd ? ` · más ${dolares(p.tarjetasUsd)} aparte, no incluidos` : '')} />
-              <Linea signo="−" label="Gastos sin tarjeta" valor={p.sinTarjeta} nota="Billetera, ya neto de recuperos sin tarjeta" />
+              <Linea signo="−" label="Tarjetas" valor={r2l(p.tarjetas - apT)} nota={NOTA_TARJETAS[p.tarjetasTipo] + (p.tarjetasUsd ? ` · más ${dolares(p.tarjetasUsd)} aparte, no incluidos` : '') + (apT ? ' · sin aportes a inversiones' : '')} />
+              <Linea signo="−" label="Gastos sin tarjeta" valor={r2l(p.sinTarjeta - apC)} nota={`Billetera, ya neto de recuperos sin tarjeta${apC ? ' · sin aportes a inversiones' : ''}`} />
+              {apT + apC > 0 && <Linea signo="−" label="Aportes a inversiones" valor={r2l(apT + apC)} nota={`Cobros asociados en Alcancía${apT && apC ? ` · tarjeta ${pesos(apT)} · cuenta ${pesos(apC)}` : apT ? ' · con tarjeta' : ' · desde tus cuentas'}. Es plata que sale, pero no es consumo.${apRecortado ? ' Ojo: hay cobros asociados por más de lo que muestra la línea de la que salen (¿datos de otro dispositivo?); se tomó el máximo.' : ''}`} />}
               {p.recuperosTarjeta > 0 && <Linea signo="+" label="Recuperos de compras con tarjeta" valor={p.recuperosTarjeta} nota="Lo que te devolvieron de gastos que pagaste con tarjeta" />}
               {p.recuperosNoSe > 0 && <Linea signo="+" label="Otros recuperos" valor={p.recuperosNoSe} nota="Te devolvieron plata de gastos que no recordás cómo pagaste" />}
               <Linea label={p.teQueda >= 0 ? 'Te queda' : 'Gastaste de más'} valor={Math.abs(p.teQueda)} fuerte />

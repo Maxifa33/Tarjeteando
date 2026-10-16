@@ -1236,7 +1236,7 @@ const App = () => {
     return { columnas, detalles };
   }, [mes, resumenes, movimientos, tiposGasto, cuotasActivas, gastosFijosDetalle, cotizacionVenta]);
   // Solo lectura para los módulos: compras con tarjeta (recuperos) y lo que vence por mes (Presupuestos).
-  const tarjeteandoParaModulos = useMemo(() => ({ movimientos, evolucion: evolucion.columnas }), [movimientos, evolucion]);
+  const tarjeteandoParaModulos = useMemo(() => ({ movimientos, resumenes, evolucion: evolucion.columnas }), [movimientos, resumenes, evolucion]);
 
   // Nombres personalizados en todas las vistas (fase 6).
   const nombreDe = (id, fallback) => nombreVisible(id, { tarjetas, nombres: nombresTarjetas, fallback });
